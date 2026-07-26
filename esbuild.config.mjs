@@ -1,0 +1,31 @@
+import esbuild from "esbuild";
+import process from "node:process";
+import { builtinModules } from "node:module";
+
+const production = process.argv[2] === "production";
+const bundleArch = process.env.ASSET_TRACK_BUNDLE_ARCH ?? process.arch;
+const context = await esbuild.context({
+  entryPoints: ["src/main.ts"],
+  bundle: true,
+  platform: "node",
+  external: ["obsidian", "electron", ...builtinModules],
+  format: "cjs",
+  target: "es2022",
+  logLevel: "info",
+  sourcemap: production ? false : "inline",
+  minify: production,
+  treeShaking: true,
+  define: {
+    __ASSET_TRACK_BUNDLE_ARCH__: JSON.stringify(
+      bundleArch === "x86_64" ? "x64" : bundleArch
+    )
+  },
+  outfile: "dist/main.js"
+});
+
+if (production) {
+  await context.rebuild();
+  await context.dispose();
+} else {
+  await context.watch();
+}

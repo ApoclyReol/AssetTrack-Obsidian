@@ -1,0 +1,62 @@
+# Python caches, virtual environments, and local packaging metadata
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.pyright/
+.ruff_cache/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+pip-wheel-metadata/
+
+# IDE and editor state
+.vscode/
+.idea/
+*.code-workspace
+*.swp
+*.swo
+
+# Operating-system noise
+.DS_Store
+Thumbs.db
+
+# Local secrets and machine-specific configuration
+.env
+.env.*
+
+# Local runtime data (development database, backups, logs, settings)
+.var/
+logs/
+*.log
+
+# SQLite transient files. Deliberate database fixtures may still be committed.
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+
+# Obsidian plugin dependencies, build output, caches, and coverage
+node_modules/
+dist/
+.vite/
+.cache/
+coverage/
+.eslintcache
+*.tsbuildinfo
+
+# Packaged build output
+build/
+*.dmg
+*.pkg
