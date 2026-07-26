@@ -8,7 +8,8 @@ AssetTrack 是本地优先工具，不提供账户或远程财务服务。
 - 数据库固定为 `<根目录>/data/accounting_system.db`。
 - 当前 SQLite 仅由 Python sidecar 读写。
 - 插件不自动备份；手动备份和恢复由用户从设置页触发。
-- Git 不跟踪数据库、WAL/SHM、CSV、备份、Vault、日志或构建产物。
+- 数据库、WAL/SHM、用户 CSV、备份、Vault、日志和构建产物不属于仓库交付物；
+  发布前必须检查 Git 状态和提交内容，避免把真实财务数据带入公开仓库。
 
 ## 本地服务
 

@@ -20,7 +20,12 @@ Obsidian ItemView
 
 当前版本将 Python/FastAPI/Pandas 打包为自包含 sidecar，用户不需要安装
 Python、Node、uv 或虚拟环境。下一主要版本计划将运行时全部迁移到
-TypeScript，详见 [路线图](docs/roadmap.md)。
+TypeScript，详见 [路线图](docs/roadmap.md) 和
+[Community Plugins 发布规划](docs/community-release-plan.md)。
+
+当前 1.2.0 必须安装完整插件目录，不能通过 Obsidian 的标准 Community
+Plugins 安装器使用；标准安装器不会带上当前版本需要的 Python sidecar。现阶段
+请使用 [发行说明](docs/release.md) 中的完整目录安装方式。
 
 ## 数据位置
 
@@ -67,4 +72,5 @@ PyInstaller onedir sidecar。不能只安装 `main.js` 或裸 sidecar。
 - [开发说明](docs/development.md)
 - [发行说明](docs/release.md)
 - [路线图](docs/roadmap.md)
+- [Community Plugins 发布规划](docs/community-release-plan.md)
 - [故障排查](docs/troubleshooting.md)

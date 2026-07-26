@@ -26,7 +26,7 @@ def _clean_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _normalize_simple_csv(df: pd.DataFrame) -> pd.DataFrame:
-    """用户手工整理的三列 CSV：商品、收支、金额。"""
+    """用户手工整理的 3–5 列 CSV：必需商品、收支、金额，可选日期、分类。"""
     df = _clean_columns(df)
     normalized_columns = {
         "商品/说明": "商品",
@@ -114,10 +114,13 @@ def _decode_csv(file_bytes: bytes) -> str:
 
 
 def parse_bill(file_bytes: bytes, filename: str) -> pd.DataFrame:
-    """读取旧三列或新五列 CSV，并输出未写库的流水草稿。"""
+    """读取 3–5 列 CSV，并输出未写库的流水草稿。"""
     suffix = Path(filename).suffix.lower()
     if suffix != ".csv":
-        raise ValueError("当前工作流只支持整理后的 CSV 文件，请上传表头为“商品、收支、金额”的 CSV")
+        raise ValueError(
+            "当前工作流只支持整理后的 CSV 文件，请上传包含“商品、收支、金额”"
+            "并可选“日期、分类”列的 CSV"
+        )
 
     content = _decode_csv(file_bytes)
     df_raw = pd.read_csv(io.StringIO(content))

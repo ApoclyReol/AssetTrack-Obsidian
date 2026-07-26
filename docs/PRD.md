@@ -39,4 +39,6 @@ AssetTrack 是个人使用的 macOS 桌面 Obsidian 财务插件。所有数据�
 - AI 分类、银行同步、移动端和多设备并发写同一 SQLite。
 - 当前版本的 Obsidian Community Plugins 分发。
 
-下一主要版本计划去除 Python sidecar并迁移到 TypeScript，迁移边界见路线图。
+下一主要版本计划去除 Python sidecar 并迁移到 TypeScript；完成后才进入标准
+Community Plugins 发布评估，迁移边界和审核门槛见
+[路线图](roadmap.md) 与 [Community Plugins 发布规划](community-release-plan.md)。

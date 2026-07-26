@@ -337,6 +337,7 @@ function MonthEditor({
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [state, setState] = useState<OperationState>({ kind: "idle" });
+  const csvInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     setState({ kind: "pending", message: "加载月份…" });
@@ -503,10 +504,22 @@ function MonthEditor({
           <span>{draft.status} · revision {draft.revision}</span>
         </div>
         <div className="asset-track-actions">
-          <label className="mod-cta">
+          <button
+            type="button"
+            className="mod-cta"
+            disabled={state.kind === "pending"}
+            onClick={() => csvInputRef.current?.click()}
+            title="支持必需的商品、收支、金额，以及可选的日期、分类列"
+          >
             导入 CSV
-            <input type="file" accept=".csv" hidden onChange={importCsv} />
-          </label>
+          </button>
+          <input
+            ref={csvInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            hidden
+            onChange={importCsv}
+          />
           <button onClick={() => void applyRules()}>应用规则</button>
           <button onClick={() => void load()}>放弃并重载</button>
           <button

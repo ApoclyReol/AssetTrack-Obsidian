@@ -28,9 +28,23 @@ Hardened Runtime、notarization 和 Gatekeeper 干净机器测试。
 
 ## 发布方式
 
-当前版本采用 GitHub Release 完整 ZIP 或手动复制目录，不申请 Obsidian
-Community Plugins。标准 Community 安装只获取 main.js、manifest 和 styles，
-不能交付当前 sidecar 目录。
+当前版本采用完整目录手动安装；如果制作 GitHub Release，应提供包含 sidecar 的
+完整 ZIP 或目录，不申请 Obsidian Community Plugins。标准 Community 安装只获取
+`main.js`、manifest 和 styles，不能交付当前 sidecar 目录。
+
+本地安装完整目录时，应先退出 Obsidian，再在仓库根目录运行：
+
+```bash
+zsh scripts/install_to_vault.sh "/path/to/obsidian-vault"
+```
+
+脚本要求目标是已有 Obsidian Vault，并将
+`build/obsidian/asset-track/` 原子替换到
+`<Vault>/.obsidian/plugins/asset-track/`；如果目标插件已有 `data.json`，会保留
+该设置文件。运行前应确认已经执行过构建，并在真实 Vault 上自行确认目标路径。
+
+去除 Python sidecar 后的标准社区发布流程、缺失条件和官方依据见
+[Community Plugins 发布规划](community-release-plan.md)。
 
 ## 发布前验证
 

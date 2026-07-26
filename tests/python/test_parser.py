@@ -16,6 +16,25 @@ def test_parse_simple_csv_groups_duplicate_product_and_type():
     assert food["transaction_date"] == ""
 
 
+def test_parse_simple_csv_accepts_optional_date_column():
+    content = "商品,收支,金额,日期\n午餐,支出,12,2026-01-02\n午餐,支出,8,2026-01-03\n"
+
+    df = parse_bill(content.encode("utf-8"), "bill.csv")
+
+    assert len(df) == 2
+    assert df["transaction_date"].tolist() == ["2026-01-02", "2026-01-03"]
+    assert df["amount"].tolist() == [12, 8]
+
+
+def test_parse_simple_csv_keeps_optional_category_column():
+    content = "商品,收支,金额,日期,分类\n午餐,支出,12,2026-01-02,餐饮基础\n"
+
+    df = parse_bill(content.encode("utf-8"), "bill.csv")
+
+    assert df.iloc[0]["transaction_date"] == "2026-01-02"
+    assert df.iloc[0]["category"] == "餐饮基础"
+
+
 def test_parse_simple_csv_rejects_invalid_type():
     content = "商品,收支,金额\n测试,转账,10\n"
 
