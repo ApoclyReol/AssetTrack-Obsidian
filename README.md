@@ -12,28 +12,29 @@ Obsidian ItemView
 
 ## 当前版本
 
-- Obsidian 插件：1.0.0
+- Obsidian 插件：1.0.1
 - SQLite schema：9
 - 平台：macOS、Windows、Linux 桌面版 Obsidian
 
-v1.0.0 直接使用 Obsidian 桌面运行时的 `node:sqlite`。
+v1.0.1 直接使用 Obsidian 桌面运行时的 `node:sqlite`。
 用户不需要安装 Python、Node、uv、虚拟环境或平台架构包。最低 Obsidian 版本为
 1.9.10，并要求使用新版桌面安装器；运行时能力不足时插件不会创建或修改数据库。
 
 ## 数据位置
 
-首次打开编辑器前，必须在插件设置中选择或新建一个 Vault 内
-`Asset_Track` 根目录。文件夹输入支持 Vault 路径联想。
+首次打开编辑器前，必须在插件设置中选择一个 Vault 内的
+“Asset-track 数据目录”。输入路径只执行只读检查，不会创建数据库。
 
 数据库路径不可编辑，固定为：
 
 ```text
-<Asset_Track 根目录>/data/accounting_system.db
+<用户选择的数据目录>/accounting_system.db
+<用户选择的数据目录>/backups/
 ```
 
-插件不会自动备份。手动备份和恢复位于设置页；恢复前必须通过完整性和内容一致
-性校验。手动备份会先选择目标目录并生成一个 ZIP；恢复支持 AssetTrack ZIP 或
-SQLite 数据库文件。
+空目录需要显式点击“创建新数据库”；已有有效数据库需要点击“载入数据库”。
+目录切换分为迁移当前库和载入目标库，切换及恢复前会在当前数据目录的
+`backups/` 创建保护快照。手动 ZIP 备份仍由用户选择导出位置。
 
 ## 开发
 
@@ -54,7 +55,7 @@ zsh scripts/build_plugin_bundle.sh
 
 产物位于 `build/obsidian/asset-track/`，只包含 `main.js`、`manifest.json` 和
 `styles.css`，不区分 CPU 架构；同时生成可供手动安装的
-`build/AssetTrack-1.0.0.zip`。
+`build/AssetTrack-1.0.1.zip`。
 
 源码仓库只维护 `src/`、`tests/plugin/`、`scripts/` 和 `docs/` 等 TypeScript
 插件开发内容，不保留 Python 后端、sidecar、旧架构构建或真实数据库副本。

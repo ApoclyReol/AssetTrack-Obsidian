@@ -1,5 +1,5 @@
 export interface AssetTrackSettings {
-  workspacePath: string;
+  dataDirectory: string;
   csvMappings: CsvMappingProfile[];
 }
 

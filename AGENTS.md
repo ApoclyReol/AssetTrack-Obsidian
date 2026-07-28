@@ -12,8 +12,9 @@ SQLite。项目不再包含 Python、HTTP API、sidecar 或平台原生扩展。
 - 根目录插件清单与构建配置、`src/`、`tests/`、`scripts/`、`docs/` 是唯一长期源码边界。
 - `build/`、`.var/`、`.venv/`、`node_modules/` 和 `dist/` 都是忽略内容。
 - 可安装产物只能是完整 `build/obsidian/asset-track/`。
-- 正式数据只能位于用户明确选择的 Vault 内 Asset_Track 根目录。
-- 数据库路径固定为 `<根目录>/data/accounting_system.db`。
+- 正式数据只能位于用户明确选择的 Vault 内 Asset-track 数据目录。
+- 数据库路径固定为 `<数据目录>/accounting_system.db`，保护备份位于
+  `<数据目录>/backups/`。
 
 ## 常用命令
 
@@ -39,7 +40,8 @@ docs/                                   当前架构、用户、开发与发行�
 
 ## 当前 handoff
 
-- v1.0.0 是当前首个正式版本：流水和规则支持 `counterparty`，账单导入支持
+- v1.0.1 是当前正式版本：在 v1.0.0 财务功能基础上重构数据库生命周期；流水和
+  规则支持 `counterparty`，账单导入支持
   CSV/XLSX/XLS，新数据库固定为 schema 9。
 - schema 8 私有数据已在 2026-07-28 使用一次性离线流程迁移并核验；迁移工具及
   旧 Python/sidecar 目录不再保留在开发仓库。当前源码、测试和文档只维护
@@ -50,7 +52,7 @@ docs/                                   当前架构、用户、开发与发行�
 - 插件实例共享 `DatabaseManager`、Repository、Service、写入队列和数据变更事件；
   每个 ItemView 仍独立保存草稿与 dirty 状态。
 - 继续维护前先读 `docs/00-reading-guide.md`；本次实现、兼容边界、测试和后续
-  注意事项详见 `docs/logs/release-v1.0.0.md`。
+  注意事项详见 `docs/logs/release-v1.0.1.md`。
 - 后续每次正式更新都在 `docs/logs/` 新增 `release-vN.N.N.md`，并同步修改受影响
   的编号长期文档，不把当前事实只留在 release 日志中。
 

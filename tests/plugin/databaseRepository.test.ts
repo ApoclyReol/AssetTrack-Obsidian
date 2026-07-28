@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -29,6 +29,26 @@ afterEach(() => {
 });
 
 describe("node:sqlite schema 9 repository", () => {
+  it("inspects missing and damaged database files without creating or replacing them", () => {
+    const root = mkdtempSync(join(tmpdir(), "asset-track-inspect-"));
+    const missing = join(root, "accounting_system.db");
+    expect(DatabaseManager.inspect(missing)).toEqual({
+      exists: false,
+      valid: false,
+      validation: null,
+      error: null
+    });
+    expect(existsSync(missing)).toBe(false);
+
+    writeFileSync(missing, "not a sqlite database", "utf8");
+    const before = readFileSync(missing);
+    expect(DatabaseManager.inspect(missing)).toMatchObject({
+      exists: true,
+      valid: false
+    });
+    expect(readFileSync(missing)).toEqual(before);
+  });
+
   it("creates and reopens a schema 9 database at a Chinese path", async () => {
     const { manager, repository, path } = fixture();
     expect(manager.validate(true)).toMatchObject({

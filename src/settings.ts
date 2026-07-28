@@ -1,19 +1,20 @@
 import {
   AbstractInputSuggest,
   App,
+  Notice,
   PluginSettingTab,
   Setting,
   TFolder
 } from "obsidian";
 import {
-  DEFAULT_DB_RELATIVE_PATH,
+  DATABASE_NAME,
   RECOMMENDED_WORKSPACE
 } from "./constants";
 import type AssetTrackPlugin from "./main";
 import type { AccountDefinition, AssetTrackSettings } from "./types";
 import {
   databaseVaultPath,
-  normalizeWorkspacePath
+  normalizeDataDirectory
 } from "./services/workspacePath";
 import {
   chooseBackupDirectory,
@@ -21,7 +22,7 @@ import {
 } from "./services/nativeDialogs";
 
 export const DEFAULT_SETTINGS: AssetTrackSettings = {
-  workspacePath: "",
+  dataDirectory: "",
   csvMappings: []
 };
 
@@ -47,7 +48,7 @@ class VaultFolderSuggest extends AbstractInputSuggest<FolderSuggestion> {
   protected getSuggestions(query: string): FolderSuggestion[] {
     let normalized = "";
     try {
-      normalized = normalizeWorkspacePath(query);
+      normalized = normalizeDataDirectory(query);
     } catch {
       return [];
     }
@@ -76,7 +77,7 @@ class VaultFolderSuggest extends AbstractInputSuggest<FolderSuggestion> {
   renderSuggestion(value: FolderSuggestion, el: HTMLElement): void {
     el.createDiv({ text: value.path });
     el.createEl("small", {
-      text: value.exists ? "Vault 内现有文件夹" : "初始化时新建此文件夹"
+      text: value.exists ? "Vault 内现有文件夹" : "可在创建数据库时新建"
     });
   }
 
@@ -102,67 +103,81 @@ export class AssetTrackSettingTab extends PluginSettingTab {
       cls: "asset-track-settings-warning"
     });
 
-    let selectedPath = this.plugin.settings.workspacePath;
+    new Setting(containerEl).setName("数据库存储").setHeading();
+
+    let selectedPath = this.plugin.settings.dataDirectory;
     const pathStatus = containerEl.createEl("p", {
-      text: selectedPath
-        ? `当前数据库：${databaseVaultPath(selectedPath)}`
-        : "尚未初始化。选择或输入 Vault 内文件夹后，点击“使用并初始化”。",
+      text: this.databaseStatusText(),
       cls: "asset-track-settings-status"
     });
     const rootSetting = new Setting(containerEl)
-      .setName("Asset_Track 根目录")
-      .setDesc(
-        `支持 Vault 文件夹联想；数据库固定为根目录下的 ${DEFAULT_DB_RELATIVE_PATH}。`
-      );
-    let initializeButton: { setDisabled(value: boolean): unknown } | undefined;
+      .setName("Asset-track 数据目录");
     rootSetting.addSearch((search) => {
       search
         .setPlaceholder(RECOMMENDED_WORKSPACE)
         .setValue(selectedPath)
         .onChange((value) => {
           selectedPath = value;
-          initializeButton?.setDisabled(!value.trim());
+          void this.inspectDirectoryText(value).then((text) => pathStatus.setText(text));
         });
       new VaultFolderSuggest(this.app, search.inputEl, (path) => {
         selectedPath = path;
-        initializeButton?.setDisabled(false);
+        void this.inspectDirectoryText(path).then((text) => pathStatus.setText(text));
       });
     });
-    rootSetting.addButton((button) => {
-      initializeButton = button;
-      button
-        .setCta()
-        .setButtonText(selectedPath ? "切换并验证" : "使用并初始化")
-        .setDisabled(!selectedPath)
-        .onClick(async () => {
-          button.setDisabled(true);
-          pathStatus.setText("正在验证目录并初始化数据库…");
-          try {
-            await this.plugin.configureWorkspacePath(selectedPath);
-            this.display();
-          } catch (error) {
-            pathStatus.setText(`初始化失败：${message(error)}`);
-            button.setDisabled(false);
-          }
-        });
-    });
-    if (!this.plugin.settings.workspacePath) {
+    if (this.plugin.isDatabaseReady()) {
+      rootSetting
+        .addButton((button) =>
+          button.setButtonText("迁移当前库").onClick(() =>
+            void this.runDatabaseAction(() =>
+              this.plugin.switchDataDirectory(selectedPath, "migrate")
+            )
+          )
+        )
+        .addButton((button) =>
+          button.setButtonText("载入目标库").onClick(() =>
+            void this.runDatabaseAction(() =>
+              this.plugin.switchDataDirectory(selectedPath, "load")
+            )
+          )
+        );
+    } else {
+      rootSetting
+        .addButton((button) =>
+          button.setButtonText("创建新数据库").onClick(() =>
+            void this.runDatabaseAction(() => this.plugin.createDatabase(selectedPath))
+          )
+        )
+        .addButton((button) =>
+          button.setCta().setButtonText("载入数据库").onClick(() =>
+            void this.runDatabaseAction(() => this.plugin.loadDatabase(selectedPath))
+          )
+        );
+    }
+    if (this.plugin.isDatabaseReady()) {
+      new Setting(containerEl)
+        .setName("当前正在使用")
+        .setDesc(databaseVaultPath(this.plugin.settings.dataDirectory))
+        .addButton((button) =>
+          button.setButtonText("打开数据目录").onClick(async () => {
+            try {
+              await this.plugin.openDataDirectory();
+            } catch (error) {
+              new Notice(message(error));
+            }
+          })
+        );
+    }
+    if (!this.plugin.isDatabaseReady()) {
       containerEl.createEl("p", {
-        text: "完成初始化后才能进入编辑器、管理账户或执行备份恢复。",
+        text: this.plugin.databaseError
+          ? `数据库未载入，原文件未修改：${this.plugin.databaseError}`
+          : "完成创建或载入后才能管理账户和执行备份恢复。",
         cls: "asset-track-settings-warning"
       });
       return;
     }
 
-    containerEl.createEl("h3", { text: "现金与理财账户" });
-    const accountStatus = containerEl.createEl("p", {
-      text: "正在读取账户定义…",
-      cls: "asset-track-settings-status"
-    });
-    const accountRoot = containerEl.createDiv("asset-track-settings-accounts");
-    void this.renderAccounts(accountRoot, accountStatus);
-
-    containerEl.createEl("h3", { text: "备份与恢复" });
     const backupStatus = containerEl.createEl("p", {
       text: "尚未执行操作。",
       cls: "asset-track-settings-status"
@@ -271,40 +286,47 @@ export class AssetTrackSettingTab extends PluginSettingTab {
           });
       });
 
-    containerEl.createEl("h3", { text: "运行与诊断" });
-    const toolsStatus = containerEl.createEl("p", {
-      text: "尚未执行操作。",
+    containerEl.createEl("h3", { text: "现金与理财账户" });
+    const accountStatus = containerEl.createEl("p", {
+      text: "正在读取账户定义…",
       cls: "asset-track-settings-status"
     });
-    const operation = async (
-      label: string,
-      action: () => Promise<void>
-    ): Promise<void> => {
-      toolsStatus.setText(`${label}中…`);
-      try {
-        await action();
-        toolsStatus.setText(`${label}完成。`);
-      } catch (error) {
-        toolsStatus.setText(`${label}失败：${message(error)}`);
-      }
-    };
-    new Setting(containerEl)
-      .setName("数据库与诊断")
-      .addButton((button) =>
-        button.setButtonText("重新打开数据库连接").onClick(() =>
-          operation("数据库重新打开", () => this.plugin.reopenDatabase())
-        )
-      )
-      .addButton((button) =>
-        button.setButtonText("打开数据目录").onClick(() =>
-          operation("打开数据目录", () => this.plugin.openDataDirectory())
-        )
-      )
-      .addButton((button) =>
-        button.setButtonText("复制诊断").onClick(() =>
-          operation("复制诊断", () => this.plugin.copyDiagnostics())
-        )
-      );
+    const accountRoot = containerEl.createDiv("asset-track-settings-accounts");
+    void this.renderAccounts(accountRoot, accountStatus);
+
+  }
+
+  private databaseStatusText(): string {
+    if (this.plugin.databaseState === "ready") {
+      return "数据库已就绪。输入其他目录后可迁移当前库或载入目标库。";
+    }
+    if (this.plugin.databaseState === "initializing") return "正在初始化数据库……";
+    if (this.plugin.databaseState === "error") {
+      return `数据库载入失败：${this.plugin.databaseError ?? "未知错误"}`;
+    }
+    return "尚未配置 Asset-track 数据目录。";
+  }
+
+  private async inspectDirectoryText(directory: string): Promise<string> {
+    if (!directory.trim()) return "请输入当前 Vault 内的数据目录。";
+    try {
+      const result = await this.plugin.inspectDataDirectory(directory);
+      if (!result.exists) return "目录中没有数据库，可以创建新数据库。";
+      if (result.valid) return `发现有效的 ${DATABASE_NAME}，可以载入。`;
+      return `发现数据库文件，但校验失败：${result.error ?? "未知错误"}`;
+    } catch (error) {
+      return message(error);
+    }
+  }
+
+  private async runDatabaseAction(action: () => Promise<void>): Promise<void> {
+    try {
+      await action();
+      new Notice("数据库操作完成");
+    } catch (error) {
+      new Notice(message(error), 10_000);
+    }
+    this.display();
   }
 
   private async renderAccounts(

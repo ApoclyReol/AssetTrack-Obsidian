@@ -16,14 +16,14 @@
 | 06 | [开发说明](06-development.md) | 搭建环境、测试和构建 |
 | 07 | [构建与发行](07-release.md) | 生成、安装和验证完整插件 bundle |
 | 08 | [故障排查](08-troubleshooting.md) | 处理启动、恢复、revision 和重复流水 |
-| 09 | [路线图](09-roadmap.md) | 查看 v1.0.0 验证和后续方向 |
+| 09 | [路线图](09-roadmap.md) | 查看当前验证和后续方向 |
 | 10 | [Community Plugins 发布规划](10-community-release-plan.md) | 核对社区发布门槛 |
 
 ## 更新日志
 
 每个发行版本新增一份 `docs/logs/release-vN.N.N.md`，记录用户可见变化、数据兼容
 边界、验证结果和后续 handoff。当前版本详见
-[Release v1.0.0](logs/release-v1.0.0.md)，历史索引见
+[Release v1.0.1](logs/release-v1.0.1.md)，历史索引见
 [logs/README](logs/README.md)。
 
 ## 事实优先级

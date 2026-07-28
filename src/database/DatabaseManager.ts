@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import {
@@ -16,6 +16,13 @@ export interface SchemaValidation {
   tables: string[];
   missing_tables: string[];
   integrity_check: string;
+}
+
+export interface DatabaseInspection {
+  exists: boolean;
+  valid: boolean;
+  validation: SchemaValidation | null;
+  error: string | null;
 }
 
 function sqliteRuntime(): SqliteModule {
@@ -44,6 +51,58 @@ export class DatabaseManager {
   private restoring = false;
 
   constructor(private path: string) {}
+
+  static inspect(path: string): DatabaseInspection {
+    if (!existsSync(path)) {
+      return { exists: false, valid: false, validation: null, error: null };
+    }
+    let db: DatabaseSync | null = null;
+    try {
+      const runtime = sqliteRuntime();
+      db = new runtime.DatabaseSync(path, { readOnly: true, timeout: 5000 });
+      const tables = (db.prepare(
+        "SELECT name FROM sqlite_master "
+        + "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+      ).all() as Array<{ name: string }>).map((row) => row.name);
+      const missing = REQUIRED_TABLES.filter((table) => !tables.includes(table));
+      const version = Number(
+        (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version
+      );
+      const integrity = String(
+        (db.prepare("PRAGMA integrity_check").get() as { integrity_check: string })
+          .integrity_check
+      );
+      const validation = {
+        valid:
+          version === CURRENT_SCHEMA_VERSION
+          && missing.length === 0
+          && integrity === "ok",
+        schema_version: version,
+        tables,
+        missing_tables: missing,
+        integrity_check: integrity
+      };
+      return {
+        exists: true,
+        valid: validation.valid,
+        validation,
+        error: validation.valid
+          ? null
+          : `仅支持完整 schema ${CURRENT_SCHEMA_VERSION} 数据库；`
+            + `版本=${version}，缺少表=${missing.join(",") || "无"}，`
+            + `完整性=${integrity}`
+      };
+    } catch (error) {
+      return {
+        exists: true,
+        valid: false,
+        validation: null,
+        error: error instanceof Error ? error.message : String(error)
+      };
+    } finally {
+      db?.close();
+    }
+  }
 
   setPath(path: string): void {
     if (path === this.path) return;

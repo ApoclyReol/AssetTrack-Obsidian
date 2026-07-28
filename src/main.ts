@@ -1,10 +1,9 @@
 import {
   FileSystemAdapter,
-  Notice,
-  Plugin,
-  TFolder,
-  normalizePath
+  Plugin
 } from "obsidian";
+import { mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import {
   VIEW_TYPE_ASSET_TRACK,
   type AnalysisMode,
@@ -14,7 +13,10 @@ import {
   AssetTrackSettingTab,
   DEFAULT_SETTINGS
 } from "./settings";
-import { DatabaseManager } from "./database/DatabaseManager";
+import {
+  DatabaseManager,
+  type DatabaseInspection
+} from "./database/DatabaseManager";
 import {
   type AssetTrackService
 } from "./services/AssetTrackService";
@@ -25,7 +27,8 @@ import type {
 } from "./types";
 import {
   databaseVaultPath,
-  normalizeWorkspacePath
+  backupsVaultPath,
+  normalizeDataDirectory
 } from "./services/workspacePath";
 import {
   AssetTrackEditorView,
@@ -36,24 +39,34 @@ const electronShell = require("electron").shell as {
   showItemInFolder(path: string): void;
 };
 
+export type DatabaseState = "unconfigured" | "initializing" | "ready" | "error";
+export type DirectorySwitchMode = "migrate" | "load";
+
+interface ServiceContext {
+  manager: DatabaseManager;
+  api: AssetTrackService;
+}
+
 export default class AssetTrackPlugin extends Plugin {
   settings: AssetTrackSettings = { ...DEFAULT_SETTINGS };
   api!: AssetTrackService;
+  databaseState: DatabaseState = "unconfigured";
+  databaseError: string | null = null;
   private databaseManager: DatabaseManager | null = null;
   private readonly dataListeners = new Set<() => void>();
 
   async onload(): Promise<void> {
     const stored = await this.loadData() as Partial<AssetTrackSettings> | null;
     this.settings = {
-      workspacePath: normalizeWorkspacePath(
-        typeof stored?.workspacePath === "string" ? stored.workspacePath : ""
+      dataDirectory: normalizeDataDirectory(
+        typeof stored?.dataDirectory === "string"
+          ? stored.dataDirectory
+          : ""
       ),
       csvMappings: Array.isArray(stored?.csvMappings)
         ? stored.csvMappings
         : []
     };
-    if (this.settings.workspacePath) this.createService();
-
     this.registerView(
       VIEW_TYPE_ASSET_TRACK,
       (leaf) => new AssetTrackEditorView(leaf, this)
@@ -79,11 +92,6 @@ export default class AssetTrackPlugin extends Plugin {
     month?: string,
     analysisMode: AnalysisMode = "home"
   ): Promise<void> {
-    if (!this.settings.workspacePath) {
-      new Notice("请先在 Asset Track 设置中选择根目录并完成初始化");
-      this.openPluginSettings();
-      return;
-    }
     let leaf = this.app.workspace
       .getLeavesOfType(VIEW_TYPE_ASSET_TRACK)
       .at(0);
@@ -96,9 +104,76 @@ export default class AssetTrackPlugin extends Plugin {
     this.app.workspace.revealLeaf(leaf);
   }
 
-  async configureWorkspacePath(value: string): Promise<void> {
-    const workspacePath = normalizeWorkspacePath(value);
-    if (!workspacePath) throw new Error("请选择 Asset_Track 根目录");
+  isDatabaseReady(): boolean {
+    return this.databaseState === "ready" && Boolean(this.databaseManager);
+  }
+
+  async inspectDataDirectory(value: string): Promise<DatabaseInspection> {
+    const dataDirectory = normalizeDataDirectory(value);
+    if (!dataDirectory) {
+      throw new Error("请选择 Asset-track 数据目录");
+    }
+    return DatabaseManager.inspect(this.fullDatabasePath(dataDirectory));
+  }
+
+  async prepareDatabaseOnViewOpen(): Promise<void> {
+    if (
+      !this.isDatabaseReady()
+      && this.databaseState !== "initializing"
+      && this.settings.dataDirectory
+    ) {
+      await this.loadDatabase(this.settings.dataDirectory).catch((error) => {
+        this.databaseState = "error";
+        this.databaseError = error instanceof Error ? error.message : String(error);
+        void this.refreshViews();
+      });
+    }
+  }
+
+  async createDatabase(value: string): Promise<void> {
+    if (this.isDatabaseReady()) {
+      throw new Error("数据库已在运行；请使用迁移当前库或载入目标库");
+    }
+    const dataDirectory = normalizeDataDirectory(value);
+    if (!dataDirectory) throw new Error("请选择 Asset-track 数据目录");
+    const inspection = await this.inspectDataDirectory(dataDirectory);
+    if (inspection.exists) {
+      throw new Error("所选目录已有 accounting_system.db，请使用载入数据库");
+    }
+    await this.activateInitialDatabase(dataDirectory, true);
+  }
+
+  async loadDatabase(value: string): Promise<void> {
+    const dataDirectory = normalizeDataDirectory(value);
+    if (!dataDirectory) throw new Error("请选择 Asset-track 数据目录");
+    if (this.isDatabaseReady()) {
+      if (dataDirectory === this.settings.dataDirectory) return;
+      throw new Error("数据库已在运行；请使用迁移当前库或载入目标库");
+    }
+    const inspection = await this.inspectDataDirectory(dataDirectory);
+    if (!inspection.exists || !inspection.valid) {
+      const error = inspection.error ?? "所选目录没有 accounting_system.db";
+      this.databaseState = "error";
+      this.databaseError = error;
+      await this.refreshViews();
+      throw new Error(error);
+    }
+    await this.activateInitialDatabase(dataDirectory, false);
+  }
+
+  async switchDataDirectory(
+    value: string,
+    mode: DirectorySwitchMode
+  ): Promise<void> {
+    const currentManager = this.databaseManager;
+    if (!currentManager || !this.isDatabaseReady()) {
+      throw new Error("当前数据库尚未就绪");
+    }
+    const dataDirectory = normalizeDataDirectory(value);
+    if (!dataDirectory) throw new Error("请选择 Asset-track 数据目录");
+    if (dataDirectory === this.settings.dataDirectory) {
+      throw new Error("所选目录就是当前数据目录");
+    }
     const dirty = this.app.workspace
       .getLeavesOfType(VIEW_TYPE_ASSET_TRACK)
       .some((leaf) =>
@@ -107,68 +182,124 @@ export default class AssetTrackPlugin extends Plugin {
       );
     if (dirty) throw new Error("当前编辑器存在未保存草稿，不能切换数据目录");
 
-    const previous = this.settings.workspacePath;
-    await this.api?.close();
-    this.databaseManager = null;
-    await this.ensureVaultFolder(workspacePath);
-    this.settings = {
-      workspacePath,
-      csvMappings: this.settings.csvMappings
-    };
-    await this.saveSettings();
+    const inspection = await this.inspectDataDirectory(dataDirectory);
+    if (mode === "migrate" && inspection.exists) {
+      throw new Error("目标目录已有 accounting_system.db，迁移不会覆盖");
+    }
+    if (mode === "load" && (!inspection.exists || !inspection.valid)) {
+      throw new Error(inspection.error ?? "目标目录没有可载入的数据库");
+    }
+    await this.createProtectionBackup("before-switch");
+    const targetPath = this.fullDatabasePath(dataDirectory);
+    if (mode === "migrate") {
+      mkdirSync(dirname(targetPath), { recursive: true });
+      await currentManager.snapshot(targetPath);
+      const copied = DatabaseManager.inspect(targetPath);
+      if (!copied.valid) throw new Error(copied.error ?? "迁移数据库校验失败");
+    }
+    const next = this.buildService(dataDirectory);
     try {
-      this.createService();
-      await this.api.meta();
-      this.notifyDataChanged();
-    } catch (error) {
-      await this.api?.close();
-      this.databaseManager = null;
-      this.settings = {
-        workspacePath: previous,
+      await next.api.meta();
+      await this.saveData({
+        dataDirectory,
         csvMappings: this.settings.csvMappings
-      };
-      await this.saveSettings();
-      if (previous) this.createService();
+      });
+    } catch (error) {
+      await next.api.close();
       throw error;
     }
+    const previousApi = this.api;
+    this.databaseManager = next.manager;
+    this.api = next.api;
+    this.settings.dataDirectory = dataDirectory;
+    this.databaseState = "ready";
+    this.databaseError = null;
+    await previousApi.close();
+    this.notifyDataChanged();
+    await this.refreshViews();
   }
 
   private filesystemAdapter(): FileSystemAdapter {
     const adapter = this.app.vault.adapter;
     if (!(adapter instanceof FileSystemAdapter)) {
-      throw new Error("Asset Track v1.0.0 仅支持桌面文件系统 Vault");
+      throw new Error("Asset Track 仅支持桌面文件系统 Vault");
     }
     return adapter;
   }
 
-  private createService(): void {
+  private buildService(dataDirectory: string): ServiceContext {
     const adapter = this.filesystemAdapter();
-    const workspaceRoot = adapter.getFullPath(this.settings.workspacePath);
-    const databasePath = adapter.getFullPath(
-      databaseVaultPath(this.settings.workspacePath)
-    );
-    this.databaseManager = new DatabaseManager(databasePath);
-    this.api = new LocalAssetTrackService(
-      this.databaseManager,
-      workspaceRoot,
-      this.manifest.version
-    );
+    const workspaceRoot = adapter.getFullPath(dataDirectory);
+    const manager = new DatabaseManager(this.fullDatabasePath(dataDirectory));
+    return {
+      manager,
+      api: new LocalAssetTrackService(
+        manager,
+        workspaceRoot,
+        this.manifest.version
+      )
+    };
   }
 
-  private async ensureVaultFolder(path: string): Promise<void> {
-    let current = "";
-    for (const part of normalizePath(path).split("/")) {
-      current = current ? `${current}/${part}` : part;
-      const existing = this.app.vault.getAbstractFileByPath(current);
-      if (!existing) {
-        await this.app.vault.createFolder(current);
-      } else if (!(existing instanceof TFolder)) {
-        throw new Error(`无法创建数据目录：${current} 已存在且不是文件夹`);
-      }
+  private async activateInitialDatabase(
+    dataDirectory: string,
+    createIfMissing: boolean
+  ): Promise<void> {
+    this.databaseState = "initializing";
+    this.databaseError = null;
+    await this.refreshViews();
+    const inspection = await this.inspectDataDirectory(dataDirectory);
+    if (!createIfMissing && (!inspection.exists || !inspection.valid)) {
+      throw new Error(inspection.error ?? "所选目录没有有效数据库");
+    }
+    const next = this.buildService(dataDirectory);
+    try {
+      await next.api.meta();
+      await this.saveData({
+        dataDirectory,
+        csvMappings: this.settings.csvMappings
+      });
+      this.databaseManager = next.manager;
+      this.api = next.api;
+      this.settings.dataDirectory = dataDirectory;
+      this.databaseState = "ready";
+      await this.refreshViews();
+    } catch (error) {
+      await next.api.close();
+      this.databaseState = "error";
+      this.databaseError = error instanceof Error ? error.message : String(error);
+      await this.refreshViews();
+      throw error;
     }
   }
 
-  private openPluginSettings(): void {
+  private fullDatabasePath(dataDirectory: string): string {
+    return this.filesystemAdapter().getFullPath(databaseVaultPath(dataDirectory));
+  }
+
+  private async createProtectionBackup(prefix: string): Promise<string> {
+    if (!this.databaseManager) throw new Error("数据库尚未就绪");
+    const adapter = this.filesystemAdapter();
+    const directory = adapter.getFullPath(
+      backupsVaultPath(this.settings.dataDirectory)
+    );
+    const target = join(
+      directory,
+      `${prefix}-${new Date().toISOString().replace(/[:.]/g, "-")}.sqlite3`
+    );
+    await this.databaseManager.snapshot(target);
+    const validation = DatabaseManager.inspect(target);
+    if (!validation.valid) throw new Error(validation.error ?? "保护备份校验失败");
+    return target;
+  }
+
+  async refreshViews(): Promise<void> {
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_ASSET_TRACK)) {
+      if (leaf.view instanceof AssetTrackEditorView) leaf.view.refresh();
+    }
+  }
+
+  openPluginSettings(): void {
     const setting = (this.app as typeof this.app & {
       setting: { open(): void; openTabById(id: string): void };
     }).setting;
@@ -202,8 +333,10 @@ export default class AssetTrackPlugin extends Plugin {
   }
 
   async openDataDirectory(): Promise<void> {
-    const status = await this.api.runtimeStatus();
-    electronShell.showItemInFolder(String(status.db_path));
+    if (!this.settings.dataDirectory) throw new Error("尚未选择数据目录");
+    electronShell.showItemInFolder(
+      this.filesystemAdapter().getFullPath(this.settings.dataDirectory)
+    );
   }
 
   showPathInFinder(path: string): void {
@@ -222,7 +355,7 @@ export default class AssetTrackPlugin extends Plugin {
       protocol_version: meta.protocol_version,
       schema_version: runtime.schema_version,
       schema_validation: exported.payload.schema,
-      workspace_path: this.settings.workspacePath,
+      data_directory: this.settings.dataDirectory,
       db_path: runtime.db_path,
       source_revision: meta.source_revision,
       runtime: "typescript"
@@ -235,6 +368,6 @@ export default class AssetTrackPlugin extends Plugin {
   }
 
   async onunload(): Promise<void> {
-    await this.api?.close();
+    if (this.isDatabaseReady()) await this.api.close();
   }
 }

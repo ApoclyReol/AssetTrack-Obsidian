@@ -5,11 +5,11 @@
 1. 把完整 `asset-track/` 目录放入 Vault 的 `.obsidian/plugins/` 并启用。目录内
    只需 `main.js`、`manifest.json` 和 `styles.css`。
 2. 打开“设置 → Asset Track”。
-3. 在“Asset_Track 根目录”中输入关键词，从 Vault 文件夹联想列表选择已有目录；
-   也可以使用推荐的 `Asset_Track` 新目录。
-4. 点击“使用并初始化”。数据库固定创建或读取于
-   `<根目录>/data/accounting_system.db`。
-5. 完成前，Ribbon 和“打开编辑器”只会引导回设置，不会创建数据库。
+3. 在“Asset-track 数据目录”中输入关键词，从 Vault 文件夹联想列表选择目录。
+4. 空目录点击“创建新数据库”；目录中已有有效的 `accounting_system.db` 时点击
+   “载入数据库”。输入路径本身不会创建或修改文件。
+5. 数据库直接位于 `<数据目录>/accounting_system.db`；完成前 ItemView 只显示
+   配置引导，不访问财务数据。
 
 ## 日常使用
 
@@ -88,6 +88,7 @@
 
 - “立即备份”先选择目录，再生成一个完整 ZIP。
 - 恢复时选择 AssetTrack ZIP 或 SQLite 数据库文件。
+- 切换数据目录和恢复前的保护快照统一保存在当前 `<数据目录>/backups/`。
 - 恢复候选通过 Finder 选择，不需要手工输入路径；选择后自动校验。
 - 候选数据必须先通过完整性和内容一致性校验。
 - 替换数据库前会创建当前数据安全快照。

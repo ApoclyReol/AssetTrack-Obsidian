@@ -76,11 +76,39 @@ export class AssetTrackEditorView extends ItemView {
 
   async onOpen(): Promise<void> {
     this.containerEl.addClass("asset-track-view");
-    this.root = createRoot(this.contentEl);
+    await this.plugin.prepareDatabaseOnViewOpen();
+    this.render();
+  }
+
+  refresh(): void {
     this.render();
   }
 
   private render(): void {
+    if (!this.plugin.isDatabaseReady()) {
+      this.root?.unmount();
+      this.root = null;
+      this.contentEl.empty();
+      const guide = this.contentEl.createDiv("asset-track-setup-guide");
+      guide.createEl("h2", { text: "Asset Track 尚未配置" });
+      guide.createEl("p", {
+        text: this.plugin.databaseState === "initializing"
+          ? "正在初始化数据库……"
+          : "请先在插件设置中选择当前 Vault 内的 Asset-track 数据目录，然后创建或载入数据库。"
+      });
+      if (this.plugin.databaseError) {
+        guide.createEl("p", {
+          text: `数据库未载入，原文件未修改：${this.plugin.databaseError}`
+        });
+      }
+      const button = guide.createEl("button", { text: "打开插件设置" });
+      button.addEventListener("click", () => this.plugin.openPluginSettings());
+      return;
+    }
+    if (!this.root) {
+      this.contentEl.empty();
+      this.root = createRoot(this.contentEl);
+    }
     this.root?.render(
       createElement(AssetTrackEditorApp, {
         api: this.plugin.api,

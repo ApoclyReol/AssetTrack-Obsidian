@@ -20,8 +20,9 @@ flowchart LR
 | DatabaseManager | 单例连接、WAL、写入队列、快照和关闭 |
 | SQLite | 唯一持久化事实 |
 
-插件加载时只注册 View、设置、Ribbon 和命令，不打开数据库。第一次初始化或数据
-请求才探测 `node:sqlite` 并延迟打开连接。插件卸载、切换根目录和恢复前关闭连接，
+插件加载时只注册 View、设置、Ribbon 和命令，不创建 Service 或打开数据库。用户
+显式创建/载入数据库或打开已配置 ItemView 时才探测 `node:sqlite`。插件卸载和
+恢复前关闭连接；目录切换的新库验证与设置提交完成后才关闭旧连接，
 不启动子进程、不监听端口、不产生 HTTP 会话。
 
 ## 数据路径与运行时
@@ -29,14 +30,15 @@ flowchart LR
 数据库固定解析为：
 
 ```text
-<Vault>/<workspacePath>/data/accounting_system.db
+<Vault>/<dataDirectory>/accounting_system.db
+<Vault>/<dataDirectory>/backups/
 ```
 
 未配置时不创建数据库。运行时要求 Node 22.16 以上且提供 `DatabaseSync` 和
 `sqlite.backup`；能力不足时只返回升级提示。最低 Obsidian 版本为 1.9.10，同时
 建议安装最新桌面安装器。
 
-插件 `data.json` 只保存 `workspacePath` 和账单映射元数据，不保存财务事实。
+插件 `data.json` 只保存 `dataDirectory` 和账单映射元数据，不保存财务事实。
 schema 9 在流水和自动规则中分别保存 `counterparty`；插件运行时不包含旧 schema
 自动迁移逻辑。
 

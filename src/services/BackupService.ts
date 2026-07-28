@@ -631,7 +631,11 @@ export class BackupService {
       const target = this.manager.getPath();
       const incoming = `${target}.incoming`;
       const rollback = `${target}.rollback`;
-      const safety = join(dirname(target), "backup", `pre-restore-${timestamp()}`);
+      const safety = join(
+        dirname(target),
+        "backups",
+        `before-restore-${timestamp()}`
+      );
       rmSync(incoming, { force: true });
       const runtime = require("node:sqlite") as typeof import("node:sqlite");
       const sourceDb = new runtime.DatabaseSync(incomingSource, { readOnly: true });
