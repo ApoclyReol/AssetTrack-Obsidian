@@ -2,15 +2,14 @@
 
 ## 项目定位
 
-AssetTrack 是 macOS 桌面 Obsidian 插件。正式运行链为 React/TypeScript
-ItemView、只监听 loopback 的 bundled FastAPI/Python sidecar 和本地 SQLite。
-Python 是当前版本的唯一计算与数据库读写方；下一主要版本计划迁移到
-TypeScript，但迁移完成前不得复制或悄悄改变财务公式。
+AssetTrack 是桌面版 Obsidian 插件。正式运行链为 React/TypeScript ItemView、
+TypeScript Service/Repository、Obsidian Electron 内置 `node:sqlite` 和本地
+SQLite。项目不再包含 Python、HTTP API、sidecar 或平台原生扩展。
 
 ## 事实来源与交付边界
 
 - 开始任务先检查实时 Git、目录、schema、数据路径和相关测试。
-- 根目录插件清单与构建配置、`src/`、`backend/`、`tests/`、`scripts/`、`docs/` 是唯一长期源码边界。
+- 根目录插件清单与构建配置、`src/`、`tests/`、`scripts/`、`docs/` 是唯一长期源码边界。
 - `build/`、`.var/`、`.venv/`、`node_modules/` 和 `dist/` 都是忽略内容。
 - 可安装产物只能是完整 `build/obsidian/asset-track/`。
 - 正式数据只能位于用户明确选择的 Vault 内 Asset_Track 根目录。
@@ -19,9 +18,7 @@ TypeScript，但迁移完成前不得复制或悄悄改变财务公式。
 ## 常用命令
 
 ```bash
-uv sync
 npm ci
-.venv/bin/pytest -q
 npm run typecheck
 npm test
 npm run build
@@ -31,36 +28,39 @@ zsh scripts/build_plugin_bundle.sh
 ## 分层边界
 
 ```text
-backend/assettrack/api/                 FastAPI 路由与仓储
-backend/assettrack/domain/              财务计算、解析、规则和校验
-backend/assettrack/infrastructure/      SQLite、路径与格式 2 备份
-src/                                    Obsidian 宿主、React 界面和 sidecar 生命周期
+src/domain/                             财务计算、账单解析、规则和校验
+src/database/                           schema 9、连接管理和 Repository
+src/services/                           本地 Service、备份恢复
+src/ui/、src/views/                     React 界面与 ItemView
 scripts/                                插件构建、安装和冒烟
-tests/                                  Python/API/备份/计算测试
+tests/plugin/                           TypeScript/schema/备份/计算测试
 docs/                                   当前架构、用户、开发与发行文档
 ```
 
 ## 当前 handoff
 
-- v1.3.0 已完成按需 sidecar、面板内延迟加载状态、Finder 备份恢复、通用 CSV
-  映射、严格不去重的增量导入、覆盖草稿、商品汇总、高频规则建议、双默认账户和
-  理财账户响应式对齐。
-- SQLite 仍是 schema 8，备份仍是格式 2；本次没有 schema 9 或自动 schema
-  迁移。CSV 映射元数据只保存在插件 `data.json`。
-- 启动路径已延迟加载 Pandas/计算/CSV/备份模块；全量完整性检查只用于备份、
-  恢复和诊断。
+- v1.0.0 是当前首个正式版本：流水和规则支持 `counterparty`，账单导入支持
+  CSV/XLSX/XLS，新数据库固定为 schema 9。
+- schema 8 私有数据已在 2026-07-28 使用一次性离线流程迁移并核验；迁移工具及
+  旧 Python/sidecar 目录不再保留在开发仓库。当前源码、测试和文档只维护
+  schema 9 正式路径。
+- 流水按类型分块编号并完整展开；新流水分类为空。月度分析增加理财环比，分类
+  对比排除大额分类，异常变化使用 30% 与 100 元双阈值；对账差额绝对值小于
+  100 元显示为平账。
+- 插件实例共享 `DatabaseManager`、Repository、Service、写入队列和数据变更事件；
+  每个 ItemView 仍独立保存草稿与 dirty 状态。
 - 继续维护前先读 `docs/00-reading-guide.md`；本次实现、兼容边界、测试和后续
-  注意事项详见 `docs/logs/release-v1.3.0.md`。
+  注意事项详见 `docs/logs/release-v1.0.0.md`。
 - 后续每次正式更新都在 `docs/logs/` 新增 `release-vN.N.N.md`，并同步修改受影响
   的编号长期文档，不把当前事实只留在 release 日志中。
 
 ## 数据与编辑约束
 
-- React 只保存未提交草稿、dirty 状态和当前编辑会话；保存后用服务端 canonical
+- React 只保存未提交草稿、dirty 状态和当前编辑会话；保存后用 Repository canonical
   rows 和新 revision 重建 clean 草稿。
 - 月份保存携带 `expected_revision`，校验和写入必须在同一事务。
 - 持久化行使用数据库 `id`，新草稿使用 `client_id`。
-- 有质检错误时前端不得调用保存 API，后端再次以结构化 422 拒绝。
+- 有质检错误时前端不得调用保存 Service，Repository 再次以结构化 422 拒绝。
 - 未保存导航必须允许用户确认放弃后继续原操作。
 - 恢复备份前先完整验证，失败不得覆盖当前数据库。
 - 插件不自动备份；手动备份和恢复只从设置页执行。
@@ -90,6 +90,8 @@ docs/                                   当前架构、用户、开发与发行�
 
 ## 提交前检查
 
-- Python tests、插件 test/typecheck/build、compileall 和 `git diff --check`。
-- PyInstaller bundle、签名、安装目录和仓库外 cwd 的 sidecar 冒烟。
+- 插件 test、typecheck、build 和 `git diff --check`。
+- 标准三文件 bundle、`node:sqlite`、安装目录、备份和数据库锁释放冒烟。
 - 检查 Git 不包含数据库、备份、日志、密钥、Vault、构建或依赖目录。
+- 检查工作树不残留 `backend/`、Python 测试、虚拟环境、旧 sidecar 构建和真实
+  数据库副本。

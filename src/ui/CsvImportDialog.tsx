@@ -14,6 +14,7 @@ const REQUIRED_FIELDS: Array<[keyof CsvColumnMapping, string]> = [
   ["type_column", "收支方向"]
 ];
 const OPTIONAL_FIELDS: Array<[keyof CsvColumnMapping, string]> = [
+  ["counterparty_column", "交易对方（可选）"],
   ["category_column", "分类（可选）"],
   ["status_column", "交易状态（可选）"]
 ];
@@ -40,6 +41,7 @@ function initialMapping(
     : {
         date_column: String(suggested.date_column ?? ""),
         product_column: String(suggested.product_column ?? ""),
+        counterparty_column: String(suggested.counterparty_column ?? ""),
         amount_column: String(suggested.amount_column ?? ""),
         type_column: String(suggested.type_column ?? ""),
         category_column: String(suggested.category_column ?? ""),
@@ -54,11 +56,12 @@ function initialMapping(
         : "";
     }
   }
-  if (base.status_column && !base.included_statuses.length) {
-    base.included_statuses = [
-      ...(inspection.distinct_values[base.status_column] ?? [])
-    ];
-  }
+  const actualStatuses = new Set(
+    inspection.distinct_values[base.status_column ?? ""] ?? []
+  );
+  base.included_statuses = base.included_statuses.filter(
+    (status) => actualStatuses.has(status)
+  );
   return base;
 }
 
@@ -109,16 +112,16 @@ export function CsvImportDialog({
         );
       }
       if (field === "status_column") {
-        next.included_statuses = [
-          ...(inspection.distinct_values[value] ?? [])
-        ];
+        next.included_statuses = [];
       }
       return next;
     });
   };
   const valid = REQUIRED_FIELDS.every(([field]) =>
     String(mapping[field] ?? "").trim()
-  ) && directionValues.every((value) => Boolean(mapping.type_values[value]));
+  )
+    && directionValues.every((value) => Boolean(mapping.type_values[value]))
+    && (!mapping.status_column || mapping.included_statuses.length > 0);
 
   const createPreview = async () => {
     setBusy(true);
@@ -148,11 +151,15 @@ export function CsvImportDialog({
       <section className="asset-track-modal" role="dialog" aria-modal="true">
         <header>
           <div>
-            <h2>导入 CSV</h2>
+            <h2>导入账单</h2>
             <span>{inspection.filename} · {inspection.row_count} 行</span>
           </div>
           <button onClick={onCancel} disabled={busy}>关闭</button>
         </header>
+
+        <p className="asset-track-import-warning">
+          推荐先根据真实账单整理列名和无关记录；系统仍会要求确认字段、收支方向和交易状态。
+        </p>
 
         <div className="asset-track-import-mode">
           <label>
@@ -229,7 +236,7 @@ export function CsvImportDialog({
 
         {mapping.status_column && statusValues.length > 0 && (
           <section className="asset-track-import-statuses">
-            <strong>允许导入的交易状态</strong>
+            <strong>文件中的交易状态（请选择允许导入的值）</strong>
             <div>
               {statusValues.map((status) => (
                 <label key={status}>

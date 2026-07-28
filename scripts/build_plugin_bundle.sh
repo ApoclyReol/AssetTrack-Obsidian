@@ -4,52 +4,36 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="$ROOT/build/obsidian"
 BUNDLE="$BUILD/asset-track"
-PYINSTALLER="$BUILD/pyinstaller"
+VERSION="$(node -p "JSON.parse(require('fs').readFileSync('$ROOT/manifest.json','utf8')).version")"
+ARCHIVE="$ROOT/build/AssetTrack-$VERSION.zip"
 
-echo "[1/5] 安装并构建 Obsidian 插件"
+echo "[1/4] 安装依赖并验证 TypeScript 插件"
 npm ci --prefix "$ROOT" --cache /private/tmp/asset-track-obsidian-npm-cache --no-audit --no-fund
 npm run test --prefix "$ROOT"
+npm run typecheck --prefix "$ROOT"
 npm run build --prefix "$ROOT"
 
-echo "[2/5] 构建无需系统 Python 的 sidecar"
-rm -rf "$PYINSTALLER"
-mkdir -p "$PYINSTALLER"
-export PYINSTALLER_CONFIG_DIR="${PYINSTALLER_CONFIG_DIR:-$BUILD/pyinstaller-cache}"
-"$ROOT/.venv/bin/pyinstaller" \
-  --noconfirm \
-  --clean \
-  --onedir \
-  --name AssetTrackSidecar \
-  --distpath "$PYINSTALLER" \
-  --workpath "$BUILD/pyinstaller-work" \
-  --specpath "$BUILD/pyinstaller-spec" \
-  --paths "$ROOT/backend" \
-  --hidden-import assettrack.api.sidecar \
-  --exclude-module pytest \
-  --exclude-module _pytest \
-  "$ROOT/backend/assettrack/api/sidecar.py"
-
-echo "[3/5] 组装插件目录"
+echo "[2/4] 组装标准 Community Plugin 目录"
 rm -rf "$BUNDLE"
-mkdir -p "$BUNDLE/sidecar"
+mkdir -p "$BUNDLE"
 cp "$ROOT/dist/main.js" "$BUNDLE/main.js"
 cp "$ROOT/manifest.json" "$BUNDLE/manifest.json"
-cp "$ROOT/versions.json" "$BUNDLE/versions.json"
 cp "$ROOT/styles.css" "$BUNDLE/styles.css"
-cp -R "$PYINSTALLER/AssetTrackSidecar/." "$BUNDLE/sidecar/"
 
-echo "[4/5] 本地 ad-hoc 签名 sidecar"
-if command -v codesign >/dev/null 2>&1; then
-  find "$BUNDLE/sidecar" -type f -print0 | while IFS= read -r -d '' file_path; do
-    if file "$file_path" | grep -q "Mach-O"; then
-      codesign --force --sign - "$file_path"
-    fi
-  done
-fi
-
-echo "[5/5] 验证插件 bundle"
+echo "[3/4] 验证统一插件 bundle"
 test -s "$BUNDLE/main.js"
 test -s "$BUNDLE/manifest.json"
 test -s "$BUNDLE/styles.css"
-test -x "$BUNDLE/sidecar/AssetTrackSidecar"
+test "$(find "$BUNDLE" -maxdepth 1 -type f | wc -l | tr -d ' ')" = "3"
+! grep -q "AssetTrackSidecar" "$BUNDLE/main.js"
+! grep -q "127.0.0.1" "$BUNDLE/main.js"
+
+echo "[4/4] 生成带 asset-track 顶层目录的 ZIP"
+rm -f "$ARCHIVE"
+(
+  cd "$BUILD"
+  zip -qr "$ARCHIVE" asset-track
+)
+test -s "$ARCHIVE"
 echo "$BUNDLE"
+echo "$ARCHIVE"

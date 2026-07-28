@@ -3,7 +3,6 @@ import process from "node:process";
 import { builtinModules } from "node:module";
 
 const production = process.argv[2] === "production";
-const bundleArch = process.env.ASSET_TRACK_BUNDLE_ARCH ?? process.arch;
 const context = await esbuild.context({
   entryPoints: ["src/main.ts"],
   bundle: true,
@@ -15,11 +14,6 @@ const context = await esbuild.context({
   sourcemap: production ? false : "inline",
   minify: production,
   treeShaking: true,
-  define: {
-    __ASSET_TRACK_BUNDLE_ARCH__: JSON.stringify(
-      bundleArch === "x86_64" ? "x64" : bundleArch
-    )
-  },
   outfile: "dist/main.js"
 });
 

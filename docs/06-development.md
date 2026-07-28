@@ -3,42 +3,29 @@
 ## 源码边界
 
 ```text
-backend/                 当前 Python sidecar
-src/                     插件与实时界面
-tests/plugin/            TypeScript 单元测试
-scripts/                 构建、安装、冒烟
-tests/python/            Python 与 API 测试
-docs/                    长期文档
+src/domain/              财务计算、账单解析、规则和质检
+src/database/            schema 9、DatabaseManager 和 Repository
+src/services/            UI Service、备份恢复和原生对话框
+src/ui/、src/views/      React 与 ItemView
+tests/plugin/            TypeScript、SQLite、golden 和备份测试
+scripts/                 构建、安装和冒烟
+docs/                    长期文档与 release 日志
 ```
 
-不要在源码目录保存数据库、备份、日志、测试 Vault、node_modules、虚拟环境或
-构建产物。
+项目不包含 Python 环境或后端。不要在源码目录保存数据库、备份、日志、测试
+Vault、node_modules 或构建产物。
 
-长期文档按 `docs/00-*.md` 至 `docs/10-*.md` 的阅读顺序维护；每次发行的详细
-handoff 写入 `docs/logs/release-vN.N.N.md`。重命名文档时必须同步 README、
-AGENTS 和所有 Markdown 相对链接。
-
-## 初始化
+## 初始化与验证
 
 ```bash
-UV_CACHE_DIR=/private/tmp/asset-track-uv-cache uv sync
-npm ci \
-  --cache /private/tmp/asset-track-obsidian-npm-cache
-```
-
-## 验证
-
-```bash
-.venv/bin/pytest -q
+npm ci --cache /private/tmp/asset-track-obsidian-npm-cache
 npm run typecheck
 npm test
 npm run build
-PYTHONPYCACHEPREFIX=/private/tmp/asset-track-pyc \
-  .venv/bin/python -m compileall -q backend tests/python
 git diff --check
 ```
 
-完整安装包：
+完整标准插件：
 
 ```bash
 zsh scripts/build_plugin_bundle.sh
@@ -46,4 +33,16 @@ zsh scripts/install_to_vault.sh /path/to/test-vault
 zsh scripts/smoke_test_plugin.sh /path/to/test-vault
 ```
 
-测试恢复和写入只能使用隔离 Vault 与复制数据库。
+测试覆盖 schema 9、中文路径、WAL、整体事务、revision、冻结 golden、
+CSV/XLSX/XLS、备份恢复、5 万笔流水和数据库锁释放。恢复和写入只能使用隔离
+Vault 与合成数据库。
+
+## 数据库版本边界
+
+当前开发、测试、备份和恢复统一使用 schema 9。schema 8 私有数据过渡已完成，
+仓库不再保留一次性迁移脚本或双 schema 生产路径。若未来确需迁移真实数据库，
+应在仓库外按根目录 `AGENTS.md` 的正式数据修改协议建立独立、可审计的一次性
+工具，不把兼容代码并入插件运行链。
+
+长期文档按 `docs/00-*.md` 至 `docs/10-*.md` 维护；每次发行的详细 handoff 写入
+`docs/logs/release-vN.N.N.md`。

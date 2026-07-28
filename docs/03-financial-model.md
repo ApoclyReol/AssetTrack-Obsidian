@@ -38,7 +38,7 @@ flowchart LR
 
 ### 1.1 固定资产记录口径
 
-`fixed_assets` 是独立的月度记录表，用于记录手机、电脑等大件资产的状态和购买价格。schema 8 已永久删除日常估值字段。
+`fixed_assets` 是独立的月度记录表，用于记录手机、电脑等大件资产的状态和购买价格。固定资产不保存日常估值字段。
 
 - 固定资产不计入 `total_assets`。
 - 固定资产不参与理论净支出、对账差额、储蓄率或年度财务趋势。
@@ -77,9 +77,10 @@ flowchart LR
 
 ## 4. 当前代码中的精确计算口径
 
-核心计算位于 `backend/assettrack/domain/calculator.py`。智能体维护时应以代码中的字段口径为准。
+核心计算位于 `src/domain/calculator.ts` 和 `src/database/AssetTrackRepository.ts`。
+维护时应以代码中的字段口径和测试为准。
 
-### 4.1 月度流水汇总 `calc_monthly(tx_df)`
+### 4.1 月度流水汇总
 
 ```text
 all_out          = SUM(amount WHERE type == "支出")
@@ -95,28 +96,31 @@ total_withdraw   = SUM(amount WHERE type == "提现")
 - 当前导入流程只接受 `支出 / 收入 / 代付 / 加仓 / 提现` 五种类型。
 - `代付` 参与 `total_daifu` 抵扣；`加仓` 与 `提现` 参与理论净支出推导，但不会进入消费分类统计。
 
-### 4.2 CSV 草稿导入契约
+### 4.2 账单草稿导入契约
 
-月度“导入 CSV”先检查原始表头，再由用户映射日期、商品/说明、金额和收支
-方向；分类和交易状态是可选映射。简化的 `商品,收支,金额[,日期,分类]` 继续
-作为内置模板。
+月度“导入账单”支持 CSV、XLSX 和 XLS。系统先检查原始表头，再由用户映射
+日期、商品/说明、金额和收支方向；交易对方、分类和交易状态是可选映射。
+简化的 `商品,收支,金额[,日期,分类]` 继续作为内置模板。
 
 - `收支` 只能使用 `支出`、`收入`、`代付`、`加仓`、`提现`。
 - `金额`允许千分位逗号和 `¥`，导入时转为绝对值，资金语义由 `收支`决定。
 - 没有日期时，当前选中月份的导入预览默认填入该月 1 日。
 - `分类`按现有分类名称匹配；`代付`、`加仓`、`提现`会清空分类，因为特殊类型不使用消费分类。
+- `收支方向`必须把文件中的每个实际值映射到统一财务类型，不进行隐式猜测。
+- 选择交易状态列后，从文件内容读取不同状态值，只有用户勾选的状态进入草稿。
+- `交易对方`与`商品`独立保存，规则可匹配任意一项或同时匹配两项。
 - 增量模式追加本次全部有效行，不检查重复文件或重复流水；覆盖模式只替换当前流水草稿。
 - 跨月、状态未选中、映射为“忽略”或必要字段无效的行不进入草稿，并在预览中计数。
 - 所有接受行逐项保留；商品汇总是只读视图，不改变数据库事实。
 - 导入只更新 React 草稿，经过质检并点击保存后才写入 SQLite。
 
-备份导出的 `transactions_backup.csv` 使用完整 schema 8 字段
-`month, transaction_date, type, category_key, category, product, amount`，
-用于备份校验与恢复，不能直接当作月度简化导入 CSV。
+备份导出的流水包含
+`month, transaction_date, type, category_key, category, counterparty, product, amount`，
+用于备份校验与恢复，不能直接当作月度简化账单导入。
 
 ### 4.3 支出结构分析
 
-结构分析基于 `backend/assettrack/infrastructure/config.py` 的 `CATEGORIES_METADATA`：
+结构分析基于 `src/database/schema.ts` 的 `CATEGORY_METADATA`：
 
 ```text
 necessary  = 必要支出

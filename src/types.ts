@@ -8,6 +8,7 @@ export type ImportMode = "append" | "replace";
 export interface CsvColumnMapping {
   date_column: string;
   product_column: string;
+  counterparty_column?: string;
   amount_column: string;
   type_column: string;
   category_column?: string;
@@ -52,6 +53,7 @@ export interface CsvImportPreview {
 export interface RuleCandidate {
   transaction_type: "支出" | "收入";
   product: string;
+  counterparty: string;
   variants: string[];
   category: string;
   category_confidence: number;
@@ -68,6 +70,7 @@ export interface Transaction {
   type: string;
   category_key?: string | null;
   category: string;
+  counterparty?: string;
   product: string;
   amount: number;
 }
@@ -137,6 +140,12 @@ export interface MonthOverview {
     position: number;
     profit: number;
     roi_percent: number;
+    comparison: {
+      available: boolean;
+      previous_position: number | null;
+      amount_delta: number | null;
+      percent_delta: number | null;
+    };
   };
   reconciliation?: {
     available: boolean;
@@ -314,11 +323,4 @@ export interface AccountDefinition {
   sort_order: number;
   usage_count?: number;
   impact_months?: string[];
-}
-
-export interface SidecarStatus {
-  state: "stopped" | "starting" | "ready" | "failed";
-  pid?: number;
-  port?: number;
-  error?: string;
 }

@@ -17,8 +17,7 @@ import {
 } from "./services/workspacePath";
 import {
   chooseBackupDirectory,
-  chooseBackupFile,
-  chooseBackupSourceDirectory
+  chooseBackupFile
 } from "./services/nativeDialogs";
 
 export const DEFAULT_SETTINGS: AssetTrackSettings = {
@@ -172,7 +171,7 @@ export class AssetTrackSettingTab extends PluginSettingTab {
     let revealButton: { setDisabled(value: boolean): unknown } | undefined;
     new Setting(containerEl)
       .setName("立即备份")
-      .setDesc("选择 Finder 目录后生成单个格式 2 ZIP。")
+      .setDesc("选择保存目录后生成一个完整 ZIP 备份。")
       .addButton((button) =>
         button.setButtonText("选择目录并导出").onClick(async () => {
           try {
@@ -208,13 +207,12 @@ export class AssetTrackSettingTab extends PluginSettingTab {
     const validationSummary = (result: Record<string, unknown>): string => {
       const rows = result.row_counts as Record<string, number> | undefined;
       const manifest = result.manifest as Record<string, unknown> | undefined;
-      const schema = result.schema as Record<string, unknown> | undefined;
-      const tables = result.required_tables as unknown[] | undefined;
       return [
-        `校验通过：schema ${String(schema?.schema_version ?? "—")}`,
-        `数据表 ${tables?.length ?? 0} 个`,
+        "备份校验通过",
         `流水 ${rows?.transactions ?? 0} 行`,
-        `创建时间 ${String(manifest?.created_at ?? "—")}`,
+        manifest?.created_at
+          ? `创建时间 ${String(manifest.created_at)}`
+          : "SQLite 数据库文件",
         restorePath
       ].join(" · ");
     };
@@ -238,15 +236,10 @@ export class AssetTrackSettingTab extends PluginSettingTab {
     };
     new Setting(containerEl)
       .setName("恢复备份")
-      .setDesc("通过 Finder 选择格式 2 ZIP、目录或 schema 8 SQLite。")
+      .setDesc("选择 AssetTrack ZIP 备份或 SQLite 数据库文件。")
       .addButton((button) =>
         button.setButtonText("选择备份文件").onClick(() =>
           void selectAndValidate(() => chooseBackupFile())
-        )
-      )
-      .addButton((button) =>
-        button.setButtonText("选择备份目录").onClick(() =>
-          void selectAndValidate(() => chooseBackupSourceDirectory())
         )
       )
       .addButton((button) => {
@@ -296,10 +289,10 @@ export class AssetTrackSettingTab extends PluginSettingTab {
       }
     };
     new Setting(containerEl)
-      .setName("sidecar 与数据")
+      .setName("数据库与诊断")
       .addButton((button) =>
-        button.setButtonText("重启 sidecar").onClick(() =>
-          operation("sidecar 重启", () => this.plugin.restartSidecar())
+        button.setButtonText("重新打开数据库连接").onClick(() =>
+          operation("数据库重新打开", () => this.plugin.reopenDatabase())
         )
       )
       .addButton((button) =>

@@ -3,10 +3,8 @@
 本目录按版本保存已经完成的更新记录。日志用于 handoff 和追溯，不替代
 `docs/00-reading-guide.md` 所列的当前长期文档。
 
-- [Release v1.3.0](release-v1.3.0.md)：启动体验、Finder 备份恢复、通用 CSV
-  映射、不去重增量导入、商品汇总和规则建议。
-- [Release v1.2.0](release-v1.2.0.md)：Vault 数据目录、初始化门禁、手动备份和
-  简化 CSV 导入。
+- [Release v1.0.0](release-v1.0.0.md)：纯 TypeScript/schema 9 首个正式版，
+  包含账单导入、交易对方规则、月度分析、备份恢复和标准三文件产物。
 
 后续每次正式更新新增 `release-vN.N.N.md`，至少记录：
 

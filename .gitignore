@@ -1,24 +1,3 @@
-# Python caches, virtual environments, and local packaging metadata
-__pycache__/
-*.py[cod]
-*$py.class
-.venv/
-venv/
-env/
-ENV/
-.pytest_cache/
-.mypy_cache/
-.pyright/
-.ruff_cache/
-.hypothesis/
-.tox/
-.nox/
-.coverage
-.coverage.*
-htmlcov/
-*.egg-info/
-pip-wheel-metadata/
-
 # IDE and editor state
 .vscode/
 .idea/
@@ -38,6 +17,9 @@ Thumbs.db
 .var/
 /logs/
 *.log
+*.db
+*.sqlite
+*.sqlite3
 
 # SQLite transient files. Deliberate database fixtures may still be committed.
 *.db-wal

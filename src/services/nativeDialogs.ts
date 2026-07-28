@@ -50,14 +50,3 @@ export function chooseBackupFile(defaultPath?: string): Promise<string | null> {
     ]
   });
 }
-
-export function chooseBackupSourceDirectory(
-  defaultPath?: string
-): Promise<string | null> {
-  return choose({
-    title: "选择 Asset Track 格式 2 备份目录",
-    buttonLabel: "选择并校验",
-    defaultPath,
-    properties: ["openDirectory"]
-  });
-}

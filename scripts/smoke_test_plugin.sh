@@ -6,61 +6,19 @@ if [[ "$#" -ne 1 ]]; then
   exit 2
 fi
 
-VAULT="$(cd "$1" && pwd)"
-PLUGIN="$VAULT/.obsidian/plugins/asset-track"
-SIDECAR="$PLUGIN/sidecar/AssetTrackSidecar"
+SOURCE="$(cd "$1" && pwd)"
+if [[ -d "$SOURCE/.obsidian" ]]; then
+  PLUGIN="$SOURCE/.obsidian/plugins/asset-track"
+else
+  PLUGIN="$SOURCE"
+fi
 
 test -s "$PLUGIN/main.js"
 test -s "$PLUGIN/manifest.json"
 test -s "$PLUGIN/styles.css"
-test -x "$SIDECAR"
 grep -q '"isDesktopOnly": true' "$PLUGIN/manifest.json"
-
-TEMP_ROOT="$(mktemp -d /private/tmp/asset-track-obsidian-smoke.XXXXXX)"
-TOKEN="smoke-$(date +%s)-$$"
-STDOUT="$TEMP_ROOT/stdout.log"
-STDERR="$TEMP_ROOT/stderr.log"
-cleanup() {
-  if [[ -n "${SIDECAR_PID:-}" ]]; then
-    kill "$SIDECAR_PID" >/dev/null 2>&1 || true
-  fi
-  rm -rf "$TEMP_ROOT"
-}
-trap cleanup EXIT
-
-ASSET_TRACK_DB_PATH="$TEMP_ROOT/accounting_system.db" \
-ASSET_TRACK_BOOTSTRAP_TOKEN="$TOKEN" \
-ASSET_TRACK_PARENT_PID="$$" \
-"$SIDECAR" >"$STDOUT" 2>"$STDERR" &
-SIDECAR_PID="$!"
-
-READY=""
-for _ in {1..600}; do
-  READY="$(grep '"event": "ready"' "$STDOUT" | tail -1 || true)"
-  [[ -n "$READY" ]] && break
-  kill -0 "$SIDECAR_PID" >/dev/null 2>&1 || {
-    cat "$STDERR" >&2
-    exit 1
-  }
-  sleep 0.1
-done
-[[ -n "$READY" ]] || {
-  echo "sidecar ready 超时（60 秒）" >&2
-  cat "$STDERR" >&2
-  exit 1
-}
-
-PORT="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["port"])' <<<"$READY")"
-SESSION="$(curl -fsS -X POST -H "X-AssetTrack-Bootstrap: $TOKEN" \
-  "http://127.0.0.1:$PORT/api/v1/session" | \
-  python3 -c 'import json,sys; print(json.load(sys.stdin)["session"])')"
-curl -fsS -H "X-AssetTrack-Session: $SESSION" \
-  "http://127.0.0.1:$PORT/health/ready" >/dev/null
-curl -fsS -H "X-AssetTrack-Session: $SESSION" \
-  "http://127.0.0.1:$PORT/api/v1/current-asset" >/dev/null
-curl -fsS -H "X-AssetTrack-Session: $SESSION" \
-  "http://127.0.0.1:$PORT/api/v1/months" >/dev/null
-curl -fsS -X POST -H "X-AssetTrack-Bootstrap: $TOKEN" \
-  "http://127.0.0.1:$PORT/internal/shutdown" >/dev/null
-
-echo "插件文件与 bundled sidecar 冒烟通过：$PLUGIN"
+test "$(find "$PLUGIN" -maxdepth 1 -type f | wc -l | tr -d ' ')" = "3"
+! test -e "$PLUGIN/sidecar"
+! grep -q "AssetTrackSidecar" "$PLUGIN/main.js"
+node -e "const sqlite=require('node:sqlite');const db=new sqlite.DatabaseSync(':memory:');db.exec('CREATE TABLE smoke(value INTEGER)');db.prepare('INSERT INTO smoke VALUES (?)').run(1);if(db.prepare('SELECT value FROM smoke').get().value!==1)process.exit(1);db.close()"
+echo "标准 TypeScript 插件与 node:sqlite 冒烟通过：$PLUGIN"

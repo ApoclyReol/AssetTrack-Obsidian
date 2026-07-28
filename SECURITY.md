@@ -6,17 +6,16 @@ AssetTrack 是本地优先工具，不提供账户或远程财务服务。
 
 - 正式数据库位于用户明确选择的 Vault 内 Asset_Track 根目录。
 - 数据库固定为 `<根目录>/data/accounting_system.db`。
-- 当前 SQLite 仅由 Python sidecar 读写。
+- SQLite 仅由插件内 TypeScript Repository 通过 Electron `node:sqlite` 读写。
+- 插件延迟打开数据库；卸载、切换根目录和恢复前必须关闭连接并释放文件锁。
 - 插件不自动备份；手动备份和恢复由用户从设置页触发。
 - 数据库、WAL/SHM、用户 CSV、备份、Vault、日志和构建产物不属于仓库交付物；
   发布前必须检查 Git 状态和提交内容，避免把真实财务数据带入公开仓库。
 
-## 本地服务
+## 运行边界
 
-- sidecar 只监听 `127.0.0.1` 随机端口。
-- 一次性 bootstrap token 通过进程环境传递，并换取 header session。
-- token 不进入 URL、SQLite、备份、诊断或日志。
-- sidecar 监控 Obsidian 父进程并在插件卸载时关闭。
+插件不启动本地服务、子进程或监听端口，不传输财务数据。发布目录只包含
+`main.js`、`manifest.json` 和 `styles.css`，不包含平台二进制。
 
 ## 恢复保护
 

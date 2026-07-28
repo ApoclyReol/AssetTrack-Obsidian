@@ -1,31 +1,24 @@
 # AssetTrack Obsidian
 
-AssetTrack 是运行在 macOS 桌面版 Obsidian 中的本地个人财务工具。插件在独立
+AssetTrack 是运行在桌面版 Obsidian 中的本地个人财务工具。插件在独立
 ItemView 中提供实时分析、流水、借款和规则管理；SQLite 是唯一事实源。
 
 ```text
 Obsidian ItemView
 → React + Recharts
-→ loopback FastAPI sidecar
+→ TypeScript Service + Repository
 → SQLite
 ```
 
 ## 当前版本
 
-- Obsidian 插件：1.3.0
-- 后端：3.3.0
-- SQLite schema：8
-- 备份格式：2
-- 平台：macOS 桌面版 Obsidian
+- Obsidian 插件：1.0.0
+- SQLite schema：9
+- 平台：macOS、Windows、Linux 桌面版 Obsidian
 
-当前版本将 Python/FastAPI/Pandas 打包为自包含 sidecar，用户不需要安装
-Python、Node、uv 或虚拟环境。下一主要版本计划将运行时全部迁移到
-TypeScript，详见 [路线图](docs/09-roadmap.md) 和
-[Community Plugins 发布规划](docs/10-community-release-plan.md)。
-
-当前 1.3.0 必须安装完整插件目录，不能通过 Obsidian 的标准 Community
-Plugins 安装器使用；标准安装器不会带上当前版本需要的 Python sidecar。现阶段
-请使用 [发行说明](docs/07-release.md) 中的完整目录安装方式。
+v1.0.0 直接使用 Obsidian 桌面运行时的 `node:sqlite`。
+用户不需要安装 Python、Node、uv、虚拟环境或平台架构包。最低 Obsidian 版本为
+1.9.10，并要求使用新版桌面安装器；运行时能力不足时插件不会创建或修改数据库。
 
 ## 数据位置
 
@@ -38,18 +31,16 @@ Plugins 安装器使用；标准安装器不会带上当前版本需要的 Pytho
 <Asset_Track 根目录>/data/accounting_system.db
 ```
 
-插件不会自动备份。手动备份和恢复位于设置页；恢复前必须先通过格式、hash、
-schema 与 SQLite 完整性校验。手动备份会先通过 Finder 选择目标目录，再生成
-单个格式 2 ZIP；恢复同样通过 Finder 选择 ZIP、格式 2 目录或 schema 8 SQLite。
+插件不会自动备份。手动备份和恢复位于设置页；恢复前必须通过完整性和内容一致
+性校验。手动备份会先选择目标目录并生成一个 ZIP；恢复支持 AssetTrack ZIP 或
+SQLite 数据库文件。
 
 ## 开发
 
 ```bash
-UV_CACHE_DIR=/private/tmp/asset-track-uv-cache uv sync
 npm ci \
   --cache /private/tmp/asset-track-obsidian-npm-cache
 
-.venv/bin/pytest -q
 npm run typecheck
 npm test
 npm run build
@@ -61,8 +52,12 @@ npm run build
 zsh scripts/build_plugin_bundle.sh
 ```
 
-产物位于 `build/obsidian/asset-track/`，包含 `main.js`、manifest、样式和
-PyInstaller onedir sidecar。不能只安装 `main.js` 或裸 sidecar。
+产物位于 `build/obsidian/asset-track/`，只包含 `main.js`、`manifest.json` 和
+`styles.css`，不区分 CPU 架构；同时生成可供手动安装的
+`build/AssetTrack-1.0.0.zip`。
+
+源码仓库只维护 `src/`、`tests/plugin/`、`scripts/` 和 `docs/` 等 TypeScript
+插件开发内容，不保留 Python 后端、sidecar、旧架构构建或真实数据库副本。
 
 ## 文档
 

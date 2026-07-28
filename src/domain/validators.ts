@@ -1,0 +1,127 @@
+import type { CategoryDefinition, Transaction } from "../types";
+import { normalizeDate } from "./dates";
+
+export interface ValidationIssue extends Record<string, unknown> {
+  severity: "警告";
+  type: string;
+  product: string;
+  field: string;
+  issue: string;
+  suggestion: string;
+  row_index?: number;
+}
+
+function issue(
+  row: Partial<Transaction>,
+  rowIndex: number,
+  field: string,
+  message: string,
+  suggestion: string
+): ValidationIssue {
+  return {
+    severity: "警告",
+    row_index: rowIndex,
+    type: String(row.type ?? "").trim() || "-",
+    product: String(row.product ?? "").trim() || "(空商品)",
+    field,
+    issue: message,
+    suggestion
+  };
+}
+
+export function validateTransactions(
+  rows: Array<Partial<Transaction>>,
+  month: string,
+  categories: CategoryDefinition[]
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const byKey = new Map(categories.map((row) => [row.category_key, row]));
+  const byName = new Map(categories.map((row) => [row.name, row]));
+  const validTypes = new Set(["支出", "收入", "代付", "加仓", "提现"]);
+
+  rows.forEach((row, index) => {
+    const rawDate = String(row.transaction_date ?? "").trim();
+    if (!rawDate) {
+      issues.push(issue(row, index, "日期", "日期为空", "填写当前月份内的消费日期"));
+    } else {
+      try {
+        const date = normalizeDate(rawDate);
+        if (date.slice(0, 7) !== month) {
+          issues.push(issue(
+            row,
+            index,
+            "日期",
+            `日期不属于当前月份 ${month}`,
+            "修改日期后再保存；系统不会自动移动跨月流水"
+          ));
+        }
+      } catch {
+        issues.push(issue(
+          row,
+          index,
+          "日期",
+          `无法识别日期：${rawDate}`,
+          "使用 YYYY-MM-DD、YYYY/MM/DD 或中文年月日"
+        ));
+      }
+    }
+    if (!String(row.product ?? "").trim()) {
+      issues.push(issue(
+        row,
+        index,
+        "商品",
+        "商品为空",
+        "补充商品说明，方便后续分类和排查"
+      ));
+    }
+    const amount = Number(row.amount);
+    if (!Number.isFinite(amount)) {
+      issues.push(issue(row, index, "金额", "金额无法识别", "改为纯数字金额"));
+    } else if (amount <= 0) {
+      issues.push(issue(row, index, "金额", "金额必须大于 0", "删除无效行或填写真实金额"));
+    }
+
+    const type = String(row.type ?? "").trim();
+    if (!validTypes.has(type)) {
+      issues.push(issue(
+        row,
+        index,
+        "收支",
+        `无效收支类型：${type || "空"}`,
+        "请选择支出、收入、代付、加仓或提现"
+      ));
+      return;
+    }
+    const categoryKey = String(row.category_key ?? "").trim();
+    const category = String(row.category ?? "").trim();
+    if (type === "支出" || type === "收入") {
+      const definition = byKey.get(categoryKey) ?? byName.get(category);
+      if (!definition) {
+        issues.push(issue(
+          row,
+          index,
+          "分类",
+          `${type}未选择有效分类`,
+          `请选择一个已启用的${type}分类`
+        ));
+      } else if (definition.transaction_type !== type) {
+        issues.push(issue(
+          row,
+          index,
+          "分类",
+          `${type}使用了不匹配的分类`,
+          `请选择${type}类分类`
+        ));
+      }
+    } else if (category || categoryKey) {
+      issues.push(issue(
+        row,
+        index,
+        "分类",
+        "特殊类型流水不能设置分类",
+        "代付、加仓、提现的分类必须为空"
+      ));
+    }
+  });
+  return issues;
+}

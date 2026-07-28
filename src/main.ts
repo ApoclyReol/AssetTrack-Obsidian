@@ -1,4 +1,10 @@
-import { Notice, Plugin, TFolder, normalizePath } from "obsidian";
+import {
+  FileSystemAdapter,
+  Notice,
+  Plugin,
+  TFolder,
+  normalizePath
+} from "obsidian";
 import {
   VIEW_TYPE_ASSET_TRACK,
   type AnalysisMode,
@@ -8,13 +14,19 @@ import {
   AssetTrackSettingTab,
   DEFAULT_SETTINGS
 } from "./settings";
-import { AssetTrackApi } from "./services/AssetTrackApi";
-import { SidecarManager } from "./services/SidecarManager";
+import { DatabaseManager } from "./database/DatabaseManager";
+import {
+  type AssetTrackService
+} from "./services/AssetTrackService";
+import { LocalAssetTrackService } from "./services/LocalAssetTrackService";
 import type {
   AssetTrackSettings,
   CsvMappingProfile
 } from "./types";
-import { normalizeWorkspacePath } from "./services/workspacePath";
+import {
+  databaseVaultPath,
+  normalizeWorkspacePath
+} from "./services/workspacePath";
 import {
   AssetTrackEditorView,
   type AssetTrackViewState
@@ -26,8 +38,8 @@ const electronShell = require("electron").shell as {
 
 export default class AssetTrackPlugin extends Plugin {
   settings: AssetTrackSettings = { ...DEFAULT_SETTINGS };
-  sidecar!: SidecarManager;
-  api!: AssetTrackApi;
+  api!: AssetTrackService;
+  private databaseManager: DatabaseManager | null = null;
   private readonly dataListeners = new Set<() => void>();
 
   async onload(): Promise<void> {
@@ -40,8 +52,7 @@ export default class AssetTrackPlugin extends Plugin {
         ? stored.csvMappings
         : []
     };
-    this.sidecar = new SidecarManager(this, () => this.settings);
-    this.api = new AssetTrackApi(this.sidecar);
+    if (this.settings.workspacePath) this.createService();
 
     this.registerView(
       VIEW_TYPE_ASSET_TRACK,
@@ -97,7 +108,8 @@ export default class AssetTrackPlugin extends Plugin {
     if (dirty) throw new Error("当前编辑器存在未保存草稿，不能切换数据目录");
 
     const previous = this.settings.workspacePath;
-    await this.sidecar.stop();
+    await this.api?.close();
+    this.databaseManager = null;
     await this.ensureVaultFolder(workspacePath);
     this.settings = {
       workspacePath,
@@ -105,17 +117,42 @@ export default class AssetTrackPlugin extends Plugin {
     };
     await this.saveSettings();
     try {
-      await this.sidecar.ensureReady();
+      this.createService();
+      await this.api.meta();
       this.notifyDataChanged();
     } catch (error) {
-      await this.sidecar.stop();
+      await this.api?.close();
+      this.databaseManager = null;
       this.settings = {
         workspacePath: previous,
         csvMappings: this.settings.csvMappings
       };
       await this.saveSettings();
+      if (previous) this.createService();
       throw error;
     }
+  }
+
+  private filesystemAdapter(): FileSystemAdapter {
+    const adapter = this.app.vault.adapter;
+    if (!(adapter instanceof FileSystemAdapter)) {
+      throw new Error("Asset Track v1.0.0 仅支持桌面文件系统 Vault");
+    }
+    return adapter;
+  }
+
+  private createService(): void {
+    const adapter = this.filesystemAdapter();
+    const workspaceRoot = adapter.getFullPath(this.settings.workspacePath);
+    const databasePath = adapter.getFullPath(
+      databaseVaultPath(this.settings.workspacePath)
+    );
+    this.databaseManager = new DatabaseManager(databasePath);
+    this.api = new LocalAssetTrackService(
+      this.databaseManager,
+      workspaceRoot,
+      this.manifest.version
+    );
   }
 
   private async ensureVaultFolder(path: string): Promise<void> {
@@ -165,7 +202,6 @@ export default class AssetTrackPlugin extends Plugin {
   }
 
   async openDataDirectory(): Promise<void> {
-    await this.sidecar.ensureReady();
     const status = await this.api.runtimeStatus();
     electronShell.showItemInFolder(String(status.db_path));
   }
@@ -175,7 +211,6 @@ export default class AssetTrackPlugin extends Plugin {
   }
 
   async copyDiagnostics(): Promise<void> {
-    await this.sidecar.ensureReady();
     const [meta, runtime, exported] = await Promise.all([
       this.api.meta(),
       this.api.runtimeStatus(),
@@ -183,23 +218,23 @@ export default class AssetTrackPlugin extends Plugin {
     ]);
     const diagnostic = {
       plugin_version: this.manifest.version,
-      backend_version: meta.app_version,
+      service_version: meta.app_version,
       protocol_version: meta.protocol_version,
       schema_version: runtime.schema_version,
       schema_validation: exported.payload.schema,
       workspace_path: this.settings.workspacePath,
       db_path: runtime.db_path,
       source_revision: meta.source_revision,
-      sidecar: this.sidecar.getStatus()
+      runtime: "typescript"
     };
     await navigator.clipboard.writeText(JSON.stringify(diagnostic, null, 2));
   }
 
-  async restartSidecar(): Promise<void> {
-    await this.sidecar.restart();
+  async reopenDatabase(): Promise<void> {
+    await this.api.reopen();
   }
 
   async onunload(): Promise<void> {
-    await this.sidecar.stop();
+    await this.api?.close();
   }
 }

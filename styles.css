@@ -153,7 +153,9 @@
 
 .asset-track-summary-details > div {
   display: grid;
-  grid-template-columns: 140px minmax(220px, 1fr) 120px minmax(150px, 220px);
+  grid-template-columns:
+    140px minmax(160px, 1fr) minmax(220px, 1fr)
+    120px minmax(150px, 220px);
   gap: 8px;
 }
 
@@ -322,10 +324,11 @@
 
 .asset-track-grid {
   display: grid;
-  grid-template-columns: 130px 180px minmax(240px, 1fr) 120px 72px;
+  grid-template-columns:
+    48px 130px minmax(150px, 0.8fr) 180px minmax(220px, 1fr) 120px 72px;
   align-items: center;
   gap: 6px;
-  min-width: 760px;
+  min-width: 1040px;
   min-height: 42px;
   padding: 4px 7px;
   border-bottom: 1px solid var(--background-modifier-border);
@@ -344,8 +347,13 @@
 }
 
 .asset-track-virtual-body {
-  max-height: min(50vh, 560px);
-  overflow-y: auto;
+  overflow: visible;
+}
+
+.asset-track-row-number {
+  color: var(--text-muted);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .asset-track-delete-confirm {
@@ -480,6 +488,14 @@
   font-size: 1.35rem;
 }
 
+.asset-track-analysis-card-suffix {
+  margin-left: 4px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-weight: normal;
+  white-space: nowrap;
+}
+
 .asset-track-analysis-card.inflow strong {
   color: #d94f45;
 }
@@ -496,6 +512,10 @@
 
 .asset-track-analysis-grid.is-three {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.asset-track-analysis-grid.asset-track-anomaly-grid {
+  grid-template-columns: minmax(220px, 0.7fr) minmax(440px, 1.3fr);
 }
 
 .asset-track-analysis-panel {
@@ -524,25 +544,47 @@
   border-bottom: 1px solid var(--background-modifier-border);
 }
 
-.asset-track-change-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
+.asset-track-big-ticket-panel table {
+  min-width: 0;
 }
 
-.asset-track-change-list span {
-  padding: 4px 8px;
-  border-radius: var(--radius-s);
-  background: var(--background-primary);
+.asset-track-big-ticket-panel th:last-child,
+.asset-track-big-ticket-panel td:last-child {
+  white-space: nowrap;
+  text-align: right;
 }
 
-.asset-track-change-list .is-growth {
-  color: #d94f45;
+.asset-track-anomaly-panel .asset-track-table-scroll {
+  overflow-x: hidden;
 }
 
-.asset-track-change-list .is-decline {
-  color: #2ca58d;
+.asset-track-anomaly-panel table {
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.asset-track-anomaly-panel th,
+.asset-track-anomaly-panel td {
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  vertical-align: middle;
+}
+
+.asset-track-anomaly-panel th:first-child,
+.asset-track-anomaly-panel td:first-child {
+  width: 22%;
+}
+
+.asset-track-anomaly-panel th:nth-child(2),
+.asset-track-anomaly-panel td:nth-child(2) {
+  width: 24%;
+}
+
+.asset-track-anomaly-panel th:last-child,
+.asset-track-anomaly-panel td:last-child {
+  width: 54%;
 }
 
 .asset-track-analysis-empty {
@@ -558,7 +600,14 @@
 @media (max-width: 1000px) {
   .asset-track-analysis-cards,
   .asset-track-analysis-grid,
-  .asset-track-analysis-grid.is-three {
+  .asset-track-analysis-grid.is-three,
+  .asset-track-analysis-grid.asset-track-anomaly-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .asset-track-analysis-grid.asset-track-anomaly-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

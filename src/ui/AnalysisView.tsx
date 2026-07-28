@@ -21,11 +21,13 @@ import type {
   CurrentAsset,
   MonthWorkspace
 } from "../types";
-import type { AssetTrackApi } from "../services/AssetTrackApi";
+import type { AssetTrackService } from "../services/AssetTrackService";
 import {
+  buildAnomalyDisplayRows,
   changeTone,
   INFLOW_COLOR,
   OUTFLOW_COLOR,
+  reconciliationStatus,
   sampleAnnualRows,
   savingsColor
 } from "./analysisModel";
@@ -61,6 +63,13 @@ function percent(value: unknown): string {
   return Number.isFinite(parsed) ? `${parsed.toFixed(1)}%` : "—";
 }
 
+function signed(value: unknown, formatter: (input: unknown) => string): string {
+  if (value === null || value === undefined || value === "") return "—";
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return "—";
+  return `${parsed > 0 ? "+" : ""}${formatter(parsed)}`;
+}
+
 function axis(value: unknown): string {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return "—";
@@ -71,14 +80,24 @@ function axis(value: unknown): string {
 function Cards({
   items
 }: {
-  items: Array<{ label: string; value: string; tone?: "inflow" | "outflow" }>;
+  items: Array<{
+    label: string;
+    value: string;
+    tone?: "inflow" | "outflow";
+    suffix?: string;
+  }>;
 }) {
   return (
     <div className="asset-track-analysis-cards">
       {items.map((item) => (
         <div className={`asset-track-analysis-card ${item.tone ?? ""}`} key={item.label}>
           <span>{item.label}</span>
-          <strong>{item.value}</strong>
+          <strong>
+            {item.value}
+            {item.suffix ? (
+              <small className="asset-track-analysis-card-suffix">（{item.suffix}）</small>
+            ) : null}
+          </strong>
         </div>
       ))}
     </div>
@@ -106,6 +125,73 @@ function Empty({ text }: { text: string }) {
   return <div className="asset-track-analysis-empty">{text}</div>;
 }
 
+interface ComparisonTickProps {
+  x?: number;
+  y?: number;
+  payload?: { value?: string };
+  rows: Array<{ category: string; delta: number }>;
+}
+
+function ComparisonCategoryTick({
+  x = 0,
+  y = 0,
+  payload,
+  rows
+}: ComparisonTickProps) {
+  const category = String(payload?.value ?? "");
+  const row = rows.find((item) => item.category === category);
+  const delta = row?.delta ?? 0;
+  const color = delta > 0 ? INFLOW : delta < 0 ? OUTFLOW : "var(--text-muted)";
+  return (
+    <text
+      x={x - 8}
+      y={y}
+      dominantBaseline="central"
+      textAnchor="end"
+      fill="var(--text-normal)"
+      fontSize={12}
+    >
+      <tspan>{category}</tspan>
+      <tspan dx={6} fill={color}>{signed(delta, money)}</tspan>
+    </text>
+  );
+}
+
+interface ComparisonBarLabelProps {
+  x?: number | string;
+  y?: number | string;
+  width?: number | string;
+  height?: number | string;
+  value?: number | string;
+  prefix: "上月" | "本月";
+  color: string;
+}
+
+function ComparisonBarLabel({
+  x = 0,
+  y = 0,
+  width = 0,
+  height = 0,
+  value,
+  prefix,
+  color
+}: ComparisonBarLabelProps) {
+  const labelX = Number(x) + Number(width) + 8;
+  const labelY = Number(y) + Number(height) / 2;
+  return (
+    <text
+      x={labelX}
+      y={labelY}
+      dominantBaseline="central"
+      textAnchor="start"
+      fill={color}
+      fontSize={12}
+    >
+      {`${prefix} ${money(value)}`}
+    </text>
+  );
+}
+
 export function AnalysisView({
   api,
   months,
@@ -115,7 +201,7 @@ export function AnalysisView({
   onModeChange,
   dataVersion
 }: {
-  api: AssetTrackApi;
+  api: AssetTrackService;
   months: string[];
   month: string;
   onMonthChange: (month: string) => void;
@@ -180,7 +266,7 @@ function HomeAnalysis({
   api,
   dataVersion
 }: {
-  api: AssetTrackApi;
+  api: AssetTrackService;
   dataVersion: number;
 }) {
   const [state, setState] = useState<
@@ -266,7 +352,7 @@ function AnnualAnalysis({
   year,
   dataVersion
 }: {
-  api: AssetTrackApi;
+  api: AssetTrackService;
   year: string;
   dataVersion: number;
 }) {
@@ -416,7 +502,7 @@ function MonthlyAnalysis({
   month,
   dataVersion
 }: {
-  api: AssetTrackApi;
+  api: AssetTrackService;
   month: string;
   dataVersion: number;
 }) {
@@ -452,6 +538,7 @@ function MonthlyAnalysis({
     : [];
   const categories = overview.category_summary ?? [];
   const comparison = overview.category_comparison;
+  const comparisonRows = comparison?.rows ?? [];
   return (
     <>
       <div className="asset-track-analysis-heading">
@@ -472,6 +559,18 @@ function MonthlyAnalysis({
             ? "不可比较"
             : money(overview.metrics.asset_delta),
           tone: changeTone(overview.metrics.asset_delta)
+        },
+        {
+          label: "对账差额",
+          value: overview.reconciliation?.available
+            ? money(overview.reconciliation.discrepancy)
+            : "不可比较",
+          tone: overview.reconciliation?.available
+            ? changeTone(overview.reconciliation.discrepancy)
+            : undefined,
+          suffix: overview.reconciliation?.available
+            ? reconciliationStatus(overview.reconciliation.discrepancy)
+            : undefined
         }
       ]} />
       <div className="asset-track-analysis-grid">
@@ -489,6 +588,26 @@ function MonthlyAnalysis({
             <div><span>市值</span><strong>{money(overview.investment?.market_value)}</strong></div>
             <div><span>流动现金</span><strong>{money(overview.investment?.cash_balance)}</strong></div>
             <div><span>收益率</span><strong>{percent(overview.investment?.roi_percent)}</strong></div>
+            <div>
+              <span>对比上月</span>
+              <strong className={
+                (overview.investment?.comparison.amount_delta ?? 0) > 0
+                  ? "is-growth"
+                  : (overview.investment?.comparison.amount_delta ?? 0) < 0
+                    ? "is-decline"
+                    : ""
+              }>
+                {overview.investment?.comparison.available
+                  ? `${signed(
+                    overview.investment.comparison.amount_delta,
+                    money
+                  )}（${signed(
+                    overview.investment.comparison.percent_delta,
+                    percent
+                  )}）`
+                  : "不可比较"}
+              </strong>
+            </div>
           </div>
         </ChartPanel>
       </div>
@@ -501,60 +620,50 @@ function MonthlyAnalysis({
         />
       </div>
       <ChartPanel title={`分类与上月对比${comparison?.previous_month ? `（${comparison.previous_month}）` : ""}`}>
-        {comparison?.available && comparison.rows.length ? (
-          <ResponsiveContainer width="100%" height={Math.max(300, comparison.rows.length * 34)}>
-            <ComposedChart layout="vertical" data={comparison.rows}>
-              <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-              <XAxis type="number" tickFormatter={axis} />
-              <YAxis type="category" dataKey="category" width={80} />
+        {comparison?.available && comparisonRows.length ? (
+          <ResponsiveContainer width="100%" height={Math.max(300, comparisonRows.length * 48)}>
+            <ComposedChart
+              layout="vertical"
+              data={comparisonRows}
+              margin={{ top: 8, right: 150, bottom: 8, left: 12 }}
+            >
+              <XAxis type="number" hide />
+              <YAxis
+                type="category"
+                dataKey="category"
+                width={190}
+                tick={<ComparisonCategoryTick rows={comparisonRows} />}
+              />
               <Tooltip formatter={(value: number | string) => money(value)} />
-              <Legend />
-              <Bar dataKey="previous" name="上月" fill="#A8A8B3" />
-              <Bar dataKey="current" name="本月" fill={PURPLE} />
+              <Bar
+                dataKey="previous"
+                name="上月"
+                fill="#A8A8B3"
+                label={
+                  <ComparisonBarLabel
+                    prefix="上月"
+                    color="var(--text-muted)"
+                  />
+                }
+              />
+              <Bar
+                dataKey="current"
+                name="本月"
+                fill={PURPLE}
+                label={
+                  <ComparisonBarLabel
+                    prefix="本月"
+                    color="var(--text-normal)"
+                  />
+                }
+              />
             </ComposedChart>
           </ResponsiveContainer>
         ) : <Empty text="严格上一个自然月没有可比较数据。" />}
-        {comparison?.available && comparison.rows.length > 0 && (
-          <div className="asset-track-change-list">
-            {comparison.rows.map((row) => (
-              <span
-                key={row.category}
-                className={
-                  row.delta > 0 ? "is-growth" : row.delta < 0 ? "is-decline" : ""
-                }
-              >
-                {row.category} {row.delta > 0 ? "+" : ""}{money(row.delta)}
-              </span>
-            ))}
-          </div>
-        )}
       </ChartPanel>
-      <ChartPanel title="月度对账">
-        {overview.reconciliation?.available ? (
-          <>
-            <Cards items={[
-              { label: "流水净支出", value: money(overview.reconciliation.actual.net_expense) },
-              { label: "理论净支出", value: money(overview.reconciliation.theoretical.net_expense) },
-              {
-                label: "对账差额",
-                value: money(overview.reconciliation.discrepancy),
-                tone: changeTone(overview.reconciliation.discrepancy)
-              }
-            ]} />
-            <p>{overview.reconciliation.explanation.summary}</p>
-          </>
-        ) : <Empty text="首月或月份不连续，无法进行对账。" />}
-      </ChartPanel>
-      <div className="asset-track-analysis-grid">
-        <RecordPanel title="大额支出" rows={overview.big_tickets ?? []} />
-        <RecordPanel
-          title="异常与变化"
-          rows={[
-            ...(overview.anomalies?.category_changes ?? []),
-            ...(overview.anomalies?.new_big_items ?? []),
-            ...(overview.anomalies?.missing_periodic ?? [])
-          ]}
-        />
+      <div className="asset-track-analysis-grid asset-track-anomaly-grid">
+        <BigTicketPanel rows={overview.big_tickets ?? []} />
+        <AnomalyPanel anomalies={overview.anomalies} />
       </div>
     </>
   );
@@ -586,32 +695,64 @@ function PiePanel({
   );
 }
 
-function RecordPanel({
-  title,
+function BigTicketPanel({
   rows
 }: {
-  title: string;
-  rows: Array<Record<string, unknown>>;
+  rows: Array<{ product: string; category: string; amount: number }>;
 }) {
-  const columns = [...new Set(rows.flatMap((row) => Object.keys(row)))].slice(0, 5);
   return (
-    <ChartPanel title={title}>
+    <ChartPanel title="大额支出" className="asset-track-big-ticket-panel">
       {rows.length ? (
         <div className="asset-track-table-scroll">
           <table>
-            <thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead>
+            <thead>
+              <tr><th scope="col">商品</th><th scope="col">金额</th></tr>
+            </thead>
             <tbody>
               {rows.map((row, index) => (
-                <tr key={index}>
-                  {columns.map((column) => (
-                    <td key={column}>{typeof row[column] === "number" ? money(row[column]) : String(row[column] ?? "")}</td>
-                  ))}
+                <tr key={`${row.product}-${index}`}>
+                  <td>{row.product || "未填写商品"}</td>
+                  <td>{money(row.amount)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       ) : <Empty text="暂无记录。" />}
+    </ChartPanel>
+  );
+}
+
+function AnomalyPanel({
+  anomalies
+}: {
+  anomalies: MonthWorkspace["overview"]["anomalies"];
+}) {
+  const rows = buildAnomalyDisplayRows(anomalies);
+  return (
+    <ChartPanel title="异常与变化" className="asset-track-anomaly-panel">
+      {rows.length ? (
+        <div className="asset-track-table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">分类</th>
+                <th scope="col">金额</th>
+                <th scope="col">异常情况</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.category}>
+                  <td>{row.category}</td>
+                  <td>{money(row.amount)}</td>
+                  <td>{row.situation}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : <Empty text="暂无达到阈值的异常变化。" />}
     </ChartPanel>
   );
 }

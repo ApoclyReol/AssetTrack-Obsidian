@@ -9,7 +9,6 @@ import {
   type ReactNode
 } from "react";
 import { Notice } from "obsidian";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   EDITOR_MODES,
   type AnalysisMode,
@@ -27,10 +26,14 @@ import type {
   RuleCandidate,
   Transaction
 } from "../types";
-import { ApiError, type AssetTrackApi } from "../services/AssetTrackApi";
+import {
+  AssetTrackError,
+  type AssetTrackService
+} from "../services/AssetTrackService";
 import { AnalysisView } from "./AnalysisView";
 import {
   createTransactionDraft,
+  transactionBlockNumber,
   transactionIndexes,
   TRANSACTION_SECTIONS
 } from "./analysisModel";
@@ -42,7 +45,7 @@ import {
 } from "./transactionGrouping";
 
 interface Props {
-  api: AssetTrackApi;
+  api: AssetTrackService;
   initialMode: EditorMode;
   initialAnalysisMode: AnalysisMode;
   initialMonth?: string;
@@ -74,8 +77,16 @@ const CATEGORY_RAINBOW = [
   "#1e88e5", "#3949ab", "#5e35b1", "#8e24aa", "#d81b60"
 ];
 
+function candidateKey(candidate: RuleCandidate): string {
+  return [
+    candidate.transaction_type,
+    normalizeProduct(candidate.counterparty ?? ""),
+    normalizeProduct(candidate.product)
+  ].join("\u0000");
+}
+
 function messageFor(error: unknown): string {
-  if (error instanceof ApiError && error.status === 409) {
+  if (error instanceof AssetTrackError && error.status === 409) {
     const detail = error.detail as { expected?: number; actual?: number };
     return `revision 冲突：草稿基于 ${detail.expected ?? "—"}，当前数据库为 ${
       detail.actual ?? "—"
@@ -96,7 +107,7 @@ function clone<T>(data: T): T {
 function readFileBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(reader.error ?? new Error("CSV 读取失败"));
+    reader.onerror = () => reject(reader.error ?? new Error("账单文件读取失败"));
     reader.onload = () => {
       const bytes = new Uint8Array(reader.result as ArrayBuffer);
       let binary = "";
@@ -245,7 +256,7 @@ export function AssetTrackEditorApp({
   if (initializing) {
     return (
       <div className="asset-track-app asset-track-boot">
-        {showPreparing && <span>正在准备 Asset Track…</span>}
+        {showPreparing && <span>正在读取 Asset Track 数据…</span>}
       </div>
     );
   }
@@ -255,7 +266,7 @@ export function AssetTrackEditorApp({
       <header className="asset-track-toolbar">
         <div>
           <strong>Asset Track</strong>
-          <span>SQLite 事实 · Python 计算 · 实时分析</span>
+          <span>SQLite 事实 · TypeScript 计算 · 实时分析</span>
         </div>
         <nav>
           {EDITOR_MODES.map((item) => (
@@ -368,7 +379,7 @@ function MonthEditor({
   getCsvMapping,
   saveCsvMapping
 }: {
-  api: AssetTrackApi;
+  api: AssetTrackService;
   month: string;
   months: string[];
   onDeleted: (next: string) => Promise<void>;
@@ -428,7 +439,7 @@ function MonthEditor({
               && category.transaction_type === candidate.transaction_type
           );
           return [
-            `${candidate.transaction_type}\u0000${normalizeProduct(candidate.product)}`,
+            candidateKey(candidate),
             definition?.category_key ?? ""
           ];
         })
@@ -453,7 +464,7 @@ function MonthEditor({
     setCandidateCategories((current) => ({
       ...current,
       ...Object.fromEntries(result.rows.map((candidate) => {
-        const key = `${candidate.transaction_type}\u0000${normalizeProduct(candidate.product)}`;
+        const key = candidateKey(candidate);
         const definition = categories.find(
           (category) =>
             category.name === candidate.category
@@ -465,7 +476,7 @@ function MonthEditor({
   };
   const createRule = async (candidate: RuleCandidate) => {
     if (!draft) return;
-    const key = `${candidate.transaction_type}\u0000${normalizeProduct(candidate.product)}`;
+    const key = candidateKey(candidate);
     const categoryKey = candidateCategories[key] ?? "";
     const category = categories.find(
       (item) => item.category_key === categoryKey
@@ -485,6 +496,7 @@ function MonthEditor({
         ...current.rows,
         {
           transaction_type: candidate.transaction_type,
+          counterparty: candidate.counterparty,
           product: candidate.product,
           category_key: category.category_key,
           category: category.name
@@ -578,7 +590,7 @@ function MonthEditor({
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    setState({ kind: "pending", message: "解析 CSV…" });
+    setState({ kind: "pending", message: "解析账单…" });
     try {
       const contentBase64 = await readFileBase64(file);
       const inspection = await api.inspectCsv(
@@ -684,14 +696,14 @@ function MonthEditor({
             className="mod-cta"
             disabled={state.kind === "pending"}
             onClick={() => csvInputRef.current?.click()}
-            title="支持必需的商品、收支、金额，以及可选的日期、分类列"
+            title="支持 CSV、XLSX、XLS；导入前需要确认字段和收支映射"
           >
-            导入 CSV
+            导入账单
           </button>
           <input
             ref={csvInputRef}
             type="file"
-            accept=".csv,text/csv"
+            accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             hidden
             onChange={importCsv}
           />
@@ -735,7 +747,9 @@ function MonthEditor({
         </section>
       )}
       <Status state={state} />
-      {issues.length > 0 && <IssueList issues={issues} />}
+      {issues.length > 0 && (
+        <IssueList issues={issues} rows={draft.transactions} />
+      )}
       <Section title="现金账户">
         <div className="asset-track-fields">
           {draft.cash_accounts.map((account, index) => (
@@ -834,7 +848,7 @@ function MonthEditor({
         />
       )}
       {ruleCandidates.rows.length > 0 && (
-        <Section title="潜在商品规则">
+        <Section title="潜在交易规则">
           <p>
             按历史记录和当前草稿统计；增量导入不去重，重复账单也会计入出现次数。
           </p>
@@ -843,6 +857,7 @@ function MonthEditor({
               <thead>
                 <tr>
                   <th>收支</th>
+                  <th>交易对方</th>
                   <th><SortButton label="商品" field="product" sort={candidateSort} onSort={setCandidateSort} /></th>
                   <th><SortButton label="出现次数" field="occurrences" sort={candidateSort} onSort={setCandidateSort} /></th>
                   <th><SortButton label="月份" field="months_count" sort={candidateSort} onSort={setCandidateSort} /></th>
@@ -853,10 +868,11 @@ function MonthEditor({
               </thead>
               <tbody>
                 {candidateView.map(({ row: candidate }) => {
-                  const key = `${candidate.transaction_type}\u0000${normalizeProduct(candidate.product)}`;
+                  const key = candidateKey(candidate);
                   return (
                     <tr key={key}>
                       <td>{candidate.transaction_type}</td>
+                      <td>{candidate.counterparty || "—"}</td>
                       <td title={candidate.variants.join("、")}>{candidate.product}</td>
                       <td>{candidate.occurrences}</td>
                       <td>{candidate.months_count}</td>
@@ -960,19 +976,14 @@ function TransactionTable({
       sortRows(visibleIndexes, sort, (index, key) => rows[index][key as keyof Transaction]),
     [rows, sort, visibleIndexes]
   );
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const virtualizer = useVirtualizer({
-    count: sorted.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => 42,
-    overscan: 12
-  });
   return (
     <Section title={`${title}（${visibleIndexes.length} 行）`}>
       <div className="asset-track-virtual-table">
         <div className="asset-track-grid asset-track-grid-head">
+          <span>行号</span>
           {[
             ["transaction_date", "日期"],
+            ["counterparty", "交易对方"],
             ["category", "分类"],
             ["product", "商品"],
             ["amount", "金额"]
@@ -981,14 +992,8 @@ function TransactionTable({
           ))}
           <span />
         </div>
-        <div
-          className="asset-track-virtual-body"
-          ref={scrollRef}
-          style={{ height: Math.min(560, Math.max(42, sorted.length * 42)) }}
-        >
-          <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
-            {virtualizer.getVirtualItems().map((item) => {
-              const originalIndex = sorted[item.index].row;
+        <div className="asset-track-virtual-body">
+          {sorted.map(({ row: originalIndex }) => {
               const row = rows[originalIndex];
               const special = ["代付", "加仓", "提现"].includes(row.type);
               const options = categories.filter(
@@ -1000,15 +1005,20 @@ function TransactionTable({
                 <div
                   className="asset-track-grid"
                   key={row.id ?? row.client_id ?? originalIndex}
-                  style={{
-                    position: "absolute",
-                    transform: `translateY(${item.start}px)`,
-                    width: "100%"
-                  }}
                 >
+                  <span className="asset-track-row-number">
+                    {transactionBlockNumber(rows, originalIndex)}
+                  </span>
                   <input
                     value={row.transaction_date}
                     onChange={(event) => onUpdate(originalIndex, "transaction_date", event.target.value)}
+                  />
+                  <input
+                    value={row.counterparty ?? ""}
+                    placeholder="交易对方"
+                    onChange={(event) =>
+                      onUpdate(originalIndex, "counterparty", event.target.value)
+                    }
                   />
                   <select
                     disabled={special}
@@ -1037,7 +1047,6 @@ function TransactionTable({
                 </div>
               );
             })}
-          </div>
         </div>
       </div>
       <button onClick={onAdd}>新增{title}流水</button>
@@ -1130,6 +1139,13 @@ function TransactionSummaryTable({
                                 value={item.transaction_date}
                                 onChange={(event) =>
                                   onUpdate(index, "transaction_date", event.target.value)
+                                }
+                              />
+                              <input
+                                value={item.counterparty ?? ""}
+                                placeholder="交易对方"
+                                onChange={(event) =>
+                                  onUpdate(index, "counterparty", event.target.value)
                                 }
                               />
                               <input
@@ -1407,7 +1423,7 @@ function RulesEditor({
   onDirty,
   onSaved
 }: {
-  api: AssetTrackApi;
+  api: AssetTrackService;
   onDirty: (dirty: boolean) => void;
   onSaved: () => void;
 }) {
@@ -1439,7 +1455,7 @@ function RulesEditor({
       setCategories(categoryResult);
       await load();
       onSaved();
-      setState({ kind: "success", message: "分类和商品匹配规则已保存。" });
+      setState({ kind: "success", message: "分类和交易匹配规则已保存。" });
     } catch (error) {
       setState({ kind: "error", message: messageFor(error) });
     }
@@ -1459,7 +1475,7 @@ function RulesEditor({
       <section className="asset-track-month-header">
         <div>
           <h2>规则</h2>
-          <span>分类定义与商品匹配</span>
+          <span>分类定义与交易对方／商品匹配</span>
         </div>
         <button className="mod-cta" onClick={() => void saveAll()}>
           整体保存
@@ -1543,11 +1559,12 @@ function RulesEditor({
           }); onDirty(true);
         }}>新增分类</button>
       </Section>
-      <Section title="商品匹配规则">
+      <Section title="交易匹配规则">
         <div className="asset-track-table-scroll">
           <table>
             <thead><tr>{[
-              ["transaction_type", "收支"], ["product", "商品"],
+              ["transaction_type", "收支"],
+              ["counterparty", "交易对方"], ["product", "商品"],
               ["category", "分类"], ["occurrences", "历史次数"],
               ["last_month", "最近月份"]
             ].map(([field, label]) => <th key={field}>
@@ -1560,6 +1577,10 @@ function RulesEditor({
                   next[index].category_key = ""; next[index].category = "";
                   setRules({ ...rules, rows: next }); onDirty(true);
                 }}><option>支出</option><option>收入</option></select></td>
+                <td><input value={String(row.counterparty ?? "")} onChange={(event) => {
+                  const next = clone(rules.rows); next[index].counterparty = event.target.value;
+                  setRules({ ...rules, rows: next }); onDirty(true);
+                }} /></td>
                 <td><input value={String(row.product ?? "")} onChange={(event) => {
                   const next = clone(rules.rows); next[index].product = event.target.value;
                   setRules({ ...rules, rows: next }); onDirty(true);
@@ -1584,7 +1605,7 @@ function RulesEditor({
         <button onClick={() => {
           const definition = categories.rows.find((row) => row.is_active && row.transaction_type === "支出");
           setRules({ ...rules, rows: [...rules.rows, {
-            transaction_type: "支出", product: "",
+            transaction_type: "支出", counterparty: "", product: "",
             category_key: definition?.category_key ?? "", category: definition?.name ?? ""
           }] }); onDirty(true);
         }}>新增规则</button>
@@ -1593,17 +1614,28 @@ function RulesEditor({
   );
 }
 
-function IssueList({ issues }: { issues: Array<Record<string, unknown>> }) {
+function IssueList({
+  issues,
+  rows
+}: {
+  issues: Array<Record<string, unknown>>;
+  rows: Transaction[];
+}) {
   return (
     <div className="asset-track-issues">
       <strong>必须先修正以下问题：</strong>
       <ul>
-        {issues.map((issue, index) => (
-          <li key={index}>
-            {String(issue.type ?? "流水")}第 {Number(issue.row_index ?? 0) + 1} 行／
-            {String(issue.field ?? "字段")}／{String(issue.issue ?? "无效")}
-          </li>
-        ))}
+        {issues.map((issue, index) => {
+          const globalIndex = Number(issue.row_index ?? 0);
+          const type = String(issue.type ?? rows[globalIndex]?.type ?? "流水");
+          const blockRow = transactionBlockNumber(rows, globalIndex);
+          return (
+            <li key={index}>
+              {type}第 {Math.max(1, blockRow)} 行／
+              {String(issue.field ?? "字段")}／{String(issue.issue ?? "无效")}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
