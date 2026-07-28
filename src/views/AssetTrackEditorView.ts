@@ -99,7 +99,17 @@ export class AssetTrackEditorView extends ItemView {
           this.app.workspace.requestSaveLayout();
         },
         subscribeDataChanges: (listener: () => void) =>
-          this.plugin.onDataChange(listener)
+          this.plugin.onDataChange(listener),
+        getCsvMapping: (signature: string) =>
+          this.plugin.csvMapping(signature)?.mapping,
+        saveCsvMapping: (
+          header_signature: string,
+          mapping: import("../types").CsvColumnMapping
+        ) => this.plugin.saveCsvMapping({
+          header_signature,
+          mapping,
+          updated_at: new Date().toISOString()
+        })
       })
     );
   }

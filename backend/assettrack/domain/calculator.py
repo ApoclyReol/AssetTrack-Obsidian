@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from typing import Dict, Any, Optional, List
-import pandas as pd
+from assettrack.domain.lazy_pandas import pd
 from loguru import logger
 
 from assettrack.infrastructure.sqlite_manager import db

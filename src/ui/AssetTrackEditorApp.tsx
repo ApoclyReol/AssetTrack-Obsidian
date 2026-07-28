@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  Fragment,
   type ChangeEvent,
   type ReactNode
 } from "react";
@@ -16,9 +17,14 @@ import {
 } from "../constants";
 import type {
   CategoryDefinition,
+  CsvColumnMapping,
+  CsvImportPreview,
+  CsvInspection,
   FixedAsset,
+  ImportMode,
   MonthCreationPolicy,
   MonthWorkspace,
+  RuleCandidate,
   Transaction
 } from "../types";
 import { ApiError, type AssetTrackApi } from "../services/AssetTrackApi";
@@ -28,6 +34,12 @@ import {
   transactionIndexes,
   TRANSACTION_SECTIONS
 } from "./analysisModel";
+import { CsvImportDialog } from "./CsvImportDialog";
+import {
+  groupTransactions,
+  normalizeProduct,
+  type TransactionGroup
+} from "./transactionGrouping";
 
 interface Props {
   api: AssetTrackApi;
@@ -41,6 +53,11 @@ interface Props {
     month: string
   ) => void;
   subscribeDataChanges: (listener: () => void) => () => void;
+  getCsvMapping: (signature: string) => CsvColumnMapping | undefined;
+  saveCsvMapping: (
+    signature: string,
+    mapping: CsvColumnMapping
+  ) => Promise<void>;
 }
 
 type OperationState =
@@ -149,7 +166,9 @@ export function AssetTrackEditorApp({
   initialMonth,
   onDirtyChange,
   onStateChange,
-  subscribeDataChanges
+  subscribeDataChanges,
+  getCsvMapping,
+  saveCsvMapping
 }: Props) {
   const [mode, setMode] = useState<EditorMode>(initialMode);
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>(initialAnalysisMode);
@@ -158,6 +177,8 @@ export function AssetTrackEditorApp({
   const [month, setMonth] = useState(initialMonth ?? "");
   const [dirty, setDirty] = useState(false);
   const [dataVersion, setDataVersion] = useState(0);
+  const [initializing, setInitializing] = useState(true);
+  const [showPreparing, setShowPreparing] = useState(false);
   useEffect(() => setMode(initialMode), [initialMode]);
   useEffect(() => setAnalysisMode(initialAnalysisMode), [initialAnalysisMode]);
   useEffect(() => {
@@ -165,15 +186,27 @@ export function AssetTrackEditorApp({
   }, [initialMonth]);
 
   const refreshMonths = useCallback(async () => {
-    const response = await api.months();
-    setMonths(response.months);
-    setMonthPolicy(response);
-    setMonth((current) => current || initialMonth || response.months.at(-1) || "");
+    try {
+      const response = await api.months();
+      setMonths(response.months);
+      setMonthPolicy(response);
+      setMonth((current) => current || initialMonth || response.months.at(-1) || "");
+    } finally {
+      setInitializing(false);
+    }
   }, [api, initialMonth]);
 
   useEffect(() => {
     void refreshMonths().catch((error) => new Notice(messageFor(error)));
   }, [refreshMonths]);
+  useEffect(() => {
+    if (!initializing) {
+      setShowPreparing(false);
+      return;
+    }
+    const timeout = window.setTimeout(() => setShowPreparing(true), 500);
+    return () => window.clearTimeout(timeout);
+  }, [initializing]);
   useEffect(
     () => subscribeDataChanges(() => {
       setDataVersion((value) => value + 1);
@@ -208,6 +241,14 @@ export function AssetTrackEditorApp({
     setDataVersion((value) => value + 1);
     new Notice(`${target} 已创建`);
   };
+
+  if (initializing) {
+    return (
+      <div className="asset-track-app asset-track-boot">
+        {showPreparing && <span>正在准备 Asset Track…</span>}
+      </div>
+    );
+  }
 
   return (
     <div className="asset-track-app">
@@ -276,6 +317,8 @@ export function AssetTrackEditorApp({
             setDataVersion((value) => value + 1);
           }}
           onDirty={setDirty}
+          getCsvMapping={getCsvMapping}
+          saveCsvMapping={saveCsvMapping}
         />
       )}
       {mode === "transactions" && !month && <EmptyState text="尚无月份，请创建第一个月份。" />}
@@ -321,7 +364,9 @@ function MonthEditor({
   months,
   onDeleted,
   onSaved,
-  onDirty
+  onDirty,
+  getCsvMapping,
+  saveCsvMapping
 }: {
   api: AssetTrackApi;
   month: string;
@@ -329,6 +374,11 @@ function MonthEditor({
   onDeleted: (next: string) => Promise<void>;
   onSaved: () => Promise<void>;
   onDirty: (dirty: boolean) => void;
+  getCsvMapping: (signature: string) => CsvColumnMapping | undefined;
+  saveCsvMapping: (
+    signature: string,
+    mapping: CsvColumnMapping
+  ) => Promise<void>;
 }) {
   const [base, setBase] = useState<MonthWorkspace | null>(null);
   const [draft, setDraft] = useState<MonthWorkspace | null>(null);
@@ -337,7 +387,29 @@ function MonthEditor({
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [state, setState] = useState<OperationState>({ kind: "idle" });
+  const [transactionView, setTransactionView] = useState<"detail" | "summary">("detail");
+  const [summarySort, setSummarySort] = useState<SortState>({
+    key: "count",
+    direction: "desc"
+  });
+  const [expandedGroup, setExpandedGroup] = useState("");
+  const [ruleCandidates, setRuleCandidates] = useState<{
+    rules_revision: number;
+    rows: RuleCandidate[];
+  }>({ rules_revision: 0, rows: [] });
+  const [candidateSort, setCandidateSort] = useState<SortState>({
+    key: "occurrences",
+    direction: "desc"
+  });
+  const [candidateCategories, setCandidateCategories] = useState<
+    Record<string, string>
+  >({});
   const csvInputRef = useRef<HTMLInputElement>(null);
+  const [csvSource, setCsvSource] = useState<{
+    filename: string;
+    contentBase64: string;
+    inspection: CsvInspection;
+  } | null>(null);
 
   const load = useCallback(async () => {
     setState({ kind: "pending", message: "加载月份…" });
@@ -346,6 +418,21 @@ function MonthEditor({
       setBase(clone(data));
       setDraft(clone(data));
       setCategories(categoryData.rows);
+      const candidateData = await api.ruleCandidates(month, data.transactions);
+      setRuleCandidates(candidateData);
+      setCandidateCategories(Object.fromEntries(
+        candidateData.rows.map((candidate) => {
+          const definition = categoryData.rows.find(
+            (category) =>
+              category.name === candidate.category
+              && category.transaction_type === candidate.transaction_type
+          );
+          return [
+            `${candidate.transaction_type}\u0000${normalizeProduct(candidate.product)}`,
+            definition?.category_key ?? ""
+          ];
+        })
+      ));
       setIssues([]);
       onDirty(false);
       setState({ kind: "idle" });
@@ -359,6 +446,60 @@ function MonthEditor({
     setDraft(next);
     setIssues([]);
     onDirty(JSON.stringify(next) !== JSON.stringify(base));
+  };
+  const refreshRuleCandidates = async (rows: Transaction[]) => {
+    const result = await api.ruleCandidates(month, rows);
+    setRuleCandidates(result);
+    setCandidateCategories((current) => ({
+      ...current,
+      ...Object.fromEntries(result.rows.map((candidate) => {
+        const key = `${candidate.transaction_type}\u0000${normalizeProduct(candidate.product)}`;
+        const definition = categories.find(
+          (category) =>
+            category.name === candidate.category
+            && category.transaction_type === candidate.transaction_type
+        );
+        return [key, current[key] || definition?.category_key || ""];
+      }))
+    }));
+  };
+  const createRule = async (candidate: RuleCandidate) => {
+    if (!draft) return;
+    const key = `${candidate.transaction_type}\u0000${normalizeProduct(candidate.product)}`;
+    const categoryKey = candidateCategories[key] ?? "";
+    const category = categories.find(
+      (item) => item.category_key === categoryKey
+    );
+    if (!category) {
+      setState({ kind: "error", message: "请先为规则建议选择分类。" });
+      return;
+    }
+    setState({ kind: "pending", message: "正在创建规则并应用到草稿…" });
+    try {
+      const current = await api.rules();
+      if (current.revision !== ruleCandidates.rules_revision) {
+        await refreshRuleCandidates(draft.transactions);
+        throw new Error("规则已在其他位置变化，建议已刷新；流水草稿未丢失。");
+      }
+      await api.saveRules(current.revision, [
+        ...current.rows,
+        {
+          transaction_type: candidate.transaction_type,
+          product: candidate.product,
+          category_key: category.category_key,
+          category: category.name
+        }
+      ]);
+      const applied = await api.applyRules(month, draft.transactions);
+      mark({ ...draft, transactions: applied.proposed_rows });
+      await refreshRuleCandidates(applied.proposed_rows);
+      setState({
+        kind: "success",
+        message: `已创建“${candidate.product}”规则并应用到当前草稿。`
+      });
+    } catch (error) {
+      setState({ kind: "error", message: messageFor(error) });
+    }
   };
   if (!draft) return <Status state={state} />;
 
@@ -396,6 +537,11 @@ function MonthEditor({
     );
     mark({ ...draft, fixed_assets: rows });
   };
+  const candidateView = sortRows(
+    ruleCandidates.rows,
+    candidateSort,
+    (candidate, key) => candidate[key as keyof RuleCandidate]
+  );
 
   const save = async () => {
     setState({ kind: "pending", message: "执行严格质检…" });
@@ -434,32 +580,43 @@ function MonthEditor({
     if (!file) return;
     setState({ kind: "pending", message: "解析 CSV…" });
     try {
-      const response = await api.importCsv(month, file.name, await readFileBase64(file));
-      const choice = window.prompt(
-        `识别 ${response.rows.length} 行。类型汇总：${JSON.stringify(
-          response.type_summary
-        )}\n问题 ${response.issues.length} 项。\n请输入“追加”或“替换”：`,
-        "追加"
+      const contentBase64 = await readFileBase64(file);
+      const inspection = await api.inspectCsv(
+        month,
+        file.name,
+        contentBase64
       );
-      if (choice !== "追加" && choice !== "替换") {
-        setState({ kind: "idle" });
-        return;
-      }
-      mark({
-        ...draft,
-        transactions:
-          choice === "追加"
-            ? [...draft.transactions, ...response.rows]
-            : response.rows
-      });
-      setIssues(response.issues as Array<Record<string, unknown>>);
-      setState({
-        kind: "success",
-        message: `已${choice} ${response.rows.length} 行到草稿，尚未写库。`
-      });
+      setCsvSource({ filename: file.name, contentBase64, inspection });
+      setState({ kind: "idle" });
     } catch (error) {
       setState({ kind: "error", message: messageFor(error) });
     }
+  };
+  const applyCsvPreview = async (
+    response: CsvImportPreview,
+    mode: ImportMode,
+    mapping: CsvColumnMapping
+  ) => {
+    if (!csvSource) return;
+    const nextTransactions =
+      mode === "append"
+        ? [...draft.transactions, ...response.rows]
+        : response.rows;
+    mark({
+      ...draft,
+      transactions: nextTransactions
+    });
+    setIssues(response.issues);
+    await saveCsvMapping(csvSource.inspection.header_signature, mapping);
+    await refreshRuleCandidates(nextTransactions);
+    setCsvSource(null);
+    setState({
+      kind: "success",
+      message:
+        mode === "append"
+          ? `已追加全部 ${response.rows.length} 行到草稿；未执行去重，尚未写库。`
+          : `已用 ${response.rows.length} 行覆盖流水草稿，尚未写库。`
+    });
   };
 
   const applyRules = async () => {
@@ -498,6 +655,24 @@ function MonthEditor({
 
   return (
     <main className="asset-track-editor">
+      {csvSource && (
+        <CsvImportDialog
+          inspection={csvSource.inspection}
+          savedMapping={getCsvMapping(
+            csvSource.inspection.header_signature
+          )}
+          onCancel={() => setCsvSource(null)}
+          onPreview={(mapping) =>
+            api.previewMappedCsv(
+              month,
+              csvSource.filename,
+              csvSource.contentBase64,
+              mapping
+            )
+          }
+          onApply={applyCsvPreview}
+        />
+      )}
       <section className="asset-track-month-header">
         <div>
           <h2>{month}</h2>
@@ -582,8 +757,11 @@ function MonthEditor({
       </Section>
       <Section title="理财账户">
         {draft.investment_accounts.map((account, index) => (
-          <div className="asset-track-fields" key={account.account_key}>
-            <strong>{account.name ?? account.account_key}</strong>
+          <div className="asset-track-fields asset-track-investment-row" key={account.account_key}>
+            <div className="asset-track-account-name">
+              <span>账户</span>
+              <strong>{account.name ?? account.account_key}</strong>
+            </div>
             {(["principal", "market_value", "cash_balance"] as const).map((field) => (
               <NumberField
                 key={field}
@@ -602,32 +780,130 @@ function MonthEditor({
           </div>
         ))}
       </Section>
-      {TRANSACTION_SECTIONS.map((title) => (
-        <TransactionTable
-          key={title}
-          title={title}
-          month={month}
+      <section className="asset-track-view-switcher">
+        <strong>流水展示</strong>
+        <button
+          className={transactionView === "detail" ? "is-active" : ""}
+          onClick={() => setTransactionView("detail")}
+        >
+          逐项
+        </button>
+        <button
+          className={transactionView === "summary" ? "is-active" : ""}
+          onClick={() => setTransactionView("summary")}
+        >
+          按商品汇总
+        </button>
+        <span>汇总只影响查看，保存时仍保留每笔流水。</span>
+      </section>
+      {transactionView === "detail" && TRANSACTION_SECTIONS.map((title) => (
+          <TransactionTable
+            key={title}
+            title={title}
+            month={month}
+            rows={draft.transactions}
+            visibleIndexes={transactionIndexes(draft.transactions, title)}
+            categories={categories}
+            onUpdate={updateTransaction}
+            onDelete={(index) =>
+              mark({
+                ...draft,
+                transactions: draft.transactions.filter((_, item) => item !== index)
+              })
+            }
+            onAdd={() => {
+              mark({
+                ...draft,
+                transactions: [
+                  ...draft.transactions,
+                  createTransactionDraft(title, month, categories)
+                ]
+              });
+            }}
+          />
+        ))}
+      {transactionView === "summary" && (
+        <TransactionSummaryTable
           rows={draft.transactions}
-          visibleIndexes={transactionIndexes(draft.transactions, title)}
           categories={categories}
+          sort={summarySort}
+          onSort={setSummarySort}
+          expanded={expandedGroup}
+          onExpanded={setExpandedGroup}
           onUpdate={updateTransaction}
-          onDelete={(index) =>
-            mark({
-              ...draft,
-              transactions: draft.transactions.filter((_, item) => item !== index)
-            })
-          }
-          onAdd={() => {
-            mark({
-              ...draft,
-              transactions: [
-                ...draft.transactions,
-                createTransactionDraft(title, month, categories)
-              ]
-            });
-          }}
         />
-      ))}
+      )}
+      {ruleCandidates.rows.length > 0 && (
+        <Section title="潜在商品规则">
+          <p>
+            按历史记录和当前草稿统计；增量导入不去重，重复账单也会计入出现次数。
+          </p>
+          <div className="asset-track-table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>收支</th>
+                  <th><SortButton label="商品" field="product" sort={candidateSort} onSort={setCandidateSort} /></th>
+                  <th><SortButton label="出现次数" field="occurrences" sort={candidateSort} onSort={setCandidateSort} /></th>
+                  <th><SortButton label="月份" field="months_count" sort={candidateSort} onSort={setCandidateSort} /></th>
+                  <th><SortButton label="最近月份" field="last_month" sort={candidateSort} onSort={setCandidateSort} /></th>
+                  <th>建议分类</th>
+                  <th>置信度</th><th />
+                </tr>
+              </thead>
+              <tbody>
+                {candidateView.map(({ row: candidate }) => {
+                  const key = `${candidate.transaction_type}\u0000${normalizeProduct(candidate.product)}`;
+                  return (
+                    <tr key={key}>
+                      <td>{candidate.transaction_type}</td>
+                      <td title={candidate.variants.join("、")}>{candidate.product}</td>
+                      <td>{candidate.occurrences}</td>
+                      <td>{candidate.months_count}</td>
+                      <td>{candidate.last_month}</td>
+                      <td>
+                        <select
+                          value={candidateCategories[key] ?? ""}
+                          onChange={(event) => setCandidateCategories((current) => ({
+                            ...current,
+                            [key]: event.target.value
+                          }))}
+                        >
+                          <option value="">请选择</option>
+                          {categories.filter(
+                            (category) =>
+                              category.is_active
+                              && category.transaction_type === candidate.transaction_type
+                          ).map((category) => (
+                            <option
+                              key={category.category_key}
+                              value={category.category_key}
+                            >
+                              {category.name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        {(candidate.category_confidence * 100).toFixed(0)}%
+                        {candidate.has_category_conflict ? " · 有冲突" : ""}
+                      </td>
+                      <td>
+                        <button
+                          disabled={state.kind === "pending"}
+                          onClick={() => void createRule(candidate)}
+                        >
+                          创建规则并应用
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+      )}
       <FixedAssetTable
         rows={draft.fixed_assets}
         onUpdate={updateAsset}
@@ -765,6 +1041,140 @@ function TransactionTable({
         </div>
       </div>
       <button onClick={onAdd}>新增{title}流水</button>
+    </Section>
+  );
+}
+
+function TransactionSummaryTable({
+  rows,
+  categories,
+  sort,
+  onSort,
+  expanded,
+  onExpanded,
+  onUpdate
+}: {
+  rows: Transaction[];
+  categories: CategoryDefinition[];
+  sort: SortState;
+  onSort: (sort: SortState) => void;
+  expanded: string;
+  onExpanded: (key: string) => void;
+  onUpdate: (
+    index: number,
+    field: keyof Transaction,
+    value: string
+  ) => void;
+}) {
+  const groups = sortRows(groupTransactions(rows), sort, (group, key) =>
+    group[key as keyof TransactionGroup]
+  );
+  return (
+    <Section title="商品汇总">
+      <div className="asset-track-table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>收支</th>
+              <th><SortButton label="商品" field="product" sort={sort} onSort={onSort} /></th>
+              <th><SortButton label="出现次数" field="count" sort={sort} onSort={onSort} /></th>
+              <th><SortButton label="总金额" field="amount" sort={sort} onSort={onSort} /></th>
+              <th><SortButton label="最近日期" field="lastDate" sort={sort} onSort={onSort} /></th>
+              <th>分类</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {groups.map(({ row: group }) => (
+              <Fragment key={group.key}>
+                <tr>
+                  <td>{group.type}</td>
+                  <td title={group.variants.join("、")}>{group.product}</td>
+                  <td>{group.count}</td>
+                  <td>{group.amount.toFixed(1)}</td>
+                  <td>
+                    {group.firstDate === group.lastDate
+                      ? group.lastDate
+                      : `${group.firstDate} ～ ${group.lastDate}`}
+                  </td>
+                  <td>
+                    {group.categories.length === 0
+                      ? "未分类"
+                      : group.categories.length === 1
+                        ? group.categories[0]
+                        : `${group.categories.length} 个分类（有冲突）`}
+                  </td>
+                  <td>
+                    <button onClick={() =>
+                      onExpanded(expanded === group.key ? "" : group.key)
+                    }>
+                      {expanded === group.key ? "收起" : "展开逐项"}
+                    </button>
+                  </td>
+                </tr>
+                {expanded === group.key && (
+                  <tr key={`${group.key}:expanded`}>
+                    <td colSpan={7}>
+                      <div className="asset-track-summary-details">
+                        {group.indexes.map((index) => {
+                          const item = rows[index];
+                          const available = categories.filter(
+                            (category) =>
+                              category.is_active
+                              && category.transaction_type === item.type
+                          );
+                          return (
+                            <div key={item.id ?? item.client_id ?? index}>
+                              <input
+                                type="date"
+                                value={item.transaction_date}
+                                onChange={(event) =>
+                                  onUpdate(index, "transaction_date", event.target.value)
+                                }
+                              />
+                              <input
+                                value={item.product}
+                                onChange={(event) =>
+                                  onUpdate(index, "product", event.target.value)
+                                }
+                              />
+                              <input
+                                type="number"
+                                value={item.amount}
+                                onChange={(event) =>
+                                  onUpdate(index, "amount", event.target.value)
+                                }
+                              />
+                              {["支出", "收入"].includes(item.type) ? (
+                                <select
+                                  value={item.category_key ?? ""}
+                                  onChange={(event) =>
+                                    onUpdate(index, "category_key", event.target.value)
+                                  }
+                                >
+                                  <option value="">请选择分类</option>
+                                  {available.map((category) => (
+                                    <option
+                                      key={category.category_key}
+                                      value={category.category_key}
+                                    >
+                                      {category.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : <span>无需分类</span>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </Section>
   );
 }

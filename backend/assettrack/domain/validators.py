@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 from typing import Any
 
-import pandas as pd
+from assettrack.domain.lazy_pandas import pd
 
 WARNING = "警告"
 

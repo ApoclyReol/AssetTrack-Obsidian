@@ -1,4 +1,4 @@
-# 产品需求
+# 01 产品需求
 
 ## 定位
 
@@ -12,6 +12,7 @@ AssetTrack 是个人使用的 macOS 桌面 Obsidian 财务插件。所有数据�
 - 管理借款、动态账户、动态分类和商品规则。
 - 使用严格质检、revision 和单事务避免错误覆盖。
 - 手动创建完整备份，并在恢复前验证候选数据。
+- 通过通用 CSV 列映射直接导入支付账单，并从高频商品创建规则。
 
 ## 初始化
 
@@ -19,6 +20,7 @@ AssetTrack 是个人使用的 macOS 桌面 Obsidian 财务插件。所有数据�
 - 用户在设置中通过 Vault 文件夹联想选择或新建 Asset_Track 根目录。
 - 数据库固定为 `<根目录>/data/accounting_system.db`。
 - 初始化完成前不能进入编辑器或启动 sidecar。
+- 新数据库只创建默认现金和默认理财两个账户。
 - 切换根目录不得静默移动或覆盖原数据库。
 
 ## 界面
@@ -32,6 +34,9 @@ AssetTrack 是个人使用的 macOS 桌面 Obsidian 财务插件。所有数据�
 分析包含 Home、年度和月度；流水包含支出、收入、代付、加仓和提现五个独立
 编辑区。类型由编辑区固定，不显示可编辑类型列。
 
+CSV 导入提供增量追加全部与覆盖当前流水草稿两种模式。系统不替用户判断重复
+账单；汇总视图只聚合展示，SQLite 始终保存逐笔流水。
+
 ## 明确不支持
 
 - 自动备份。
@@ -41,4 +46,5 @@ AssetTrack 是个人使用的 macOS 桌面 Obsidian 财务插件。所有数据�
 
 下一主要版本计划去除 Python sidecar 并迁移到 TypeScript；完成后才进入标准
 Community Plugins 发布评估，迁移边界和审核门槛见
-[路线图](roadmap.md) 与 [Community Plugins 发布规划](community-release-plan.md)。
+[路线图](09-roadmap.md) 与
+[Community Plugins 发布规划](10-community-release-plan.md)。

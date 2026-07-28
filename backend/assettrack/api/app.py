@@ -12,7 +12,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -25,11 +24,13 @@ from assettrack.api.models import (
     AccountDefinitionsSaveRequest,
     CategoryDefinitionsSaveRequest,
     CsvImportRequest,
+    CsvMappedImportRequest,
     DebtsSaveRequest,
     FixedAssetsSaveRequest,
     InvestmentSaveRequest,
     MonthWorkspaceSaveRequest,
     MonthDeleteRequest,
+    RuleCandidatesRequest,
     RulesSaveRequest,
     SnapshotSaveRequest,
     TransactionPreviewRequest,
@@ -44,15 +45,7 @@ from assettrack.api.repository import (
 )
 from assettrack.infrastructure.runtime_paths import resolve_runtime_paths
 from assettrack.infrastructure.sqlite_manager import SqliteManager
-from assettrack.infrastructure.backup.backup_bundle import (
-    export_directory_backup,
-    import_complete_backup,
-    validate_backup_source,
-)
 from assettrack.domain.data_revision import source_revision
-from assettrack.domain.rule_service import apply_auto_rules
-from assettrack.domain.parser import parse_bill
-from assettrack.domain.validators import validate_transactions
 
 
 PROTOCOL_VERSION = 2
@@ -121,7 +114,7 @@ def create_app(
 
     app = FastAPI(
         title="Asset Track API",
-        version=os.getenv("ASSET_TRACK_APP_VERSION", "3.2.0"),
+        version=os.getenv("ASSET_TRACK_APP_VERSION", "3.3.0"),
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
@@ -260,7 +253,7 @@ def create_app(
         definitions = repository.category_definitions()["rows"]
         return {
             "protocol_version": PROTOCOL_VERSION,
-            "app_version": os.getenv("ASSET_TRACK_APP_VERSION", "3.2.0"),
+            "app_version": os.getenv("ASSET_TRACK_APP_VERSION", "3.3.0"),
             "categories": [
                 row["name"] for row in definitions if bool(row["is_active"])
             ],
@@ -405,9 +398,11 @@ def create_app(
         except Exception as exc:
             raise error_response(exc) from exc
 
-    @app.post("/api/v1/months/{month}/transactions/import-preview", dependencies=[Depends(require_session)])
+    @app.post("/api/v1/months/{month}/transactions/import-file-preview", dependencies=[Depends(require_session)])
     async def import_preview(month: str, file: UploadFile = File(...)) -> dict[str, Any]:
         try:
+            from assettrack.domain.parser import parse_bill
+
             frame = parse_bill(await file.read(), file.filename or "transactions.csv")
             rows = frame.to_dict(orient="records")
             return repository.prepare_import_preview(month, rows)
@@ -420,6 +415,8 @@ def create_app(
     )
     def import_json_preview(month: str, payload: CsvImportRequest) -> dict[str, Any]:
         try:
+            from assettrack.domain.parser import parse_bill
+
             raw = base64.b64decode(payload.content_base64, validate=True)
             frame = parse_bill(raw, payload.filename)
             rows = frame.to_dict(orient="records")
@@ -427,8 +424,48 @@ def create_app(
         except Exception as exc:
             raise error_response(exc) from exc
 
+    @app.post(
+        "/api/v1/months/{month}/transactions/import-inspect",
+        dependencies=[Depends(require_session)],
+    )
+    def inspect_csv_import(month: str, payload: CsvImportRequest) -> dict[str, Any]:
+        try:
+            from assettrack.domain.parser import inspect_bill
+
+            raw = base64.b64decode(payload.content_base64, validate=True)
+            return {"month": month, **inspect_bill(raw, payload.filename)}
+        except Exception as exc:
+            raise error_response(exc) from exc
+
+    @app.post(
+        "/api/v1/months/{month}/transactions/import-preview",
+        dependencies=[Depends(require_session)],
+    )
+    def mapped_csv_import(
+        month: str, payload: CsvMappedImportRequest
+    ) -> dict[str, Any]:
+        try:
+            from assettrack.domain.parser import parse_mapped_bill
+
+            raw = base64.b64decode(payload.content_base64, validate=True)
+            frame, import_stats = parse_mapped_bill(
+                raw,
+                payload.filename,
+                month=month,
+                mapping=payload.mapping.model_dump(),
+            )
+            result = repository.prepare_import_preview(
+                month, frame.to_dict(orient="records")
+            )
+            return {**result, "import_stats": import_stats}
+        except Exception as exc:
+            raise error_response(exc) from exc
+
     @app.post("/api/v1/months/{month}/transactions/rules-preview", dependencies=[Depends(require_session)])
     def rules_preview(month: str, payload: TransactionPreviewRequest) -> dict[str, Any]:
+        import pandas as pd
+        from assettrack.domain.rule_service import apply_auto_rules
+
         frame = pd.DataFrame(model_rows(payload.rows))
         if frame.empty:
             return {"month": month, "base_revision": repository.get_revision(month), "proposed_rows": [], "changes": [], "warnings": []}
@@ -448,6 +485,9 @@ def create_app(
 
     @app.post("/api/v1/months/{month}/transactions/validate", dependencies=[Depends(require_session)])
     def validate_transaction_rows(month: str, payload: TransactionPreviewRequest) -> dict[str, Any]:
+        import pandas as pd
+        from assettrack.domain.validators import validate_transactions
+
         frame = pd.DataFrame(model_rows(payload.rows))
         return {
             "month": month,
@@ -465,6 +505,22 @@ def create_app(
         except Exception as exc:
             raise error_response(exc) from exc
 
+    @app.post(
+        "/api/v1/months/{month}/rule-candidates",
+        dependencies=[Depends(require_session)],
+    )
+    def rule_candidates(
+        month: str, payload: RuleCandidatesRequest
+    ) -> dict[str, Any]:
+        try:
+            return repository.rule_candidates(
+                month,
+                model_rows(payload.rows),
+                min_occurrences=payload.min_occurrences,
+            )
+        except Exception as exc:
+            raise error_response(exc) from exc
+
     @app.get("/api/v1/product-history", dependencies=[Depends(require_session)])
     def product_history(min_occurrences: int = 5) -> dict[str, Any]:
         try:
@@ -478,19 +534,49 @@ def create_app(
     @app.post("/api/v1/backups/export", dependencies=[Depends(require_session)])
     def export_backup(request: BackupExportRequest | None = None) -> dict[str, Any]:
         try:
+            from assettrack.infrastructure.backup.backup_bundle import (
+                export_complete_backup,
+                export_directory_backup,
+                validate_backup_source,
+            )
+
             paths = resolve_runtime_paths().ensure_directories()
             custom_path = request.path if request else None
-            output = (
-                Path(custom_path).expanduser().resolve()
-                if custom_path
-                else paths.backup_dir
-                / datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-            )
-            path = export_directory_backup(
-                output,
-                source_manager=repository.db,
-                source_revision=source_revision(repository),
-            )
+            custom_directory = request.directory if request else None
+            if custom_directory:
+                output = (
+                    Path(custom_directory).expanduser().resolve()
+                    / f"asset-track-backup-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.zip"
+                )
+                path = export_complete_backup(
+                    output,
+                    source_manager=repository.db,
+                    copy_raw_csv=False,
+                )
+            elif custom_path:
+                output = Path(custom_path).expanduser().resolve()
+                if output.suffix.lower() == ".zip":
+                    path = export_complete_backup(
+                        output,
+                        source_manager=repository.db,
+                        copy_raw_csv=False,
+                    )
+                else:
+                    path = export_directory_backup(
+                        output,
+                        source_manager=repository.db,
+                        source_revision=source_revision(repository),
+                    )
+            else:
+                output = (
+                    paths.backup_dir
+                    / f"asset-track-backup-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.zip"
+                )
+                path = export_complete_backup(
+                    output,
+                    source_manager=repository.db,
+                    copy_raw_csv=False,
+                )
             return {"path": str(path), "validation": validate_backup_source(path)}
         except Exception as exc:
             raise error_response(exc) from exc
@@ -499,6 +585,10 @@ def create_app(
     def import_backup(source: BackupImportRequest) -> dict[str, Any]:
         path = source.path
         try:
+            from assettrack.infrastructure.backup.backup_bundle import (
+                import_complete_backup,
+            )
+
             return import_complete_backup(path, target_manager=repository.db)
         except Exception as exc:
             raise error_response(exc) from exc
@@ -506,6 +596,10 @@ def create_app(
     @app.post("/api/v1/backups/validate", dependencies=[Depends(require_session)])
     def validate_backup(source: BackupImportRequest) -> dict[str, Any]:
         try:
+            from assettrack.infrastructure.backup.backup_bundle import (
+                validate_backup_source,
+            )
+
             return validate_backup_source(source.path)
         except Exception as exc:
             raise error_response(exc) from exc
@@ -514,16 +608,17 @@ def create_app(
     def export_diagnostics() -> dict[str, Any]:
         paths = resolve_runtime_paths().ensure_directories()
         output = paths.log_dir / f"asset-track-diagnostics-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+        schema = repository.db.validate_schema(full=True)
         payload = {
             "created_at": datetime.now().isoformat(),
-            "app_version": os.getenv("ASSET_TRACK_APP_VERSION", "3.2.0"),
+            "app_version": os.getenv("ASSET_TRACK_APP_VERSION", "3.3.0"),
             "protocol_version": PROTOCOL_VERSION,
-            "schema": app.state.schema,
+            "schema": schema,
             "data_dir": str(paths.data_dir),
             "source_revision": source_revision(repository),
         }
         output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        return {"path": str(output)}
+        return {"path": str(output), "payload": payload}
 
     @app.get("/api/v1/runtime-status", dependencies=[Depends(require_session)])
     def runtime_status() -> dict[str, Any]:

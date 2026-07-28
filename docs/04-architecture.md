@@ -1,4 +1,4 @@
-# 架构
+# 04 架构
 
 ## 当前运行链
 
@@ -21,6 +21,10 @@ flowchart LR
 sidecar 只监听 loopback，使用一次性 bootstrap token 换取 session。插件持续消费
 stdout/stderr，传入 Obsidian 父进程 PID，并在卸载时请求 shutdown。
 
+插件加载时只注册 View、设置、Ribbon 和命令，不启动 sidecar。首次 API 请求才
+按需启动；全局不显示准备 Notice。编辑面板等待超过约 500ms 时才在面板内部
+显示加载状态。Pandas、计算、CSV 和备份模块按功能首次使用延迟加载。
+
 ## 数据路径
 
 用户必须在 Vault 内选择 Asset_Track 根目录。插件设置只保存 Vault 相对根目录，
@@ -33,6 +37,10 @@ stdout/stderr，传入 Obsidian 父进程 PID，并在卸载时请求 shutdown�
 未配置时不创建 View、不启动 sidecar，也不创建数据库。切换根目录前必须处理
 dirty 草稿；新位置只允许为空或包含可验证的 schema 8 数据库。
 
+Obsidian 插件自身的 `data.json` 只保存 `workspacePath` 和 CSV 映射配置。映射配置
+包含表头指纹、列映射、方向映射和状态过滤，不包含 CSV 行或财务事实。商品汇总、
+规则候选和导入模式没有新增 SQLite 表或字段；当前数据库版本仍为 schema 8。
+
 ## 写入边界
 
 - 月份、借款、规则和账户保存均携带 revision。
@@ -41,6 +49,7 @@ dirty 草稿；新位置只允许为空或包含可验证的 schema 8 数据库�
 - 保存后分析重新读取服务端权威数据。
 - 插件不生成 Markdown/SVG，也不自动备份。
 - 手动恢复先 staging 校验，再创建当前数据库安全快照并原子替换。
+- CSV 检查和映射预览只返回草稿候选，不写数据库；增量模式不去重。
 
 ## 下一主要版本
 

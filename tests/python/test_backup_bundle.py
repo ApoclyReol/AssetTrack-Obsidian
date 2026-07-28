@@ -51,11 +51,15 @@ def test_complete_backup_contains_all_tables_and_round_trips(tmp_path, monkeypat
         tmp_path / "asset-track-backup.zip", source_manager=source
     )
     result = validate_backup_source(archive)
+    sqlite_result = validate_backup_source(tmp_path / "source.db")
 
     assert result["valid"] is True
     assert result["mode"] == "complete"
     assert result["row_counts"]["transactions"] == 2
     assert result["row_counts"]["fixed_assets"] == 1
+    assert sqlite_result["mode"] == "sqlite"
+    assert sqlite_result["schema"]["schema_version"] == 8
+    assert sqlite_result["row_counts"]["transactions"] == 2
 
     with zipfile.ZipFile(archive) as handle:
         names = set(handle.namelist())

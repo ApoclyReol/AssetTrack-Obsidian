@@ -1,4 +1,4 @@
-# 开发说明
+# 06 开发说明
 
 ## 源码边界
 
@@ -13,6 +13,10 @@ docs/                    长期文档
 
 不要在源码目录保存数据库、备份、日志、测试 Vault、node_modules、虚拟环境或
 构建产物。
+
+长期文档按 `docs/00-*.md` 至 `docs/10-*.md` 的阅读顺序维护；每次发行的详细
+handoff 写入 `docs/logs/release-vN.N.N.md`。重命名文档时必须同步 README、
+AGENTS 和所有 Markdown 相对链接。
 
 ## 初始化
 

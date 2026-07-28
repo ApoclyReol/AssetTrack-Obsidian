@@ -277,7 +277,7 @@ def _manifest_for_root(root: Path, db_manager: SqliteManager) -> dict[str, Any]:
     return {
         "format_version": BACKUP_FORMAT_VERSION,
         "schema_version": validation["schema_version"],
-        "app_version": os.getenv("ASSET_TRACK_APP_VERSION", "3.2.0"),
+        "app_version": os.getenv("ASSET_TRACK_APP_VERSION", "3.3.0"),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "required_tables": list(REQUIRED_TABLES),
         "tables": table_manifest,
@@ -549,6 +549,14 @@ def validate_backup_source(source: str | os.PathLike[str]) -> dict[str, Any]:
                     root / configured_filename,
                     configs[table],
                 )
+        elif mode == "sqlite":
+            with sqlite3.connect(str(database_path)) as conn:
+                row_counts = {
+                    table: int(
+                        conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                    )
+                    for table in required_tables
+                }
 
         if mode == "complete":
             with sqlite3.connect(str(database_path)) as conn:

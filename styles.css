@@ -9,6 +9,13 @@
   background: var(--background-primary);
 }
 
+.asset-track-boot {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  color: var(--text-muted);
+}
+
 .asset-track-toolbar {
   position: sticky;
   z-index: 5;
@@ -90,6 +97,162 @@
   display: grid;
   grid-template-columns: repeat(4, minmax(130px, 1fr));
   gap: 12px;
+}
+
+.asset-track-investment-row {
+  grid-template-columns: minmax(150px, 1fr) repeat(3, minmax(130px, 1fr));
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+.asset-track-account-name {
+  display: grid;
+  min-height: 58px;
+  align-content: end;
+  gap: 6px;
+}
+
+.asset-track-account-name span {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.asset-track-account-name strong {
+  display: flex;
+  min-height: var(--input-height);
+  align-items: center;
+}
+
+.asset-track-view-switcher {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+}
+
+.asset-track-view-switcher button.is-active {
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+}
+
+.asset-track-view-switcher span {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.asset-track-summary-details {
+  display: grid;
+  gap: 6px;
+  padding: 6px;
+}
+
+.asset-track-summary-details > div {
+  display: grid;
+  grid-template-columns: 140px minmax(220px, 1fr) 120px minmax(150px, 220px);
+  gap: 8px;
+}
+
+.asset-track-modal-backdrop {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.55);
+  place-items: center;
+}
+
+.asset-track-modal {
+  width: min(920px, 95vw);
+  max-height: 90vh;
+  padding: 18px;
+  overflow: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-l);
+  background: var(--background-primary);
+  box-shadow: var(--shadow-l);
+}
+
+.asset-track-modal > header,
+.asset-track-modal > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.asset-track-modal > header h2 {
+  margin: 0 0 4px;
+}
+
+.asset-track-modal > header span {
+  color: var(--text-muted);
+}
+
+.asset-track-modal > footer {
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.asset-track-import-mode,
+.asset-track-import-statuses > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 14px 0;
+}
+
+.asset-track-import-warning {
+  padding: 10px 12px;
+  color: var(--color-orange);
+  border: 1px solid rgba(var(--color-orange-rgb), 0.35);
+  border-radius: var(--radius-s);
+  background: rgba(var(--color-orange-rgb), 0.08);
+}
+
+.asset-track-mapping-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.asset-track-mapping-grid label,
+.asset-track-import-values label {
+  display: grid;
+  gap: 5px;
+}
+
+.asset-track-import-values,
+.asset-track-import-statuses,
+.asset-track-import-preview {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0;
+  padding: 12px;
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+}
+
+.asset-track-import-values label {
+  grid-template-columns: minmax(180px, 1fr) minmax(140px, 220px);
+  align-items: center;
+}
+
+.asset-track-import-preview {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+@media (max-width: 900px) {
+  .asset-track-investment-row,
+  .asset-track-summary-details > div,
+  .asset-track-mapping-grid {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 .asset-track-fields label {

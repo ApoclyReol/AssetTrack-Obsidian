@@ -40,6 +40,20 @@ tests/                                  Python/API/备份/计算测试
 docs/                                   当前架构、用户、开发与发行文档
 ```
 
+## 当前 handoff
+
+- v1.3.0 已完成按需 sidecar、面板内延迟加载状态、Finder 备份恢复、通用 CSV
+  映射、严格不去重的增量导入、覆盖草稿、商品汇总、高频规则建议、双默认账户和
+  理财账户响应式对齐。
+- SQLite 仍是 schema 8，备份仍是格式 2；本次没有 schema 9 或自动 schema
+  迁移。CSV 映射元数据只保存在插件 `data.json`。
+- 启动路径已延迟加载 Pandas/计算/CSV/备份模块；全量完整性检查只用于备份、
+  恢复和诊断。
+- 继续维护前先读 `docs/00-reading-guide.md`；本次实现、兼容边界、测试和后续
+  注意事项详见 `docs/logs/release-v1.3.0.md`。
+- 后续每次正式更新都在 `docs/logs/` 新增 `release-vN.N.N.md`，并同步修改受影响
+  的编号长期文档，不把当前事实只留在 release 日志中。
+
 ## 数据与编辑约束
 
 - React 只保存未提交草稿、dirty 状态和当前编辑会话；保存后用服务端 canonical

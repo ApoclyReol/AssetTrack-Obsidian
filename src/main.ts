@@ -10,7 +10,10 @@ import {
 } from "./settings";
 import { AssetTrackApi } from "./services/AssetTrackApi";
 import { SidecarManager } from "./services/SidecarManager";
-import type { AssetTrackSettings } from "./types";
+import type {
+  AssetTrackSettings,
+  CsvMappingProfile
+} from "./types";
 import { normalizeWorkspacePath } from "./services/workspacePath";
 import {
   AssetTrackEditorView,
@@ -32,7 +35,10 @@ export default class AssetTrackPlugin extends Plugin {
     this.settings = {
       workspacePath: normalizeWorkspacePath(
         typeof stored?.workspacePath === "string" ? stored.workspacePath : ""
-      )
+      ),
+      csvMappings: Array.isArray(stored?.csvMappings)
+        ? stored.csvMappings
+        : []
     };
     this.sidecar = new SidecarManager(this, () => this.settings);
     this.api = new AssetTrackApi(this.sidecar);
@@ -93,14 +99,20 @@ export default class AssetTrackPlugin extends Plugin {
     const previous = this.settings.workspacePath;
     await this.sidecar.stop();
     await this.ensureVaultFolder(workspacePath);
-    this.settings = { workspacePath };
+    this.settings = {
+      workspacePath,
+      csvMappings: this.settings.csvMappings
+    };
     await this.saveSettings();
     try {
       await this.sidecar.ensureReady();
       this.notifyDataChanged();
     } catch (error) {
       await this.sidecar.stop();
-      this.settings = { workspacePath: previous };
+      this.settings = {
+        workspacePath: previous,
+        csvMappings: this.settings.csvMappings
+      };
       await this.saveSettings();
       throw error;
     }
@@ -136,51 +148,55 @@ export default class AssetTrackPlugin extends Plugin {
     this.dataListeners.forEach((listener) => listener());
   }
 
+  csvMapping(signature: string): CsvMappingProfile | undefined {
+    return this.settings.csvMappings.find(
+      (profile) => profile.header_signature === signature
+    );
+  }
+
+  async saveCsvMapping(profile: CsvMappingProfile): Promise<void> {
+    this.settings.csvMappings = [
+      ...this.settings.csvMappings.filter(
+        (item) => item.header_signature !== profile.header_signature
+      ),
+      profile
+    ].slice(-20);
+    await this.saveSettings();
+  }
+
   async openDataDirectory(): Promise<void> {
-    try {
-      await this.sidecar.ensureReady();
-      const status = await this.api.runtimeStatus();
-      electronShell.showItemInFolder(String(status.db_path));
-    } catch (error) {
-      new Notice(this.errorMessage(error));
-    }
+    await this.sidecar.ensureReady();
+    const status = await this.api.runtimeStatus();
+    electronShell.showItemInFolder(String(status.db_path));
+  }
+
+  showPathInFinder(path: string): void {
+    electronShell.showItemInFolder(path);
   }
 
   async copyDiagnostics(): Promise<void> {
-    try {
-      await this.sidecar.ensureReady();
-      const [meta, runtime] = await Promise.all([
-        this.api.meta(),
-        this.api.runtimeStatus()
-      ]);
-      const diagnostic = {
-        plugin_version: this.manifest.version,
-        backend_version: meta.app_version,
-        protocol_version: meta.protocol_version,
-        schema_version: runtime.schema_version,
-        workspace_path: this.settings.workspacePath,
-        db_path: runtime.db_path,
-        source_revision: meta.source_revision,
-        sidecar: this.sidecar.getStatus()
-      };
-      await navigator.clipboard.writeText(JSON.stringify(diagnostic, null, 2));
-      new Notice("脱敏诊断信息已复制");
-    } catch (error) {
-      new Notice(this.errorMessage(error));
-    }
+    await this.sidecar.ensureReady();
+    const [meta, runtime, exported] = await Promise.all([
+      this.api.meta(),
+      this.api.runtimeStatus(),
+      this.api.exportDiagnostics()
+    ]);
+    const diagnostic = {
+      plugin_version: this.manifest.version,
+      backend_version: meta.app_version,
+      protocol_version: meta.protocol_version,
+      schema_version: runtime.schema_version,
+      schema_validation: exported.payload.schema,
+      workspace_path: this.settings.workspacePath,
+      db_path: runtime.db_path,
+      source_revision: meta.source_revision,
+      sidecar: this.sidecar.getStatus()
+    };
+    await navigator.clipboard.writeText(JSON.stringify(diagnostic, null, 2));
   }
 
   async restartSidecar(): Promise<void> {
-    try {
-      await this.sidecar.restart();
-      new Notice("sidecar 已重启");
-    } catch (error) {
-      new Notice(this.errorMessage(error));
-    }
-  }
-
-  private errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
+    await this.sidecar.restart();
   }
 
   async onunload(): Promise<void> {

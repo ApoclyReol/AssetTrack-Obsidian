@@ -10,7 +10,7 @@ from collections import Counter, defaultdict
 from datetime import datetime
 from typing import Any, Iterable
 
-import pandas as pd
+from assettrack.domain.lazy_pandas import pd
 
 from assettrack.infrastructure.sqlite_manager import SqliteManager, db
 from assettrack.infrastructure.config import category_rainbow_color
@@ -149,8 +149,7 @@ class APIRepository:
         self.db = manager or db
 
     def initialize(self) -> dict[str, Any]:
-        self.db.init_db()
-        validation = self.db.validate_schema()
+        validation = self.db.init_db()
         if not validation["valid"]:
             raise RuntimeError(f"数据库 schema 无效：{validation}")
         return validation
@@ -395,6 +394,110 @@ class APIRepository:
             suggestions,
             key=lambda row: (-row["occurrences"], row["transaction_type"], row["product"]),
         )
+
+    def rule_candidates(
+        self,
+        month: str,
+        draft_rows: list[dict[str, Any]],
+        *,
+        min_occurrences: int = 2,
+    ) -> dict[str, Any]:
+        """Suggest frequent draft/history products without mutating rules or rows."""
+
+        if not _month_valid(month):
+            raise RepositoryValidationError(f"非法月份：{month}")
+        threshold = max(1, min(int(min_occurrences), 10_000))
+        rules = self.rules()
+        existing = {
+            (
+                str(row["transaction_type"]),
+                normalize_product_key(row["product"]),
+            )
+            for row in rules["rows"]
+        }
+        history = self.db.fetch_all(
+            "SELECT month, type, category, product FROM transactions "
+            "WHERE month <> ? AND type IN ('支出', '收入') "
+            "AND TRIM(COALESCE(product, '')) <> ''",
+            (month,),
+        )
+        combined = [
+            *history,
+            *[
+                {
+                    "month": month,
+                    "type": _text(row.get("type")),
+                    "category": _text(row.get("category")),
+                    "product": _text(row.get("product")),
+                }
+                for row in draft_rows
+                if _text(row.get("type")) in RULE_TRANSACTION_TYPES
+                and _text(row.get("product"))
+            ],
+        ]
+        grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+        for row in combined:
+            key = (
+                str(row["type"]),
+                normalize_product_key(row.get("product")),
+            )
+            if key[1]:
+                grouped[key].append(row)
+
+        category_metadata = self._category_metadata()
+        candidates = []
+        for key, group in grouped.items():
+            if len(group) < threshold or key in existing:
+                continue
+            transaction_type, _normalized = key
+            variants = Counter(_text(row.get("product")) for row in group)
+            category_counts = Counter(
+                category
+                for row in group
+                if (
+                    (category := _text(row.get("category")))
+                    and category_metadata.get(category, {}).get("type")
+                    == transaction_type
+                )
+            )
+            category = (
+                category_counts.most_common(1)[0][0] if category_counts else ""
+            )
+            confidence = (
+                category_counts[category] / len(group) if category else 0
+            )
+            candidates.append(
+                {
+                    "transaction_type": transaction_type,
+                    "product": variants.most_common(1)[0][0],
+                    "variants": [
+                        name for name, _count in variants.most_common() if name
+                    ],
+                    "category": category,
+                    "category_confidence": round(confidence, 4),
+                    "has_category_conflict": len(category_counts) > 1,
+                    "occurrences": len(group),
+                    "months_count": len(
+                        {str(row.get("month") or month) for row in group}
+                    ),
+                    "last_month": max(
+                        str(row.get("month") or month) for row in group
+                    ),
+                }
+            )
+        return {
+            "month": month,
+            "rules_revision": rules["revision"],
+            "min_occurrences": threshold,
+            "rows": sorted(
+                candidates,
+                key=lambda row: (
+                    -row["occurrences"],
+                    row["transaction_type"],
+                    row["product"],
+                ),
+            ),
+        }
 
     def prepare_import_preview(
         self, month: str, rows: list[dict[str, Any]]
@@ -1200,13 +1303,25 @@ class APIRepository:
             "cash-wechat": "wechat_balance",
         }
         current = self.get_month(month)
+        available = {
+            str(row["account_key"]) for row in current["cash_accounts"]
+        }
+        cash_accounts = (
+            [{
+                "account_key": "cash-default",
+                "balance": sum(_number(values.get(field, 0)) for field in mapping.values()),
+            }]
+            if "cash-default" in available
+            else [
+                {"account_key": key, "balance": values.get(field, 0)}
+                for key, field in mapping.items()
+                if key in available
+            ]
+        )
         return self.save_month_workspace(
             month,
             expected_revision,
-            [
-                {"account_key": key, "balance": values.get(field, 0)}
-                for key, field in mapping.items()
-            ],
+            cash_accounts,
             current["investment_accounts"],
             current["transactions"],
             current["fixed_assets"],

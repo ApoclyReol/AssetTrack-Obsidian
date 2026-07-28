@@ -1,5 +1,64 @@
 export interface AssetTrackSettings {
   workspacePath: string;
+  csvMappings: CsvMappingProfile[];
+}
+
+export type ImportMode = "append" | "replace";
+
+export interface CsvColumnMapping {
+  date_column: string;
+  product_column: string;
+  amount_column: string;
+  type_column: string;
+  category_column?: string;
+  status_column?: string;
+  type_values: Record<string, string>;
+  included_statuses: string[];
+}
+
+export interface CsvMappingProfile {
+  header_signature: string;
+  mapping: CsvColumnMapping;
+  updated_at: string;
+}
+
+export interface CsvInspection {
+  month: string;
+  filename: string;
+  headers: string[];
+  header_signature: string;
+  row_count: number;
+  sample_rows: Array<Record<string, string>>;
+  distinct_values: Record<string, string[]>;
+  suggested_mapping: Partial<CsvColumnMapping>;
+}
+
+export interface CsvImportStats {
+  source_rows: number;
+  accepted_rows: number;
+  filtered: Record<string, number>;
+  examples: Record<string, Array<Record<string, unknown>>>;
+}
+
+export interface CsvImportPreview {
+  month: string;
+  rows: Transaction[];
+  issues: Array<Record<string, unknown>>;
+  type_summary: Record<string, number>;
+  modes: ImportMode[];
+  import_stats: CsvImportStats;
+}
+
+export interface RuleCandidate {
+  transaction_type: "支出" | "收入";
+  product: string;
+  variants: string[];
+  category: string;
+  category_confidence: number;
+  has_category_conflict: boolean;
+  occurrences: number;
+  months_count: number;
+  last_month: string;
 }
 
 export interface Transaction {

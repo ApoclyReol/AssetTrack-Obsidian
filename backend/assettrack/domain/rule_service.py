@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import unicodedata
 
-import pandas as pd
 from loguru import logger
 
 from assettrack.infrastructure.config import CATEGORIES_METADATA
+from assettrack.domain.lazy_pandas import pd
 
 
 RULE_TRANSACTION_TYPES = ("支出", "收入")

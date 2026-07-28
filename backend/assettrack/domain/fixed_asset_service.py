@@ -3,12 +3,14 @@
 固定资产是记录性事实，不参与现金、理财、借款或对账计算。
 """
 
+from __future__ import annotations
+
 from datetime import date, datetime
 import math
 from typing import Any, Dict, Iterable
 from uuid import uuid4
 
-import pandas as pd
+from assettrack.domain.lazy_pandas import pd
 
 from assettrack.infrastructure.sqlite_manager import db
 from assettrack.domain.month_status import (

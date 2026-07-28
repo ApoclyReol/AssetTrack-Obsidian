@@ -1,8 +1,8 @@
-# Obsidian Community Plugins 发布规划
+# 10 Obsidian Community Plugins 发布规划
 
 ## 当前结论
 
-截至 2026-07-26，AssetTrack 1.2.0 **暂不具备标准 Community Plugins 安装条件**。
+截至 2026-07-28，AssetTrack 1.3.0 **暂不具备标准 Community Plugins 安装条件**。
 当前插件的 `main.js` 会从同一插件目录启动
 `sidecar/AssetTrackSidecar`；完整安装目录还包含 PyInstaller 的 `_internal/`
 运行时。当前可交付产物必须是完整的：
@@ -17,7 +17,7 @@ build/obsidian/asset-track/
 ```
 
 官方社区安装流程只从 GitHub Release 获取 `main.js`、`manifest.json` 和可选的
-`styles.css`。因此，按当前代码和官方安装机制对照，直接提交 1.2.0 会漏掉
+`styles.css`。因此，按当前代码和官方安装机制对照，直接提交 1.3.0 会漏掉
 sidecar，不能作为可用插件安装。当前版本应继续使用完整目录安装；不要把裸
 `main.js` 当作可运行发布包。
 

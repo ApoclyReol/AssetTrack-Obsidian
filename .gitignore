@@ -36,7 +36,7 @@ Thumbs.db
 
 # Local runtime data (development database, backups, logs, settings)
 .var/
-logs/
+/logs/
 *.log
 
 # SQLite transient files. Deliberate database fixtures may still be committed.

@@ -29,6 +29,24 @@ GOLDEN = {
 
 def populate(repository: APIRepository) -> None:
     repository.initialize()
+    with repository.db.get_connection() as connection:
+        connection.execute(
+            "DELETE FROM account_definitions WHERE account_key='cash-default'"
+        )
+        connection.executemany(
+            """
+            INSERT INTO account_definitions
+              (account_key, name, account_type, is_active, sort_order)
+            VALUES (?, ?, 'cash', 1, ?)
+            """,
+            [
+                ("cash-boc", "中国银行", 0),
+                ("cash-ccb", "建设银行", 1),
+                ("cash-alipay", "支付宝", 2),
+                ("cash-wechat", "微信", 3),
+            ],
+        )
+        connection.commit()
     repository.save_month_workspace(
         "2025-12",
         0,

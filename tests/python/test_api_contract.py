@@ -1,3 +1,5 @@
+import base64
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -170,8 +172,7 @@ def test_whole_month_save_is_atomic_and_increments_once(tmp_path, monkeypatch):
             json={
                 "expected_revision": 0,
                 "cash_accounts": [
-                    {"account_key": "cash-boc", "balance": 1000},
-                    {"account_key": "cash-wechat", "balance": 20},
+                    {"account_key": "cash-default", "balance": 1020},
                 ],
                 "investment_accounts": [{
                     "account_key": "investment-default",
@@ -206,7 +207,7 @@ def test_whole_month_save_is_atomic_and_increments_once(tmp_path, monkeypatch):
             "/api/v1/months/2026-01/workspace",
             json={
                 "expected_revision": 1,
-                "cash_accounts": [{"account_key": "cash-boc", "balance": 9999}],
+                "cash_accounts": [{"account_key": "cash-default", "balance": 9999}],
                 "investment_accounts": [{
                     "account_key": "investment-default",
                     "principal": 0,
@@ -228,8 +229,8 @@ def test_whole_month_save_is_atomic_and_increments_once(tmp_path, monkeypatch):
         assert next(
             row["balance"]
             for row in unchanged["cash_accounts"]
-            if row["account_key"] == "cash-boc"
-        ) == 1000
+            if row["account_key"] == "cash-default"
+        ) == 1020
         assert unchanged["fixed_assets"][0]["asset_key"] == "phone"
 
 
@@ -242,7 +243,7 @@ def test_live_analysis_and_directory_backup_validate_without_render_bundle(
             "/api/v1/months/2026-01/workspace",
             json={
                 "expected_revision": 0,
-                "cash_accounts": [{"account_key": "cash-boc", "balance": 1000}],
+                "cash_accounts": [{"account_key": "cash-default", "balance": 1000}],
                 "investment_accounts": [{
                     "account_key": "investment-default",
                     "principal": 100,
@@ -507,6 +508,27 @@ def test_manual_backup_and_debt_date_validation(tmp_path, monkeypatch):
         assert second_exported.status_code == 200
         assert second_exported.json()["path"] != exported.json()["path"]
 
+        finder_directory = tmp_path / "finder-backups"
+        finder_directory.mkdir()
+        finder_export = client.post(
+            "/api/v1/backups/export", json={"directory": str(finder_directory)}
+        )
+        assert finder_export.status_code == 200
+        finder_path = Path(finder_export.json()["path"])
+        assert finder_path.parent == finder_directory
+        assert finder_path.name.startswith("asset-track-backup-")
+        assert finder_path.suffix == ".zip"
+        assert finder_path.is_file()
+        assert finder_export.json()["validation"]["valid"] is True
+
+        diagnostics = client.post("/api/v1/diagnostics/export")
+        assert diagnostics.status_code == 200
+        diagnostic_payload = json.loads(
+            Path(diagnostics.json()["path"]).read_text(encoding="utf-8")
+        )
+        assert diagnostic_payload["schema"]["integrity_check"] == "ok"
+        assert diagnostics.json()["payload"] == diagnostic_payload
+
         selected_path = tmp_path / "chosen" / "my-asset-track"
         custom_export = client.post(
             "/api/v1/backups/export", json={"path": str(selected_path)}
@@ -602,6 +624,51 @@ def test_product_history_excludes_existing_rules_and_respects_frequency(tmp_path
             "months_count": 2,
             "last_month": "2026-02",
         }]
+
+
+def test_generic_csv_preview_and_rule_candidates_keep_duplicate_rows(
+    tmp_path, monkeypatch
+):
+    _, client = _client(tmp_path, monkeypatch=monkeypatch)
+    raw = (
+        "日期,说明,金额,方向\n"
+        "2026-01-02,咖啡,12,付款\n"
+        "2026-01-02,咖啡,12,付款\n"
+    ).encode("utf-8")
+    encoded = base64.b64encode(raw).decode("ascii")
+    with client:
+        inspected = client.post(
+            "/api/v1/months/2026-01/transactions/import-inspect",
+            json={"filename": "bill.csv", "content_base64": encoded},
+        )
+        assert inspected.status_code == 200
+        assert inspected.json()["row_count"] == 2
+
+        preview = client.post(
+            "/api/v1/months/2026-01/transactions/import-preview",
+            json={
+                "filename": "bill.csv",
+                "content_base64": encoded,
+                "mapping": {
+                    "date_column": "日期",
+                    "product_column": "说明",
+                    "amount_column": "金额",
+                    "type_column": "方向",
+                    "type_values": {"付款": "支出"},
+                },
+            },
+        )
+        assert preview.status_code == 200
+        rows = preview.json()["rows"]
+        assert len(rows) == 2
+        assert [row["product"] for row in rows] == ["咖啡", "咖啡"]
+
+        candidates = client.post(
+            "/api/v1/months/2026-01/rule-candidates",
+            json={"rows": rows, "min_occurrences": 2},
+        )
+        assert candidates.status_code == 200
+        assert candidates.json()["rows"][0]["occurrences"] == 2
 
 
 def test_rules_are_scoped_by_transaction_type_and_normalized_product(tmp_path, monkeypatch):

@@ -1,11 +1,11 @@
-# 路线图
+# 09 路线图
 
 ## 当前发行边界
 
-1.2.0 是完整目录安装版本：插件主程序依赖同目录下的 Python/FastAPI
+1.3.0 是完整目录安装版本：插件主程序依赖同目录下的 Python/FastAPI
 sidecar，当前以本地完整 bundle 交付；如需公开分发，应先准备包含 sidecar 的
 完整 Release，不提交 Obsidian Community Plugins。完整原因、门槛和提交步骤见
-[Community Plugins 发布规划](community-release-plan.md)。
+[Community Plugins 发布规划](10-community-release-plan.md)。
 
 ## 下一主要版本：去 Python
 
@@ -32,4 +32,4 @@ Obsidian 生态的单一插件运行时，并为标准 GitHub/Community 分发�
 - Intel 架构构建与签名自动化。
 - 标准 GitHub Release 打包。
 - 去 Python、跨架构验证和公开发布资料齐备后，按
-  [Community Plugins 发布规划](community-release-plan.md) 执行社区提交。
+  [Community Plugins 发布规划](10-community-release-plan.md) 执行社区提交。

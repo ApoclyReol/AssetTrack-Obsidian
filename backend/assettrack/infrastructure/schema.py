@@ -16,6 +16,10 @@ from assettrack.infrastructure.config import (
 
 
 CURRENT_SCHEMA_VERSION = 8
+DEFAULT_ACCOUNT_DEFINITIONS = (
+    ("cash-default", "默认现金账户", "cash", 0),
+    ("investment-default", "默认理财账户", "investment", 1),
+)
 REQUIRED_TABLES = (
     "transactions",
     "category_definitions",
@@ -193,12 +197,6 @@ def create_current_schema(connection: sqlite3.Connection) -> None:
           (account_key, name, account_type, is_active, sort_order)
         VALUES (?, ?, ?, 1, ?)
         """,
-        [
-            ("cash-boc", "中国银行", "cash", 0),
-            ("cash-ccb", "建设银行", "cash", 1),
-            ("cash-alipay", "支付宝", "cash", 2),
-            ("cash-wechat", "微信", "cash", 3),
-            ("investment-default", "默认理财账户", "investment", 0),
-        ],
+        DEFAULT_ACCOUNT_DEFINITIONS,
     )
     connection.execute(f"PRAGMA user_version={CURRENT_SCHEMA_VERSION}")

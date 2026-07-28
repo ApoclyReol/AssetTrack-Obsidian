@@ -3,10 +3,14 @@ import type {
   AccountDefinition,
   AnnualOverview,
   CategoryDefinition,
+  CsvColumnMapping,
+  CsvImportPreview,
+  CsvInspection,
   CurrentAsset,
   FixedAsset,
   MonthCreationPolicy,
   MonthWorkspace,
+  RuleCandidate,
   Transaction
 } from "../types";
 import type { SidecarManager } from "./SidecarManager";
@@ -126,6 +130,48 @@ export class AssetTrackApi {
     );
   }
 
+  inspectCsv(
+    month: string,
+    filename: string,
+    contentBase64: string
+  ): Promise<CsvInspection> {
+    return this.request(
+      `/api/v1/months/${month}/transactions/import-inspect`,
+      "POST",
+      { filename, content_base64: contentBase64 }
+    );
+  }
+
+  previewMappedCsv(
+    month: string,
+    filename: string,
+    contentBase64: string,
+    mapping: CsvColumnMapping
+  ): Promise<CsvImportPreview> {
+    return this.request(
+      `/api/v1/months/${month}/transactions/import-preview`,
+      "POST",
+      { filename, content_base64: contentBase64, mapping }
+    );
+  }
+
+  ruleCandidates(
+    month: string,
+    rows: Transaction[],
+    minOccurrences = 2
+  ): Promise<{
+    month: string;
+    rules_revision: number;
+    min_occurrences: number;
+    rows: RuleCandidate[];
+  }> {
+    return this.request(
+      `/api/v1/months/${month}/rule-candidates`,
+      "POST",
+      { rows, min_occurrences: minOccurrences }
+    );
+  }
+
   debts(): Promise<{ revision: number; rows: Array<Record<string, unknown>> }> {
     return this.request("/api/v1/debts");
   }
@@ -176,8 +222,15 @@ export class AssetTrackApi {
     });
   }
 
-  backup(path?: string): Promise<{ path: string }> {
-    return this.request("/api/v1/backups/export", "POST", path ? { path } : {});
+  backup(directory?: string): Promise<{
+    path: string;
+    validation: Record<string, unknown>;
+  }> {
+    return this.request(
+      "/api/v1/backups/export",
+      "POST",
+      directory ? { directory } : {}
+    );
   }
 
   validateBackup(path: string): Promise<Record<string, unknown>> {
@@ -190,5 +243,12 @@ export class AssetTrackApi {
 
   runtimeStatus(): Promise<Record<string, unknown>> {
     return this.request("/api/v1/runtime-status");
+  }
+
+  exportDiagnostics(): Promise<{
+    path: string;
+    payload: Record<string, unknown>;
+  }> {
+    return this.request("/api/v1/diagnostics/export", "POST");
   }
 }

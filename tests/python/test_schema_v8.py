@@ -17,7 +17,13 @@ def test_new_database_is_created_directly_as_schema8(tmp_path):
     assert "current_value" not in validation["columns"]["fixed_assets"]
     assert manager.fetch_one(
         "SELECT COUNT(*) AS count FROM account_definitions"
-    )["count"] == 5
+    )["count"] == 2
+    assert {
+        row["name"]
+        for row in manager.fetch_all(
+            "SELECT name FROM account_definitions ORDER BY sort_order"
+        )
+    } == {"默认现金账户", "默认理财账户"}
     colors = [
         row["color"]
         for row in manager.fetch_all(
@@ -51,3 +57,25 @@ def test_existing_non_schema8_database_is_rejected_without_mutation(tmp_path):
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         } == {"transactions"}
+
+
+def test_empty_account_definitions_are_repaired_without_touching_existing_accounts(
+    tmp_path,
+):
+    manager = SqliteManager(str(tmp_path / "accounts.db"))
+    manager.init_db()
+    manager.execute("DELETE FROM account_definitions")
+    manager.init_db()
+    assert manager.fetch_one(
+        "SELECT COUNT(*) AS count FROM account_definitions"
+    )["count"] == 2
+
+    manager.execute(
+        "INSERT INTO account_definitions "
+        "(account_key,name,account_type,is_active,sort_order) VALUES (?,?,?,?,?)",
+        ("cash-user", "自定义现金", "cash", 1, 9),
+    )
+    manager.init_db()
+    assert manager.fetch_one(
+        "SELECT name FROM account_definitions WHERE account_key='cash-user'"
+    )["name"] == "自定义现金"

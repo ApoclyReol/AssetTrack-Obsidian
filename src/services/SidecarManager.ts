@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import {
   FileSystemAdapter,
-  Notice,
   requestUrl,
   type Plugin
 } from "obsidian";
@@ -74,13 +73,10 @@ export class SidecarManager {
   async ensureReady(): Promise<void> {
     if (this.status.state === "ready") return;
     if (this.startPromise) return this.startPromise;
-    const notice = new Notice("正在启动 Asset Track sidecar，首次启动可能需要一些时间…", 0);
     this.startPromise = this.start();
     try {
       await this.startPromise;
-      new Notice("Asset Track sidecar 已就绪");
     } finally {
-      notice.hide();
       this.startPromise = null;
     }
   }
@@ -112,7 +108,7 @@ export class SidecarManager {
           ASSET_TRACK_PARENT_PID: String(process.pid),
           ASSET_TRACK_DB_PATH: this.databasePath(),
           ASSET_TRACK_DATA_DIR: this.workspacePath(),
-          ASSET_TRACK_APP_VERSION: "3.2.0"
+          ASSET_TRACK_APP_VERSION: "3.3.0"
         },
         stdio: ["ignore", "pipe", "pipe"]
       });
@@ -154,7 +150,7 @@ export class SidecarManager {
         const message = `sidecar 已退出（code=${code ?? "—"}, signal=${signal ?? "—"}）`;
         this.publish({ state: "failed", error: message });
         if (!settled) rejectReady(new Error(message));
-        else new Notice(`${message}，可运行“重启 sidecar”。`);
+        else console.error(`[Asset Track] ${message}`);
       });
     }).catch((error) => {
       this.child?.kill("SIGTERM");

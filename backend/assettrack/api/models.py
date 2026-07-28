@@ -148,6 +148,7 @@ class BackupImportRequest(APIModel):
 
 class BackupExportRequest(APIModel):
     path: str | None = Field(default=None, min_length=1)
+    directory: str | None = Field(default=None, min_length=1)
 
 
 class TransactionPreviewRequest(APIModel):
@@ -155,9 +156,28 @@ class TransactionPreviewRequest(APIModel):
     only_unclassified: bool = False
 
 
+class RuleCandidatesRequest(TransactionPreviewRequest):
+    min_occurrences: int = Field(default=2, ge=1, le=10_000)
+
+
 class CsvImportRequest(APIModel):
     filename: str = "transactions.csv"
     content_base64: str = Field(min_length=1)
+
+
+class CsvColumnMapping(APIModel):
+    date_column: str = Field(min_length=1)
+    product_column: str = Field(min_length=1)
+    amount_column: str = Field(min_length=1)
+    type_column: str = Field(min_length=1)
+    category_column: str | None = None
+    status_column: str | None = None
+    type_values: dict[str, str] = Field(default_factory=dict)
+    included_statuses: list[str] = Field(default_factory=list)
+
+
+class CsvMappedImportRequest(CsvImportRequest):
+    mapping: CsvColumnMapping
 
 
 class RevisionResponse(APIModel):

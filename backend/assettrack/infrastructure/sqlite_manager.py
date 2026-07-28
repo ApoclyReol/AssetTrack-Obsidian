@@ -9,6 +9,7 @@ from assettrack.infrastructure.schema import (
     CURRENT_SCHEMA_VERSION,
     REQUIRED_COLUMNS,
     REQUIRED_TABLES,
+    DEFAULT_ACCOUNT_DEFINITIONS,
     create_current_schema,
 )
 
@@ -35,7 +36,7 @@ class SqliteManager:
         finally:
             conn.close()
 
-    def init_db(self):
+    def init_db(self) -> dict[str, object]:
         """Create a new schema-8 database or validate an existing one."""
         with self.get_connection() as connection:
             tables = {
@@ -64,18 +65,34 @@ class SqliteManager:
                         f"当前版本={version}，缺少表={missing}。"
                         "请清除测试数据库或导入离线转换后的格式 2 备份。"
                     )
+                account_count = int(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM account_definitions"
+                    ).fetchone()[0]
+                )
+                if account_count == 0:
+                    connection.executemany(
+                        """
+                        INSERT INTO account_definitions
+                          (account_key, name, account_type, is_active, sort_order)
+                        VALUES (?, ?, ?, 1, ?)
+                        """,
+                        DEFAULT_ACCOUNT_DEFINITIONS,
+                    )
+                    connection.commit()
 
-        validation = self.validate_schema()
+        validation = self.validate_schema(full=False)
         if not validation["valid"]:
             raise RuntimeError(f"数据库 schema 8 校验失败：{validation}")
         logger.info(f"数据库 schema 8 已就绪: {self.db_path}")
+        return validation
 
     def get_schema_version(self) -> int:
         with self.get_connection() as conn:
             row = conn.execute("PRAGMA user_version").fetchone()
             return int(row[0] or 0)
 
-    def validate_schema(self) -> dict[str, object]:
+    def validate_schema(self, *, full: bool = True) -> dict[str, object]:
         """Validate required tables and return their columns/version.
 
         This is intentionally read-only so backup validation can run against
@@ -98,7 +115,11 @@ class SqliteManager:
                         f"PRAGMA table_info({table})"
                     ).fetchall()
                 ]
-            integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+            integrity = (
+                conn.execute("PRAGMA integrity_check").fetchone()[0]
+                if full
+                else "skipped"
+            )
             version = int(conn.execute("PRAGMA user_version").fetchone()[0] or 0)
             missing_columns = {
                 table: sorted(REQUIRED_COLUMNS[table] - set(table_columns))
@@ -110,7 +131,7 @@ class SqliteManager:
             "valid": (
                 not missing
                 and not missing_columns
-                and integrity == "ok"
+                and integrity in {"ok", "skipped"}
                 and version == CURRENT_SCHEMA_VERSION
             ),
             "missing_tables": missing,

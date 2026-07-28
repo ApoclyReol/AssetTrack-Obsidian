@@ -1,4 +1,7 @@
-# 构建与发行
+# 07 构建与发行
+
+当前版本可直接使用的用户发布文案见
+[Release v1.3.0](logs/release-v1.3.0.md)。
 
 ## 安装产物
 
@@ -32,7 +35,8 @@ Hardened Runtime、notarization 和 Gatekeeper 干净机器测试。
 完整 ZIP 或目录，不申请 Obsidian Community Plugins。标准 Community 安装只获取
 `main.js`、manifest 和 styles，不能交付当前 sidecar 目录。
 
-本地安装完整目录时，应先退出 Obsidian，再在仓库根目录运行：
+安装脚本不是插件运行的必要条件，只是把 Vault 检查、完整复制、保留已有
+`data.json` 和临时目录替换自动化。通常应先退出 Obsidian，再在仓库根目录运行：
 
 ```bash
 zsh scripts/install_to_vault.sh "/path/to/obsidian-vault"
@@ -43,8 +47,22 @@ zsh scripts/install_to_vault.sh "/path/to/obsidian-vault"
 `<Vault>/.obsidian/plugins/asset-track/`；如果目标插件已有 `data.json`，会保留
 该设置文件。运行前应确认已经执行过构建，并在真实 Vault 上自行确认目标路径。
 
+也可以手动复制构建结果。目标插件目录不存在时：
+
+```bash
+VAULT="/path/to/obsidian-vault"
+BUNDLE="/path/to/AssetTrack-Obsidian/build/obsidian/asset-track"
+mkdir -p "$VAULT/.obsidian/plugins/asset-track"
+cp -R "$BUNDLE/." "$VAULT/.obsidian/plugins/asset-track/"
+```
+
+必须复制整个 `asset-track/` 目录，包括 `sidecar/AssetTrackSidecar` 和
+`sidecar/_internal/`，不能只复制 `main.js`。如果目标目录已经存在，建议继续使用
+安装脚本，或先在 Obsidian 关闭后手动替换整个目录并保留其中的 `data.json`，避免
+旧版本残留文件或丢失插件设置。
+
 去除 Python sidecar 后的标准社区发布流程、缺失条件和官方依据见
-[Community Plugins 发布规划](community-release-plan.md)。
+[Community Plugins 发布规划](10-community-release-plan.md)。
 
 ## 发布前验证
 

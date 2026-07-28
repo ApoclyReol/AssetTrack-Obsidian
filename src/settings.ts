@@ -1,7 +1,6 @@
 import {
   AbstractInputSuggest,
   App,
-  Notice,
   PluginSettingTab,
   Setting,
   TFolder
@@ -16,9 +15,15 @@ import {
   databaseVaultPath,
   normalizeWorkspacePath
 } from "./services/workspacePath";
+import {
+  chooseBackupDirectory,
+  chooseBackupFile,
+  chooseBackupSourceDirectory
+} from "./services/nativeDialogs";
 
 export const DEFAULT_SETTINGS: AssetTrackSettings = {
-  workspacePath: ""
+  workspacePath: "",
+  csvMappings: []
 };
 
 function message(error: unknown): string {
@@ -135,7 +140,6 @@ export class AssetTrackSettingTab extends PluginSettingTab {
           pathStatus.setText("正在验证目录并初始化数据库…");
           try {
             await this.plugin.configureWorkspacePath(selectedPath);
-            new Notice("Asset Track 数据目录已就绪");
             this.display();
           } catch (error) {
             pathStatus.setText(`初始化失败：${message(error)}`);
@@ -164,59 +168,95 @@ export class AssetTrackSettingTab extends PluginSettingTab {
       text: "尚未执行操作。",
       cls: "asset-track-settings-status"
     });
+    let exportedPath = "";
+    let revealButton: { setDisabled(value: boolean): unknown } | undefined;
     new Setting(containerEl)
       .setName("立即备份")
-      .setDesc("导出 schema 8 SQLite、一致的九张 CSV 和格式 2 manifest。")
+      .setDesc("选择 Finder 目录后生成单个格式 2 ZIP。")
       .addButton((button) =>
-        button.setButtonText("创建备份").onClick(async () => {
-          button.setDisabled(true);
-          backupStatus.setText("正在创建一致性备份…");
+        button.setButtonText("选择目录并导出").onClick(async () => {
           try {
-            const result = await this.plugin.api.backup();
+            const directory = await chooseBackupDirectory();
+            if (!directory) return;
+            button.setDisabled(true);
+            backupStatus.setText("正在创建并校验一致性 ZIP 备份…");
+            const result = await this.plugin.api.backup(directory);
+            exportedPath = result.path;
+            revealButton?.setDisabled(false);
             backupStatus.setText(`备份完成：${result.path}`);
-            new Notice("Asset Track 备份已完成");
           } catch (error) {
             backupStatus.setText(`备份失败：${message(error)}`);
           } finally {
             button.setDisabled(false);
           }
         })
-      );
+      )
+      .addButton((button) => {
+        revealButton = button;
+        button
+          .setButtonText("在 Finder 中显示")
+          .setDisabled(true)
+          .onClick(() => {
+            if (exportedPath) this.plugin.showPathInFinder(exportedPath);
+          });
+      });
     let restorePath = "";
+    let restoreValidated = false;
+    let restoreButton:
+      | { setDisabled(value: boolean): unknown }
+      | undefined;
+    const validationSummary = (result: Record<string, unknown>): string => {
+      const rows = result.row_counts as Record<string, number> | undefined;
+      const manifest = result.manifest as Record<string, unknown> | undefined;
+      const schema = result.schema as Record<string, unknown> | undefined;
+      const tables = result.required_tables as unknown[] | undefined;
+      return [
+        `校验通过：schema ${String(schema?.schema_version ?? "—")}`,
+        `数据表 ${tables?.length ?? 0} 个`,
+        `流水 ${rows?.transactions ?? 0} 行`,
+        `创建时间 ${String(manifest?.created_at ?? "—")}`,
+        restorePath
+      ].join(" · ");
+    };
+    const selectAndValidate = async (
+      picker: () => Promise<string | null>
+    ): Promise<void> => {
+      const selected = await picker();
+      if (!selected) return;
+      restorePath = selected;
+      restoreValidated = false;
+      restoreButton?.setDisabled(true);
+      backupStatus.setText("正在校验备份候选…");
+      try {
+        const result = await this.plugin.api.validateBackup(restorePath);
+        restoreValidated = true;
+        restoreButton?.setDisabled(false);
+        backupStatus.setText(validationSummary(result));
+      } catch (error) {
+        backupStatus.setText(`校验失败：${message(error)}`);
+      }
+    };
     new Setting(containerEl)
-      .setName("备份路径")
-      .setDesc("支持格式 2 目录、ZIP 或 schema 8 SQLite。必须先验证再恢复。")
-      .addText((text) =>
-        text.setPlaceholder("/absolute/path/to/backup").onChange((value) => {
-          restorePath = value.trim();
-        })
+      .setName("恢复备份")
+      .setDesc("通过 Finder 选择格式 2 ZIP、目录或 schema 8 SQLite。")
+      .addButton((button) =>
+        button.setButtonText("选择备份文件").onClick(() =>
+          void selectAndValidate(() => chooseBackupFile())
+        )
       )
       .addButton((button) =>
-        button.setButtonText("校验路径").onClick(async () => {
-          button.setDisabled(true);
-          backupStatus.setText("正在校验备份候选…");
-          try {
-            const result = await this.plugin.api.validateBackup(restorePath);
-            backupStatus.setText(`校验通过：${JSON.stringify(result)}`);
-          } catch (error) {
-            backupStatus.setText(`校验失败：${message(error)}`);
-          } finally {
-            button.setDisabled(false);
-          }
-        })
+        button.setButtonText("选择备份目录").onClick(() =>
+          void selectAndValidate(() => chooseBackupSourceDirectory())
+        )
       )
-      .addButton((button) =>
-        button.setWarning().setButtonText("确认恢复").onClick(async () => {
-          if (!restorePath) {
-            backupStatus.setText("请先填写并校验备份路径。");
-            return;
-          }
-          try {
-            await this.plugin.api.validateBackup(restorePath);
-          } catch (error) {
-            backupStatus.setText(`恢复前校验失败：${message(error)}`);
-            return;
-          }
+      .addButton((button) => {
+        restoreButton = button;
+        button
+          .setWarning()
+          .setButtonText("确认恢复")
+          .setDisabled(true)
+          .onClick(async () => {
+          if (!restorePath || !restoreValidated) return;
           if (
             !window.confirm(
               `将恢复：\n${restorePath}\n\n恢复前会创建当前数据库一致性安全备份。继续？`
@@ -224,20 +264,19 @@ export class AssetTrackSettingTab extends PluginSettingTab {
           ) return;
           button.setDisabled(true);
           backupStatus.setText("正在 staging 恢复数据库…");
-          const notice = new Notice("正在验证并恢复 Asset Track…", 0);
           try {
             await this.plugin.api.restoreBackup(restorePath);
             this.plugin.notifyDataChanged();
+            restoreValidated = false;
+            button.setDisabled(true);
             backupStatus.setText("恢复完成；实时分析数据已刷新。");
-            new Notice("备份恢复完成");
           } catch (error) {
             backupStatus.setText(`恢复失败：${message(error)}`);
           } finally {
-            notice.hide();
-            button.setDisabled(false);
+            button.setDisabled(!restoreValidated);
           }
-        })
-      );
+          });
+      });
 
     containerEl.createEl("h3", { text: "运行与诊断" });
     const toolsStatus = containerEl.createEl("p", {
