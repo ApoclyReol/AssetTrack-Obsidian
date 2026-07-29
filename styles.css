@@ -22,6 +22,56 @@
   background: var(--background-primary);
 }
 
+.asset-track-app button:not(:disabled),
+.asset-track-modal button:not(:disabled),
+.asset-track-setup-guide button:not(:disabled),
+.asset-track-settings button:not(:disabled) {
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
+}
+
+.asset-track-app button:not(:disabled):hover,
+.asset-track-modal button:not(:disabled):hover,
+.asset-track-setup-guide button:not(:disabled):hover,
+.asset-track-settings button:not(:disabled):hover {
+  color: var(--text-normal);
+  border-color: var(--interactive-accent);
+  background: var(--background-modifier-hover);
+  box-shadow: 0 2px 8px rgba(var(--mono-rgb-100), 0.18);
+  transform: translateY(-1px);
+}
+
+.asset-track-app button.mod-cta:not(:disabled):hover,
+.asset-track-modal button.mod-cta:not(:disabled):hover,
+.asset-track-settings button.mod-cta:not(:disabled):hover,
+.asset-track-app button.is-active:not(:disabled):hover,
+.asset-track-analysis-nav button.is-active:not(:disabled):hover,
+.asset-track-view-switcher button.is-active:not(:disabled):hover {
+  color: var(--text-on-accent);
+  background: var(--interactive-accent-hover);
+}
+
+.asset-track-app button:disabled,
+.asset-track-modal button:disabled,
+.asset-track-setup-guide button:disabled,
+.asset-track-settings button:disabled {
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .asset-track-app button,
+  .asset-track-modal button,
+  .asset-track-setup-guide button,
+  .asset-track-settings button {
+    transition: none;
+  }
+}
+
 .asset-track-boot {
   display: grid;
   min-height: 180px;

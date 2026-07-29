@@ -96,6 +96,7 @@ export class AssetTrackSettingTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
+    containerEl.addClass("asset-track-settings");
     containerEl.createEl("h2", { text: "Asset Track" });
     containerEl.createEl("p", {
       text:

@@ -20,8 +20,10 @@ Vault、node_modules 或构建产物。
 ```bash
 npm ci --cache /private/tmp/asset-track-obsidian-npm-cache
 npm run typecheck
+npm run lint
 npm test
 npm run build
+npm run release:check
 git diff --check
 ```
 

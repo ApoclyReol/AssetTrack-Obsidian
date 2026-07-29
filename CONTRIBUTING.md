@@ -17,8 +17,10 @@ AssetTrack 处理本地个人财务数据。修改前先阅读 `AGENTS.md`，检
 ```bash
 npm ci
 npm run typecheck
+npm run lint
 npm test
 npm run build
+npm run release:check
 git diff --check
 zsh scripts/build_plugin_bundle.sh
 ```
