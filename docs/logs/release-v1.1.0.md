@@ -22,8 +22,8 @@
 
 ## 文档与测试
 
-- README 完善为 English-first 的完整英文说明，并补齐对等中文安装、使用、语言、
-  数据、隐私与开发章节。
+- README 完善为 English-first 的完整英文说明，新增独立 `README.zh-CN.md`
+  中文版本，并在两份文档顶部提供语言切换入口。
 - 新增语言判定测试和英文账单导入界面测试。
 - typecheck、53 项测试、lint、生产构建、release:check 和 `git diff --check`
   已通过。

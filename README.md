@@ -1,5 +1,7 @@
 # Asset Track
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 Asset Track is a desktop-only, local-first personal finance tracker. It records
 monthly accounts, transactions, loans, investments, and fixed assets, and provides
 bill imports, rule-based categorization, analytics, reconciliation, and verified
@@ -117,58 +119,3 @@ Project documentation:
 - [Troubleshooting](docs/08-troubleshooting.md)
 - [Community Plugins release plan](docs/10-community-release-plan.md)
 - [Release history](docs/logs/README.md)
-
-## 中文说明
-
-Asset Track 是桌面版、本地优先的个人财务工具，用于记录月度账户、流水、借款、
-理财和固定资产，并提供账单导入、规则归类、实时分析、对账和一致性备份。插件
-不联网、不含遥测，SQLite 是唯一事实源。
-
-### 安装
-
-1. 从同一 GitHub Release 下载 `main.js`、`manifest.json` 和 `styles.css`。
-2. 在 Vault 的 `.obsidian/plugins/` 下创建 `asset-track/` 目录。
-3. 将三个文件放入该目录，重启应用并在“设置 → 第三方插件”中启用。
-
-### 开始使用
-
-1. 打开“设置 → Asset Track”，选择 Vault 内的专用数据目录。
-2. 空目录选择“创建新数据库”；已有有效数据库选择“载入数据库”。
-3. 从命令面板或侧边栏打开编辑器，配置账户与分类后录入或导入数据。
-4. 导入真实账单前，先从设置页导出并验证一份手动 ZIP 备份。
-
-### 语言
-
-Asset Track 自动跟随当前应用语言。`zh`、`zh-CN`、`zh-TW` 及其他 `zh-*`
-中文环境显示中文，其他语言环境统一回退英文。修改应用语言后，请重新加载插件或
-重启应用。
-
-插件只翻译产品界面和内置业务标签。用户创建的账户、分类、交易对方、商品和流水
-说明始终按数据库原文显示，不会因切换语言而修改。
-
-### 数据、备份与隐私
-
-数据库固定保存为 `<数据目录>/accounting_system.db`，保护快照位于
-`<数据目录>/backups/`。迁移数据目录、切换数据库和恢复操作前会创建保护快照；
-设置页可以导出并校验完整 ZIP 备份。插件不执行定时或在线备份，禁用或卸载插件
-也不会删除数据库、保护快照或手动备份。
-
-插件仅支持桌面版 macOS、Windows 和 Linux，最低应用版本为 1.9.10。SQLite、
-一致性快照和 ZIP 备份恢复需要直接文件系统访问；插件不联网、不含遥测，也不读取
-或写入系统剪贴板。完整权限边界见 [SECURITY.md](SECURITY.md)。
-
-### 开发
-
-```bash
-npm ci
-npm run typecheck
-npm run lint
-npm test
-npm run build
-npm run release:check
-```
-
-当前版本为 1.1.0，数据库 schema 为 9。项目长期文档位于 [docs/](docs/)。
-
-本项目使用 [MIT License](LICENSE)。直接生产依赖的许可证见
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
