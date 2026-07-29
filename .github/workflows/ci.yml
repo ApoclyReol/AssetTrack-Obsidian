@@ -37,7 +37,7 @@ jobs:
         with:
           node-version: 22.16.0
           cache: npm
-      - run: zsh scripts/build_plugin_bundle.sh
+      - run: bash scripts/build_plugin_bundle.sh
       - uses: actions/upload-artifact@v4
         with:
           name: asset-track-community-plugin
