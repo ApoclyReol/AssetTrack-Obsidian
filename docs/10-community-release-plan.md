@@ -2,8 +2,8 @@
 
 ## 当前结论
 
-v1.0.4 已具备标准 Community Plugin 三文件结构、根目录 MIT LICENSE、依赖声明、
-lint、CI 和发布校验：
+v1.0.5 已具备标准 Community Plugin 三文件结构、英文 manifest/README、根目录
+MIT LICENSE、依赖声明、lint、CI、artifact attestations 和发布校验：
 
 ```text
 main.js
@@ -21,9 +21,9 @@ styles.css
 - `manifest.json` 最低 Obsidian 版本为 1.9.10。
 - 运行时探测 Node ≥22.16、`DatabaseSync` 和 `sqlite.backup`；旧桌面安装器只显示
   升级提示，不修改数据。
-- `versions.json` 声明 1.0.4 最低兼容 Obsidian 1.9.10。
+- `versions.json` 声明 1.0.5 最低兼容 Obsidian 1.9.10。
 - 稳定版冻结 schema 9；Community 插件不包含旧数据库自动迁移路径。
-- 生产 `main.js` 打包 React、Recharts 和 SheetJS；许可证与 lockfile 边界见根目录
+- 生产 `main.js` 打包 React 18、Recharts 和 SheetJS；许可证与 lockfile 边界见根目录
   `THIRD_PARTY_NOTICES.md`。生产文件大小由当前 `release:check` 记录；SheetJS
   当前静态导入，Recharts 2.x 已停止活跃维护。
 
@@ -58,19 +58,19 @@ styles.css
   `npm ci → typecheck → lint → test → build → release:check`。
 - `release:check` 校验 package/manifest/versions、MIT 声明、三发布源文件、
   SheetJS CDN lockfile integrity，并记录生产 `dist/main.js` 字节数。
-- 发布前复查 GitHub Release 包含标准 `main.js`、`manifest.json` 和
-  `styles.css` 插件文件。
+- tag 工作流只发布标准 `main.js`、`manifest.json` 和 `styles.css`，并为三文件
+  生成 GitHub artifact attestations。
 - README、长期文档、CHANGELOG、SECURITY、release 日志与 release 资产一致。
 - Git 不包含数据库、备份、真实账单、Vault、日志、密钥、依赖或构建缓存。
-- 从正式 v1.0.4 bundle 采集主要功能截图，并记录一次冷启动/插件加载耗时。
+- 从正式 v1.0.5 bundle 采集主要功能截图，并记录一次冷启动/插件加载耗时。
 - 三平台 smoke 全部完成，Community Directory 名称与 ID 再次确认无冲突。
 
 ## GitHub Release 与提交
 
-1. tag、`package.json`、manifest 和 `versions.json` 的 1.0.4 完全一致。
-2. Release 上传 `main.js`、`manifest.json` 和 `styles.css`。
+1. tag、`package.json`、manifest 和 `versions.json` 的 1.0.5 完全一致。
+2. Release 只上传 `main.js`、`manifest.json` 和 `styles.css`，并生成证明。
 3. 用全新 Vault 和已有 schema 9 数据库的复制 Vault从 Release 安装验证。
-4. 完成上表并保存脱敏记录后，以 `1.0.4` 提交 Community Plugins。
+4. 完成上表并保存脱敏记录后，以 `1.0.5` 提交 Community Plugins。
 5. 按官方
    [Submit your plugin](https://docs.obsidian.md/Plugins/Releasing/Submit%20your%20plugin)
    流程提交仓库和 manifest。

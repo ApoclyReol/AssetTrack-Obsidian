@@ -343,28 +343,6 @@ export default class AssetTrackPlugin extends Plugin {
     electronShell.showItemInFolder(path);
   }
 
-  async copyDiagnostics(): Promise<void> {
-    const [meta, runtime, exported] = await Promise.all([
-      this.api.meta(),
-      this.api.runtimeStatus(),
-      this.api.exportDiagnostics()
-    ]);
-    const diagnostic = {
-      plugin_version: this.manifest.version,
-      service_version: meta.app_version,
-      protocol_version: meta.protocol_version,
-      schema_version: runtime.schema_version,
-      schema_validation: exported.payload.schema,
-      data_directory: this.settings.dataDirectory,
-      db_path: runtime.db_path,
-      source_revision: meta.source_revision,
-      runtime: "typescript"
-    };
-    await activeWindow.navigator.clipboard.writeText(
-      JSON.stringify(diagnostic, null, 2)
-    );
-  }
-
   async reopenDatabase(): Promise<void> {
     await this.api.reopen();
   }

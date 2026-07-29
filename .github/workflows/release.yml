@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.16.0
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: npm run release:check
+      - name: Verify tag version
+        shell: bash
+        run: |
+          version="$(node -p "require('./manifest.json').version")"
+          test "${GITHUB_REF_NAME}" = "${version}"
+      - name: Stage standard plugin assets
+        shell: bash
+        run: |
+          mkdir release
+          cp dist/main.js release/main.js
+          cp manifest.json styles.css release/
+          test "$(find release -type f | wc -l)" -eq 3
+      - name: Attest release assets
+        uses: actions/attest@v4
+        with:
+          subject-path: "release/*"
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${GITHUB_REF_NAME}"
+          release/main.js release/manifest.json release/styles.css
+          --verify-tag --generate-notes

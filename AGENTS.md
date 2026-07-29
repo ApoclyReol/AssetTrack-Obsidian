@@ -41,8 +41,8 @@ docs/                                   当前架构、用户、开发与发行�
 
 ## 当前 handoff
 
-- v1.0.4 是当前正式版本：保持 schema 9 和财务口径，修复设置、Vault 相对路径、
-  数据库结构和恢复校验；失败的账单导入不会部分修改草稿，单文件限制为 20 MiB。
+- v1.0.5 是当前正式版本：保持 schema 9 和财务口径，修复 Community Plugins
+  manifest、英文 README、动态脚本扫描和发布资产来源证明。
 - 确认操作使用 Obsidian 原生 Modal，CSV 映射窗口支持焦点陷阱、Escape 和状态
   播报；流水逐项表按可视行渲染，分块编号为线性预计算。
 - schema 8 私有数据已在 2026-07-28 使用一次性离线流程迁移并核验；迁移工具及
@@ -54,7 +54,7 @@ docs/                                   当前架构、用户、开发与发行�
 - 插件实例共享 `DatabaseManager`、Repository、Service、写入队列和数据变更事件；
   每个 ItemView 仍独立保存草稿与 dirty 状态。
 - 继续维护前先读 `docs/00-reading-guide.md`；本次实现、兼容边界、测试和后续
-  注意事项详见 `docs/logs/release-v1.0.4.md`。
+  注意事项详见 `docs/logs/release-v1.0.5.md`。
 - 后续每次正式更新都在 `docs/logs/` 新增 `release-vN.N.N.md`，并同步修改受影响
   的编号长期文档，不把当前事实只留在 release 日志中。
 

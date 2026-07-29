@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.5
+
+- 修正 Community Plugins 要求的英文 manifest 描述及结尾标点。
+- README 改为英文优先并补齐安装、开始使用、权限与数据边界说明，同时保留中文
+  快速说明。
+- 移除未使用的程序化剪贴板访问；生产 React 运行时调整为 18.3.1，消除 bundle
+  中被审核器判定为动态脚本注入的代码。
+- 新增 tag 驱动的 GitHub Release 工作流，只发布标准三文件并生成 artifact
+  attestations；发布校验增加 manifest、README 和生产 bundle 审核门禁。
+
 ## 1.0.4
 
 - 修复异常设置、非法 Vault 相对路径和损坏 schema 9 数据库未能被完整拦截的问题；

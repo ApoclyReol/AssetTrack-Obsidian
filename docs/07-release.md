@@ -1,6 +1,6 @@
 # 07 构建与发行
 
-当前发布文案见 [Release v1.0.4](logs/release-v1.0.4.md)。
+当前发布文案见 [Release v1.0.5](logs/release-v1.0.5.md)。
 
 ## 安装产物
 
@@ -28,8 +28,10 @@ Release 的 `main.js`、`manifest.json` 和 `styles.css`。更新时保留已有
 
 ## GitHub Release
 
-- tag 与 manifest 版本完全一致，即 `1.0.4`；
-- 上传 `main.js`、`manifest.json` 和 `styles.css`；
+- tag 与 manifest 版本完全一致，即 `1.0.5`；
+- 推送版本 tag 后由 `.github/workflows/release.yml` 重新执行完整验证和生产构建；
+- 只上传 `main.js`、`manifest.json` 和 `styles.css`，不上传插件 ZIP；
+- 对标准三文件生成 GitHub artifact attestations；
 - 仓库根目录保留 `versions.json`，声明各版本最低兼容 Obsidian 版本；
 - 首次正式版先使用复制 Vault，真实数据测试前创建并校验 ZIP 备份；
 - Community Plugins 稳定提交门槛见

@@ -66,5 +66,5 @@ AssetTrack 是个人使用的桌面版 Obsidian 财务插件。所有数据保�
 - AI 分类、银行同步、移动端和多设备并发写同一 SQLite。
 - 移动端和不具备 `node:sqlite` 的旧 Obsidian 桌面安装器。
 
-v1.0.4 已采用纯 TypeScript 运行链并具备标准三文件产物；正式提交 Community
+v1.0.5 已采用纯 TypeScript 运行链并具备标准三文件产物；正式提交 Community
 Plugins 前仍需完成三平台真实 Obsidian smoke 和作者许可协议。
