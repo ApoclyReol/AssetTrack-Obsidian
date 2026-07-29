@@ -9,6 +9,8 @@
   切换，以及数据库直接位于用户选择的数据目录。
 - [Release v1.0.2](release-v1.0.2.md)：社区发布合规、LICENSE、安全披露、
   lint/CI、发布校验和按钮 hover 反馈。
+- [Release v1.0.3](release-v1.0.3.md)：加强按钮 hover、手型指针、按下反馈与
+  键盘焦点可见性。
 
 后续每次正式更新新增 `release-vN.N.N.md`，至少记录：
 

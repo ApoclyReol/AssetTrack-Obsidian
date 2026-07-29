@@ -13,10 +13,10 @@ SheetJS 使用固定 CDN tarball，`package-lock.json` 同时锁定下载地址�
 integrity。每次依赖更新都应重新核对许可证、lockfile 与生产 bundle 大小。
 
 当前 SheetJS 由账单解析模块静态导入，因此随 React、Recharts 一起进入初始
-`main.js`，尚未延迟加载。v1.0.2 生产文件为 1,895,071 bytes；是否拆分 SheetJS
+`main.js`，尚未延迟加载。v1.0.3 生产文件为 1,895,071 bytes；是否拆分 SheetJS
 必须结合三平台真实插件加载耗时和 Obsidian 的单文件发布约束评估。
 
 安装依赖时 npm 已提示 Recharts 2.x 分支不再活跃。升级到 Recharts 3 属于需要
-图表回归验证的后续工作，不在 v1.0.2 发布合规修改中直接跨主版本升级。
+图表回归验证的后续工作，不在 v1.0.3 交互更新中直接跨主版本升级。
 
 Obsidian、Electron 和开发/测试工具未打入插件的三个发布文件，分别遵循其自身许可。

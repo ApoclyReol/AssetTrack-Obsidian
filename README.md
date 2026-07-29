@@ -33,7 +33,7 @@ SQLite 是唯一事实源；无需账户，不联网，也不含遥测。
 
 ## 兼容要求
 
-- 当前版本：1.0.2；SQLite schema：9。
+- 当前版本：1.0.3；SQLite schema：9。
 - 仅支持 macOS、Windows、Linux 桌面版 Obsidian，不支持移动端。
 - 最低 Obsidian 版本为 1.9.10，并要求桌面运行时具备 Node ≥22.16、
   `DatabaseSync` 和 `sqlite.backup`。
@@ -42,7 +42,7 @@ SQLite 是唯一事实源；无需账户，不联网，也不含遥测。
 
 正式社区发布前的三平台真实 Obsidian smoke 状态与测试矩阵见
 [Community Plugins 发布规划](docs/10-community-release-plan.md)。界面截图将在该
-真实 smoke 中从正式 v1.0.2 三文件产物采集，避免使用与发布版本不一致的示意图。
+真实 smoke 中从正式 v1.0.3 三文件产物采集，避免使用与发布版本不一致的示意图。
 
 ## 隐私与安全
 
@@ -68,7 +68,7 @@ zsh scripts/build_plugin_bundle.sh
 ```
 
 产物位于 `build/obsidian/asset-track/`，只包含 `main.js`、`manifest.json` 和
-`styles.css`；同时生成 `build/AssetTrack-1.0.2.zip`。手动安装时必须先解压完整
+`styles.css`；同时生成 `build/AssetTrack-1.0.3.zip`。手动安装时必须先解压完整
 `asset-track/` 目录到 `<Vault>/.obsidian/plugins/`，不能把 ZIP 留在插件目录。
 
 ## 文档

@@ -41,8 +41,8 @@ docs/                                   当前架构、用户、开发与发行�
 
 ## 当前 handoff
 
-- v1.0.2 是当前正式版本：在 v1.0.1 数据库生命周期基础上补齐社区发布合规、
-  lint/CI、发布校验与按钮反馈；流水和
+- v1.0.3 是当前正式版本：在 v1.0.2 社区发布合规基础上加强普通、主操作、选中
+  和危险按钮的 hover、指针、按下及键盘焦点反馈；流水和
   规则支持 `counterparty`，账单导入支持
   CSV/XLSX/XLS，新数据库固定为 schema 9。
 - schema 8 私有数据已在 2026-07-28 使用一次性离线流程迁移并核验；迁移工具及
@@ -54,7 +54,7 @@ docs/                                   当前架构、用户、开发与发行�
 - 插件实例共享 `DatabaseManager`、Repository、Service、写入队列和数据变更事件；
   每个 ItemView 仍独立保存草稿与 dirty 状态。
 - 继续维护前先读 `docs/00-reading-guide.md`；本次实现、兼容边界、测试和后续
-  注意事项详见 `docs/logs/release-v1.0.2.md`。
+  注意事项详见 `docs/logs/release-v1.0.3.md`。
 - 后续每次正式更新都在 `docs/logs/` 新增 `release-vN.N.N.md`，并同步修改受影响
   的编号长期文档，不把当前事实只留在 release 日志中。
 
