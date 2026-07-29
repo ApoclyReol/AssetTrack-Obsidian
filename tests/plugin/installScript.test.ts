@@ -11,8 +11,12 @@ import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
+const hasZsh = spawnSync("zsh", ["--version"], {
+  encoding: "utf8"
+}).status === 0;
+
 describe("Vault installer", () => {
-  it("restores the previous plugin when the staged move fails", () => {
+  it.skipIf(!hasZsh)("restores the previous plugin when the staged move fails", () => {
     const root = mkdtempSync(join(tmpdir(), "asset-track-install-"));
     const vault = join(root, "vault");
     const configDirectory = [".", "obsidian"].join("");
