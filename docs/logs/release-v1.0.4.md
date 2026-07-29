@@ -8,8 +8,7 @@
 > [!IMPORTANT]
 > 当前版本尚未进入 Obsidian Community Plugins，不能通过 Obsidian 社区插件市场
 > 搜索或自动安装。请下载本 Release 的 `main.js`、`manifest.json` 和
-> `styles.css`，放入 `<Vault>/.obsidian/plugins/asset-track/` 后手动启用；
-> `AssetTrack-1.0.4.zip` 提供相同三文件的完整目录安装包。
+> `styles.css`，放入 `<Vault>/.obsidian/plugins/asset-track/` 后手动启用。
 
 ## 稳定性与数据安全修复
 
@@ -34,9 +33,7 @@
 ## 工程与发布
 
 - `npm run lint` 执行完整规则，当前为零 warning。
-- 安装脚本使用 staging、旧目录备份和失败回滚；npm 构建缓存改为可移植临时目录。
-- CI 在 Ubuntu、macOS 和 Windows 执行静态验证；Ubuntu 生成标准三文件 zip、
-  上传 artifact，并在 push 时生成 provenance。
+- CI 在 Ubuntu、macOS 和 Windows 执行类型、lint、测试、构建和发布静态验证。
 - 版本更新为 1.0.4，最低 Obsidian 版本仍为 1.9.10，schema 仍为 9，备份格式和
   财务口径不变。
 
@@ -47,7 +44,7 @@
 - `npm test`：14 个测试文件、45 个测试通过。
 - `npm run build` 与 `npm run release:check`：通过。
 - production `dist/main.js`：1,905,551 bytes。
-- 标准三文件 bundle、zip 内容和 `node:sqlite` smoke 由正式 bundle 脚本复核。
+- 标准三文件内容和 `node:sqlite` smoke 已复核。
 
 ## 尚需人工完成
 

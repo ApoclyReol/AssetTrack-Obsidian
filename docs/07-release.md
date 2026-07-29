@@ -4,39 +4,27 @@
 
 ## 安装产物
 
-```text
-build/obsidian/asset-track/
-├── main.js
-├── manifest.json
-└── styles.css
-```
-
-三个文件组成统一桌面插件，不包含 sidecar、Python、平台二进制或架构目录。
-构建同时生成 `build/AssetTrack-1.0.4.zip`，ZIP 内只有一个 `asset-track/`
-顶层目录及上述三个文件。
+GitHub Release 直接上传 `main.js`、`manifest.json` 和 `styles.css`。三个文件
+组成统一桌面插件，不包含 sidecar、Python、平台二进制或架构目录。
 
 ## 构建与验证
 
 ```bash
-zsh scripts/build_plugin_bundle.sh
-zsh scripts/smoke_test_plugin.sh build/obsidian/asset-track
+npm run typecheck
+npm run lint
+npm test
+npm run build
+npm run release:check
 ```
 
-脚本执行 npm clean install、typecheck、lint、插件测试、production esbuild、
-版本和依赖锁校验及三文件结构审计，并拒绝包含旧 sidecar/loopback 标识的产物。
-脚本同时输出生产 `main.js` 的字节数。
+构建产物为 `dist/main.js`；发布时将它以 `main.js` 为附件名上传，并同时上传仓库
+根目录的 `manifest.json` 和 `styles.css`。
 
 ## 本地安装
 
-退出 Obsidian 后运行：
-
-```bash
-zsh scripts/install_to_vault.sh "/path/to/obsidian-vault"
-```
-
-脚本把构建目录原子替换到
-`<Vault>/.obsidian/plugins/asset-track/`，并保留已有 `data.json`。也可以手动复制
-完整 `asset-track/` 目录。ZIP 必须先解压，不能直接留在 `plugins` 目录。
+退出 Obsidian 后，在 `<Vault>/.obsidian/plugins/asset-track/` 中放入同一
+Release 的 `main.js`、`manifest.json` 和 `styles.css`。更新时保留已有
+`data.json`，然后重新启动 Obsidian。
 
 ## GitHub Release
 

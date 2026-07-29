@@ -6,7 +6,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   validate:
@@ -27,27 +26,3 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run release:check
-
-  package:
-    needs: validate
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.16.0
-          cache: npm
-      - run: bash scripts/build_plugin_bundle.sh
-      - uses: actions/upload-artifact@v4
-        with:
-          name: asset-track-community-plugin
-          path: |
-            build/AssetTrack-*.zip
-            build/obsidian/asset-track/main.js
-            build/obsidian/asset-track/manifest.json
-            build/obsidian/asset-track/styles.css
-          if-no-files-found: error
-      - uses: actions/attest-build-provenance@v2
-        if: github.event_name == 'push'
-        with:
-          subject-path: build/AssetTrack-*.zip

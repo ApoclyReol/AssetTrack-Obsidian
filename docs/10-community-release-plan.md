@@ -58,7 +58,8 @@ smoke 仍是提交前发布门槛；未实测的平台不得标记完成。** Co
 - Ubuntu package job 生成并上传标准三文件与 zip；push 构建生成 provenance。
 - `release:check` 校验 package/manifest/versions、MIT 声明、三发布源文件、
   SheetJS CDN lockfile integrity，并记录生产 `dist/main.js` 字节数。
-- bundle 脚本复查安装目录仅有三个文件，ZIP 仅有一个 `asset-track/` 顶层目录。
+- 发布前复查 GitHub Release 包含标准 `main.js`、`manifest.json` 和
+  `styles.css` 插件文件。
 - README、长期文档、CHANGELOG、SECURITY、release 日志与 release 资产一致。
 - Git 不包含数据库、备份、真实账单、Vault、日志、密钥、依赖或构建缓存。
 - 从正式 v1.0.4 bundle 采集主要功能截图，并记录一次冷启动/插件加载耗时。

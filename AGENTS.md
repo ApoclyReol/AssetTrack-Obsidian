@@ -24,7 +24,7 @@ npm run typecheck
 npm run lint
 npm test
 npm run build
-zsh scripts/build_plugin_bundle.sh
+npm run release:check
 ```
 
 ## 分层边界

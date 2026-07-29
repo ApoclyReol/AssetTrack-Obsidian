@@ -13,7 +13,7 @@ SQLite 是唯一事实源；无需账户，不联网，也不含遥测。
 
 1. 在 Vault 的 `.obsidian/plugins/` 下创建 `asset-track/` 目录。
 2. 将同一 GitHub Release 的 `main.js`、`manifest.json` 和 `styles.css` 放入
-   `asset-track/`；也可以下载 `AssetTrack-1.0.4.zip`，解压其中完整目录。
+   `asset-track/`。
 3. 重启 Obsidian，或刷新“设置 → 第三方插件”，然后启用 **Asset Track**。
 4. 在 Obsidian 设置中打开 **Asset Track**。
 5. 选择 Vault 内一个专用的“Asset-track 数据目录”。
@@ -70,15 +70,9 @@ npm run build
 npm run release:check
 ```
 
-构建完整安装目录：
-
-```bash
-zsh scripts/build_plugin_bundle.sh
-```
-
-产物位于 `build/obsidian/asset-track/`，只包含 `main.js`、`manifest.json` 和
-`styles.css`；同时生成 `build/AssetTrack-1.0.4.zip`。手动安装时必须先解压完整
-`asset-track/` 目录到 `<Vault>/.obsidian/plugins/`，不能把 ZIP 留在插件目录。
+发布时上传 `dist/main.js`（重命名为 `main.js`）、`manifest.json` 和
+`styles.css`。手动安装时将这三个文件放入
+`<Vault>/.obsidian/plugins/asset-track/`。
 
 ## 文档
 

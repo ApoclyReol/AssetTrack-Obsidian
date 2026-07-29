@@ -27,12 +27,11 @@ npm run release:check
 git diff --check
 ```
 
-完整标准插件：
+发布文件验证：
 
 ```bash
-zsh scripts/build_plugin_bundle.sh
-zsh scripts/install_to_vault.sh /path/to/test-vault
-zsh scripts/smoke_test_plugin.sh /path/to/test-vault
+npm run build
+npm run release:check
 ```
 
 测试覆盖 schema 9、中文路径、WAL、整体事务、revision、冻结 golden、
