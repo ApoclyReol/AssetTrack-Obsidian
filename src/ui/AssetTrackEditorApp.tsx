@@ -54,6 +54,7 @@ import {
   calculateVirtualRowRange,
   virtualSpacerBlocks
 } from "./virtualRows";
+import { businessLabel, displayError, getLocale, t } from "../i18n";
 
 interface Props {
   api: AssetTrackService;
@@ -101,11 +102,12 @@ function candidateKey(candidate: RuleCandidate): string {
 function messageFor(error: unknown): string {
   if (error instanceof AssetTrackError && error.status === 409) {
     const detail = error.detail as { expected?: number; actual?: number };
-    return `revision 冲突：草稿基于 ${detail.expected ?? "—"}，当前数据库为 ${
-      detail.actual ?? "—"
-    }。请重新加载。`;
+    return t(
+      `revision 冲突：草稿基于 ${detail.expected ?? "—"}，当前数据库为 ${detail.actual ?? "—"}。请重新加载。`,
+      `Revision conflict: the draft is based on ${detail.expected ?? "—"}, but the database is at ${detail.actual ?? "—"}. Reload and try again.`
+    );
   }
-  return error instanceof Error ? error.message : String(error);
+  return displayError(error);
 }
 
 function number(value: string): number {
@@ -120,21 +122,27 @@ function clone<T>(data: T): T {
 function readFileBase64(file: File): Promise<string> {
   if (file.size > MAX_IMPORT_FILE_BYTES) {
     return Promise.reject(
-      new Error("账单文件不能超过 20 MiB；请拆分后重新导入")
+      new Error(t(
+        "账单文件不能超过 20 MiB；请拆分后重新导入",
+        "Statement files cannot exceed 20 MiB. Split the file and import it again."
+      ))
     );
   }
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(reader.error ?? new Error("账单文件读取失败"));
+    reader.onerror = () => reject(reader.error ?? new Error(t(
+      "账单文件读取失败",
+      "Failed to read the statement file."
+    )));
     reader.onload = () => {
       if (typeof reader.result !== "string") {
-        reject(new Error("账单文件编码失败"));
+        reject(new Error(t("账单文件编码失败", "Failed to encode the statement file.")));
         return;
       }
       const result = reader.result;
       const separator = result.indexOf(",");
       if (separator < 0) {
-        reject(new Error("账单文件编码失败"));
+        reject(new Error(t("账单文件编码失败", "Failed to encode the statement file.")));
         return;
       }
       resolve(result.slice(separator + 1));
@@ -147,7 +155,7 @@ function compareValues(left: unknown, right: unknown): number {
   if (typeof left === "number" || typeof right === "number") {
     return Number(left ?? 0) - Number(right ?? 0);
   }
-  return scalarText(left).localeCompare(scalarText(right), "zh-CN", {
+  return scalarText(left).localeCompare(scalarText(right), getLocale(), {
     numeric: true,
     sensitivity: "base"
   });
@@ -192,9 +200,10 @@ function SortButton({
     <button
       type="button"
       className="asset-track-sort"
-      aria-label={`${label}排序${
-        active ? `，当前${sort.direction === "asc" ? "升序" : "降序"}` : ""
-      }`}
+      aria-label={t(
+        `${label}排序${active ? `，当前${sort.direction === "asc" ? "升序" : "降序"}` : ""}`,
+        `Sort by ${label}${active ? `, currently ${sort.direction === "asc" ? "ascending" : "descending"}` : ""}`
+      )}
       aria-pressed={active}
       aria-sort={
         active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"
@@ -274,9 +283,9 @@ export function AssetTrackEditorApp({
     if (
       dirty
       && !await confirmAction(
-        "放弃未保存草稿？",
-        "当前草稿尚未保存。放弃更改并切换？",
-        "放弃并切换"
+        t("放弃未保存草稿？", "Discard unsaved changes?"),
+        t("当前草稿尚未保存。放弃更改并切换？", "The current draft has not been saved. Discard the changes and switch?"),
+        t("放弃并切换", "Discard and switch")
       )
     ) return;
     setDirty(false);
@@ -286,9 +295,9 @@ export function AssetTrackEditorApp({
     if (
       dirty
       && !await confirmAction(
-        "切换月份并放弃草稿？",
-        "当前月份草稿尚未保存。放弃更改并切换？",
-        "放弃并切换"
+        t("切换月份并放弃草稿？", "Switch months and discard the draft?"),
+        t("当前月份草稿尚未保存。放弃更改并切换？", "The current month has unsaved changes. Discard them and switch?"),
+        t("放弃并切换", "Discard and switch")
       )
     ) return;
     setDirty(false);
@@ -296,20 +305,20 @@ export function AssetTrackEditorApp({
   };
   const createNext = async () => {
     if (!monthPolicy?.can_create) {
-      throw new Error(monthPolicy?.reason ?? "当前不能创建新月份");
+      throw new Error(monthPolicy?.reason ?? t("当前不能创建新月份", "A new month cannot be created right now."));
     }
     const target = monthPolicy.next_target;
     await api.createMonth(target);
     await refreshMonths();
     setMonth(target);
     setDataVersion((value) => value + 1);
-    new Notice(`${target} 已创建`);
+    new Notice(t(`${target} 已创建`, `${target} created`));
   };
 
   if (initializing) {
     return (
       <div className="asset-track-app asset-track-boot">
-        {showPreparing && <span>正在读取 Asset Track 数据…</span>}
+        {showPreparing && <span>{t("正在读取 Asset Track 数据…", "Loading Asset Track data…")}</span>}
       </div>
     );
   }
@@ -319,7 +328,7 @@ export function AssetTrackEditorApp({
       <header className="asset-track-toolbar">
         <div>
           <strong>Asset Track</strong>
-          <span>SQLite 事实 · TypeScript 计算 · 实时分析</span>
+          <span>{t("SQLite 事实 · TypeScript 计算 · 实时分析", "SQLite source of truth · TypeScript calculations · Live analytics")}</span>
         </div>
         <nav>
           {EDITOR_MODES.map((item) => (
@@ -328,7 +337,7 @@ export function AssetTrackEditorApp({
               className={mode === item ? "is-active" : ""}
               onClick={() => void switchMode(item)}
             >
-              {{ analysis: "分析", transactions: "流水", debts: "借款", rules: "规则" }[item]}
+              {{ analysis: t("分析", "Analysis"), transactions: t("流水", "Transactions"), debts: t("借款", "Debts"), rules: t("规则", "Rules") }[item]}
             </button>
           ))}
         </nav>
@@ -347,14 +356,14 @@ export function AssetTrackEditorApp({
           </select>
           <button
             disabled={!monthPolicy?.can_create}
-            title={monthPolicy?.reason ?? `创建 ${monthPolicy?.next_target ?? ""}`}
+            title={displayError(monthPolicy?.reason ?? t(`创建 ${monthPolicy?.next_target ?? ""}`, `Create ${monthPolicy?.next_target ?? ""}`))}
             onClick={() => void createNext().catch((error) => new Notice(messageFor(error)))}
           >
             {monthPolicy?.can_create
-              ? `创建 ${monthPolicy.next_target}`
-              : "暂不能创建月份"}
+              ? t(`创建 ${monthPolicy.next_target}`, `Create ${monthPolicy.next_target}`)
+              : t("暂不能创建月份", "Cannot create a month yet")}
           </button>
-          {monthPolicy?.reason && <span>{monthPolicy.reason}</span>}
+          {monthPolicy?.reason && <span>{displayError(monthPolicy.reason)}</span>}
         </div>
       )}
       {mode === "analysis" && (
@@ -389,10 +398,10 @@ export function AssetTrackEditorApp({
           saveCsvMapping={saveCsvMapping}
         />
       )}
-      {mode === "transactions" && !month && <EmptyState text="尚无月份，请创建第一个月份。" />}
+      {mode === "transactions" && !month && <EmptyState text={t("尚无月份，请创建第一个月份。", "No months exist yet. Create the first month.")} />}
       {mode === "debts" && (
         <CollectionEditor
-          title="借款管理"
+          title={t("借款管理", "Debt management")}
           load={() => api.debts()}
           save={(revision, rows) => api.saveDebts(revision, rows)}
           createRow={() => ({
@@ -404,12 +413,12 @@ export function AssetTrackEditorApp({
             paid_date: null
           })}
           columns={[
-            ["start_date", "发生日期", "date"],
-            ["description", "说明", "text"],
-            ["counterparty", "对方", "text"],
-            ["amount", "金额", "number"],
-            ["is_paid", "已还", "checkbox"],
-            ["paid_date", "还清日期", "date"]
+            ["start_date", t("发生日期", "Start date"), "date"],
+            ["description", t("说明", "Description"), "text"],
+            ["counterparty", t("对方", "Counterparty"), "text"],
+            ["amount", t("金额", "Amount"), "number"],
+            ["is_paid", t("已还", "Paid"), "checkbox"],
+            ["paid_date", t("还清日期", "Paid date"), "date"]
           ]}
           onDirty={setDirty}
           onSaved={() => setDataVersion((value) => value + 1)}
@@ -482,7 +491,7 @@ function MonthEditor({
   } | null>(null);
 
   const load = useCallback(async () => {
-    setState({ kind: "pending", message: "加载月份…" });
+    setState({ kind: "pending", message: t("加载月份…", "Loading month…") });
     try {
       const [data, categoryData] = await Promise.all([api.month(month), api.categories()]);
       setBase(clone(data));
@@ -541,15 +550,18 @@ function MonthEditor({
       (item) => item.category_key === categoryKey
     );
     if (!category) {
-      setState({ kind: "error", message: "请先为规则建议选择分类。" });
+      setState({ kind: "error", message: t("请先为规则建议选择分类。", "Select a category for the rule suggestion first.") });
       return;
     }
-    setState({ kind: "pending", message: "正在创建规则并应用到草稿…" });
+    setState({ kind: "pending", message: t("正在创建规则并应用到草稿…", "Creating the rule and applying it to the draft…") });
     try {
       const current = await api.rules();
       if (current.revision !== ruleCandidates.rules_revision) {
         await refreshRuleCandidates(draft.transactions);
-        throw new Error("规则已在其他位置变化，建议已刷新；流水草稿未丢失。");
+        throw new Error(t(
+          "规则已在其他位置变化，建议已刷新；流水草稿未丢失。",
+          "Rules changed elsewhere. Suggestions were refreshed and the transaction draft was preserved."
+        ));
       }
       await api.saveRules(current.revision, [
         ...current.rows,
@@ -566,7 +578,10 @@ function MonthEditor({
       await refreshRuleCandidates(applied.proposed_rows);
       setState({
         kind: "success",
-        message: `已创建“${candidate.product}”规则并应用到当前草稿。`
+        message: t(
+          `已创建“${candidate.product}”规则并应用到当前草稿。`,
+          `Created a rule for “${candidate.product}” and applied it to the current draft.`
+        )
       });
     } catch (error) {
       setState({ kind: "error", message: messageFor(error) });
@@ -615,7 +630,7 @@ function MonthEditor({
   );
 
   const save = async () => {
-    setState({ kind: "pending", message: "执行严格质检…" });
+    setState({ kind: "pending", message: t("执行严格质检…", "Running strict validation…") });
     try {
       const validation = await api.validateTransactions(month, draft.transactions);
       const found = validation.issues;
@@ -623,11 +638,14 @@ function MonthEditor({
       if (found.length) {
         setState({
           kind: "error",
-          message: `有 ${found.length} 项必须先完整填写；未调用保存。`
+          message: t(
+            `有 ${found.length} 项必须先完整填写；未调用保存。`,
+            `${found.length} items must be completed before saving. Nothing was written.`
+          )
         });
         return;
       }
-      setState({ kind: "pending", message: "保存整月…" });
+      setState({ kind: "pending", message: t("保存整月…", "Saving the month…") });
       const saved = await api.saveMonth(month, {
         expected_revision: draft.revision,
         cash_accounts: draft.cash_accounts,
@@ -639,7 +657,10 @@ function MonthEditor({
       setDraft(clone(saved));
       onDirty(false);
       await onSaved();
-      setState({ kind: "success", message: `已保存 revision ${saved.revision}。` });
+      setState({ kind: "success", message: t(
+        `已保存 revision ${saved.revision}。`,
+        `Saved revision ${saved.revision}.`
+      ) });
     } catch (error) {
       setState({ kind: "error", message: messageFor(error) });
     }
@@ -649,7 +670,7 @@ function MonthEditor({
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    setState({ kind: "pending", message: "解析账单…" });
+    setState({ kind: "pending", message: t("解析账单…", "Parsing statement…") });
     try {
       const contentBase64 = await readFileBase64(file);
       const inspection = await api.inspectCsv(
@@ -669,7 +690,7 @@ function MonthEditor({
     mapping: CsvColumnMapping
   ) => {
     if (!csvSource) return;
-    setState({ kind: "pending", message: "正在准备导入草稿…" });
+    setState({ kind: "pending", message: t("正在准备导入草稿…", "Preparing the import draft…") });
     try {
       const prepared = await prepareCsvImportCommit({
         currentTransactions: draft.transactions,
@@ -703,8 +724,14 @@ function MonthEditor({
         kind: "success",
         message:
           mode === "append"
-            ? `已追加全部 ${response.rows.length} 行到草稿；未执行去重，尚未写库。`
-            : `已用 ${response.rows.length} 行覆盖流水草稿，尚未写库。`
+            ? t(
+                `已追加全部 ${response.rows.length} 行到草稿；未执行去重，尚未写库。`,
+                `Appended all ${response.rows.length} rows to the draft without deduplication. Nothing has been saved yet.`
+              )
+            : t(
+                `已用 ${response.rows.length} 行覆盖流水草稿，尚未写库。`,
+                `Replaced the transaction draft with ${response.rows.length} rows. Nothing has been saved yet.`
+              )
       });
     } catch (error) {
       setState({ kind: "error", message: messageFor(error) });
@@ -713,14 +740,20 @@ function MonthEditor({
   };
 
   const applyRules = async () => {
-    setState({ kind: "pending", message: "应用自动规则…" });
+    setState({ kind: "pending", message: t("应用自动规则…", "Applying automatic rules…") });
     try {
       const result = await api.applyRules(month, draft.transactions);
       if (result.base_revision !== draft.revision) {
-        throw new Error("规则预览期间 revision 已变化，请重新加载");
+        throw new Error(t(
+          "规则预览期间 revision 已变化，请重新加载",
+          "The revision changed while previewing rules. Reload and try again."
+        ));
       }
       mark({ ...draft, transactions: result.proposed_rows });
-      setState({ kind: "success", message: "规则结果已进入草稿，保存后写库。" });
+      setState({ kind: "success", message: t(
+        "规则结果已进入草稿，保存后写库。",
+        "Rule results have been applied to the draft and will be written when you save."
+      ) });
     } catch (error) {
       setState({ kind: "error", message: messageFor(error) });
     }
@@ -728,10 +761,10 @@ function MonthEditor({
 
   const deleteMonth = async () => {
     if (deleteConfirm !== month) {
-      setState({ kind: "error", message: "确认月份不匹配，未删除。" });
+      setState({ kind: "error", message: t("确认月份不匹配，未删除。", "The confirmation month did not match. Nothing was deleted.") });
       return;
     }
-    setState({ kind: "pending", message: `正在删除 ${month}…` });
+    setState({ kind: "pending", message: t(`正在删除 ${month}…`, `Deleting ${month}…`) });
     try {
       await api.deleteMonth(month, draft.revision);
       const remaining = months.filter((item) => item !== month).sort();
@@ -740,7 +773,7 @@ function MonthEditor({
       await onDeleted(next);
       setShowDeleteConfirm(false);
       setDeleteConfirm("");
-      new Notice(`${month} 已删除`);
+      new Notice(t(`${month} 已删除`, `${month} deleted`));
     } catch (error) {
       setState({ kind: "error", message: messageFor(error) });
     }
@@ -770,7 +803,7 @@ function MonthEditor({
       <section className="asset-track-month-header">
         <div>
           <h2>{month}</h2>
-          <span>{draft.status} · revision {draft.revision}</span>
+          <span>{businessLabel(draft.status)} · revision {draft.revision}</span>
         </div>
         <div className="asset-track-actions">
           <button
@@ -778,9 +811,12 @@ function MonthEditor({
             className="mod-cta"
             disabled={state.kind === "pending"}
             onClick={() => csvInputRef.current?.click()}
-            title="支持 CSV、XLSX、XLS；导入前需要确认字段和收支映射"
+            title={t(
+              "支持 CSV、XLSX、XLS；导入前需要确认字段和收支映射",
+              "Supports CSV, XLSX, and XLS. Confirm fields and income/expense mappings before importing."
+            )}
           >
-            导入账单
+            {t("导入账单", "Import statement")}
           </button>
           <input
             ref={csvInputRef}
@@ -789,24 +825,27 @@ function MonthEditor({
             hidden
             onChange={(event) => void importCsv(event)}
           />
-          <button onClick={() => void applyRules()}>应用规则</button>
-          <button onClick={() => void load()}>放弃并重载</button>
+          <button onClick={() => void applyRules()}>{t("应用规则", "Apply rules")}</button>
+          <button onClick={() => void load()}>{t("放弃并重载", "Discard and reload")}</button>
           <button
             className="mod-warning"
             onClick={() => setShowDeleteConfirm((visible) => !visible)}
           >
-            删除月份
+            {t("删除月份", "Delete month")}
           </button>
           <button className="mod-cta" disabled={state.kind === "pending"} onClick={() => void save()}>
-            保存月份
+            {t("保存月份", "Save month")}
           </button>
         </div>
       </section>
       {showDeleteConfirm && (
         <section className="asset-track-delete-confirm">
-          <strong>删除后会清理该月全部数据库事实，且无法在界面中撤销。</strong>
+          <strong>{t(
+            "删除后会清理该月全部数据库事实，且无法在界面中撤销。",
+            "Deleting this month removes all of its database records and cannot be undone in the interface."
+          )}</strong>
           <label>
-            输入完整月份 {month}
+            {t(`输入完整月份 ${month}`, `Enter the full month ${month}`)}
             <input
               autoFocus
               value={deleteConfirm}
@@ -818,13 +857,13 @@ function MonthEditor({
             disabled={deleteConfirm !== month || state.kind === "pending"}
             onClick={() => void deleteMonth()}
           >
-            确认删除 {month}
+            {t(`确认删除 ${month}`, `Confirm deletion of ${month}`)}
           </button>
           <button onClick={() => {
             setShowDeleteConfirm(false);
             setDeleteConfirm("");
           }}>
-            取消
+            {t("取消", "Cancel")}
           </button>
         </section>
       )}
@@ -832,7 +871,7 @@ function MonthEditor({
       {issues.length > 0 && (
         <IssueList issues={issues} rows={draft.transactions} />
       )}
-      <Section title="现金账户">
+      <Section title={t("现金账户", "Cash accounts")}>
         <div className="asset-track-fields">
           {draft.cash_accounts.map((account, index) => (
             <NumberField
@@ -851,17 +890,21 @@ function MonthEditor({
           ))}
         </div>
       </Section>
-      <Section title="理财账户">
+      <Section title={t("理财账户", "Investment accounts")}>
         {draft.investment_accounts.map((account, index) => (
           <div className="asset-track-fields asset-track-investment-row" key={account.account_key}>
             <div className="asset-track-account-name">
-              <span>账户</span>
+              <span>{t("账户", "Account")}</span>
               <strong>{account.name ?? account.account_key}</strong>
             </div>
             {(["principal", "market_value", "cash_balance"] as const).map((field) => (
               <NumberField
                 key={field}
-                label={{ principal: "本金", market_value: "市值", cash_balance: "流动现金" }[field]}
+                label={{
+                  principal: t("本金", "Principal"),
+                  market_value: t("市值", "Market value"),
+                  cash_balance: t("流动现金", "Liquid cash")
+                }[field]}
                 value={account[field]}
                 onChange={(value) =>
                   mark({
@@ -877,20 +920,23 @@ function MonthEditor({
         ))}
       </Section>
       <section className="asset-track-view-switcher">
-        <strong>流水展示</strong>
+        <strong>{t("流水展示", "Transaction display")}</strong>
         <button
           className={transactionView === "detail" ? "is-active" : ""}
           onClick={() => setTransactionView("detail")}
         >
-          逐项
+          {t("逐项", "Individual")}
         </button>
         <button
           className={transactionView === "summary" ? "is-active" : ""}
           onClick={() => setTransactionView("summary")}
         >
-          按商品汇总
+          {t("按商品汇总", "Group by item")}
         </button>
-        <span>汇总只影响查看，保存时仍保留每笔流水。</span>
+        <span>{t(
+          "汇总只影响查看，保存时仍保留每笔流水。",
+          "Grouping only changes the view. Every transaction is preserved when saved."
+        )}</span>
       </section>
       {transactionView === "detail" && TRANSACTION_SECTIONS.map((title) => (
           <TransactionTable
@@ -930,22 +976,25 @@ function MonthEditor({
         />
       )}
       {ruleCandidates.rows.length > 0 && (
-        <Section title="潜在交易规则">
+        <Section title={t("潜在交易规则", "Potential transaction rules")}>
           <p>
-            按历史记录和当前草稿统计；增量导入不去重，重复账单也会计入出现次数。
+            {t(
+              "按历史记录和当前草稿统计；增量导入不去重，重复账单也会计入出现次数。",
+              "Counts include history and the current draft. Incremental imports are not deduplicated, so repeated statements also increase occurrences."
+            )}
           </p>
           <div className="asset-track-table-scroll">
             <table>
               <thead>
                 <tr>
-                  <th>收支</th>
-                  <th>交易对方</th>
-                  <th><SortButton label="商品" field="product" sort={candidateSort} onSort={setCandidateSort} /></th>
-                  <th><SortButton label="出现次数" field="occurrences" sort={candidateSort} onSort={setCandidateSort} /></th>
-                  <th><SortButton label="月份" field="months_count" sort={candidateSort} onSort={setCandidateSort} /></th>
-                  <th><SortButton label="最近月份" field="last_month" sort={candidateSort} onSort={setCandidateSort} /></th>
-                  <th>建议分类</th>
-                  <th>置信度</th><th />
+                  <th>{t("收支", "Type")}</th>
+                  <th>{t("交易对方", "Counterparty")}</th>
+                  <th><SortButton label={t("商品", "Item")} field="product" sort={candidateSort} onSort={setCandidateSort} /></th>
+                  <th><SortButton label={t("出现次数", "Occurrences")} field="occurrences" sort={candidateSort} onSort={setCandidateSort} /></th>
+                  <th><SortButton label={t("月份", "Months")} field="months_count" sort={candidateSort} onSort={setCandidateSort} /></th>
+                  <th><SortButton label={t("最近月份", "Latest month")} field="last_month" sort={candidateSort} onSort={setCandidateSort} /></th>
+                  <th>{t("建议分类", "Suggested category")}</th>
+                  <th>{t("置信度", "Confidence")}</th><th />
                 </tr>
               </thead>
               <tbody>
@@ -953,7 +1002,7 @@ function MonthEditor({
                   const key = candidateKey(candidate);
                   return (
                     <tr key={key}>
-                      <td>{candidate.transaction_type}</td>
+                      <td>{businessLabel(candidate.transaction_type)}</td>
                       <td>{candidate.counterparty || "—"}</td>
                       <td title={candidate.variants.join("、")}>{candidate.product}</td>
                       <td>{candidate.occurrences}</td>
@@ -967,7 +1016,7 @@ function MonthEditor({
                             [key]: event.target.value
                           }))}
                         >
-                          <option value="">请选择</option>
+                          <option value="">{t("请选择", "Select")}</option>
                           {categories.filter(
                             (category) =>
                               category.is_active
@@ -984,14 +1033,14 @@ function MonthEditor({
                       </td>
                       <td>
                         {(candidate.category_confidence * 100).toFixed(0)}%
-                        {candidate.has_category_conflict ? " · 有冲突" : ""}
+                        {candidate.has_category_conflict ? t(" · 有冲突", " · Conflict") : ""}
                       </td>
                       <td>
                         <button
                           disabled={state.kind === "pending"}
                           onClick={() => void createRule(candidate)}
                         >
-                          创建规则并应用
+                          {t("创建规则并应用", "Create and apply rule")}
                         </button>
                       </td>
                     </tr>
@@ -1052,6 +1101,7 @@ function TransactionTable({
   onDelete: (index: number) => void;
   onAdd: () => void;
 }) {
+  const displayTitle = businessLabel(title);
   const [sort, setSort] = useState<SortState>(null);
   const [viewport, setViewport] = useState({
     scrollTop: 0,
@@ -1073,7 +1123,10 @@ function TransactionTable({
   );
   const visibleRows = sorted.slice(range.start, range.end);
   return (
-    <Section title={`${title}（${visibleIndexes.length} 行）`}>
+    <Section title={t(
+      `${title}（${visibleIndexes.length} 行）`,
+      `${displayTitle} (${visibleIndexes.length} rows)`
+    )}>
       <div
         className="asset-track-virtual-table"
         role="table"
@@ -1086,13 +1139,13 @@ function TransactionTable({
         }}
       >
         <div className="asset-track-grid asset-track-grid-head">
-          <span>行号</span>
+          <span>{t("行号", "Row")}</span>
           {[
-            ["transaction_date", "日期"],
-            ["counterparty", "交易对方"],
-            ["category", "分类"],
-            ["product", "商品"],
-            ["amount", "金额"]
+            ["transaction_date", t("日期", "Date")],
+            ["counterparty", t("交易对方", "Counterparty")],
+            ["category", t("分类", "Category")],
+            ["product", t("商品", "Item")],
+            ["amount", t("金额", "Amount")]
           ].map(([field, label]) => (
             <SortButton key={field} field={field} label={label} sort={sort} onSort={setSort} />
           ))}
@@ -1126,25 +1179,25 @@ function TransactionTable({
                     {blockNumber}
                   </span>
                   <input
-                    aria-label={`${title}第 ${blockNumber} 行日期`}
+                    aria-label={t(`${title}第 ${blockNumber} 行日期`, `${displayTitle} row ${blockNumber} date`)}
                     value={row.transaction_date}
                     onChange={(event) => onUpdate(originalIndex, "transaction_date", event.target.value)}
                   />
                   <input
-                    aria-label={`${title}第 ${blockNumber} 行交易对方`}
+                    aria-label={t(`${title}第 ${blockNumber} 行交易对方`, `${displayTitle} row ${blockNumber} counterparty`)}
                     value={row.counterparty ?? ""}
-                    placeholder="交易对方"
+                    placeholder={t("交易对方", "Counterparty")}
                     onChange={(event) =>
                       onUpdate(originalIndex, "counterparty", event.target.value)
                     }
                   />
                   <select
-                    aria-label={`${title}第 ${blockNumber} 行分类`}
+                    aria-label={t(`${title}第 ${blockNumber} 行分类`, `${displayTitle} row ${blockNumber} category`)}
                     disabled={special}
                     value={row.category_key ?? ""}
                     onChange={(event) => onUpdate(originalIndex, "category_key", event.target.value)}
                   >
-                    <option value="">请选择</option>
+                    <option value="">{t("请选择", "Select")}</option>
                     {options.map((category) => (
                       <option key={category.category_key} value={category.category_key}>
                         {category.name}
@@ -1152,12 +1205,12 @@ function TransactionTable({
                     ))}
                   </select>
                   <input
-                    aria-label={`${title}第 ${blockNumber} 行商品`}
+                    aria-label={t(`${title}第 ${blockNumber} 行商品`, `${displayTitle} row ${blockNumber} item`)}
                     value={row.product}
                     onChange={(event) => onUpdate(originalIndex, "product", event.target.value)}
                   />
                   <input
-                    aria-label={`${title}第 ${blockNumber} 行金额`}
+                    aria-label={t(`${title}第 ${blockNumber} 行金额`, `${displayTitle} row ${blockNumber} amount`)}
                     type="number"
                     min="0"
                     step="0.01"
@@ -1165,10 +1218,10 @@ function TransactionTable({
                     onChange={(event) => onUpdate(originalIndex, "amount", event.target.value)}
                   />
                   <button
-                    aria-label={`删除${title}第 ${blockNumber} 行`}
+                    aria-label={t(`删除${title}第 ${blockNumber} 行`, `Delete ${displayTitle} row ${blockNumber}`)}
                     onClick={() => onDelete(originalIndex)}
                   >
-                    删除
+                    {t("删除", "Delete")}
                   </button>
                 </div>
               );
@@ -1182,7 +1235,7 @@ function TransactionTable({
           ))}
         </div>
       </div>
-      <button onClick={onAdd}>新增{title}流水</button>
+      <button onClick={onAdd}>{t(`新增${title}流水`, `Add ${displayTitle} transaction`)}</button>
     </Section>
   );
 }
@@ -1212,17 +1265,17 @@ function TransactionSummaryTable({
     group[key as keyof TransactionGroup]
   );
   return (
-    <Section title="商品汇总">
+    <Section title={t("商品汇总", "Item summary")}>
       <div className="asset-track-table-scroll">
         <table>
           <thead>
             <tr>
-              <th>收支</th>
-              <th><SortButton label="商品" field="product" sort={sort} onSort={onSort} /></th>
-              <th><SortButton label="出现次数" field="count" sort={sort} onSort={onSort} /></th>
-              <th><SortButton label="总金额" field="amount" sort={sort} onSort={onSort} /></th>
-              <th><SortButton label="最近日期" field="lastDate" sort={sort} onSort={onSort} /></th>
-              <th>分类</th>
+              <th>{t("收支", "Type")}</th>
+              <th><SortButton label={t("商品", "Item")} field="product" sort={sort} onSort={onSort} /></th>
+              <th><SortButton label={t("出现次数", "Occurrences")} field="count" sort={sort} onSort={onSort} /></th>
+              <th><SortButton label={t("总金额", "Total amount")} field="amount" sort={sort} onSort={onSort} /></th>
+              <th><SortButton label={t("最近日期", "Latest date")} field="lastDate" sort={sort} onSort={onSort} /></th>
+              <th>{t("分类", "Category")}</th>
               <th />
             </tr>
           </thead>
@@ -1230,7 +1283,7 @@ function TransactionSummaryTable({
             {groups.map(({ row: group }) => (
               <Fragment key={group.key}>
                 <tr>
-                  <td>{group.type}</td>
+                  <td>{businessLabel(group.type)}</td>
                   <td title={group.variants.join("、")}>{group.product}</td>
                   <td>{group.count}</td>
                   <td>{group.amount.toFixed(1)}</td>
@@ -1241,16 +1294,21 @@ function TransactionSummaryTable({
                   </td>
                   <td>
                     {group.categories.length === 0
-                      ? "未分类"
+                      ? t("未分类", "Uncategorized")
                       : group.categories.length === 1
                         ? group.categories[0]
-                        : `${group.categories.length} 个分类（有冲突）`}
+                        : t(
+                            `${group.categories.length} 个分类（有冲突）`,
+                            `${group.categories.length} categories (conflict)`
+                          )}
                   </td>
                   <td>
                     <button onClick={() =>
                       onExpanded(expanded === group.key ? "" : group.key)
                     }>
-                      {expanded === group.key ? "收起" : "展开逐项"}
+                      {expanded === group.key
+                        ? t("收起", "Collapse")
+                        : t("展开逐项", "Expand items")}
                     </button>
                   </td>
                 </tr>
@@ -1276,7 +1334,7 @@ function TransactionSummaryTable({
                               />
                               <input
                                 value={item.counterparty ?? ""}
-                                placeholder="交易对方"
+                                placeholder={t("交易对方", "Counterparty")}
                                 onChange={(event) =>
                                   onUpdate(index, "counterparty", event.target.value)
                                 }
@@ -1301,7 +1359,7 @@ function TransactionSummaryTable({
                                     onUpdate(index, "category_key", event.target.value)
                                   }
                                 >
-                                  <option value="">请选择分类</option>
+                                  <option value="">{t("请选择分类", "Select category")}</option>
                                   {available.map((category) => (
                                     <option
                                       key={category.category_key}
@@ -1311,7 +1369,7 @@ function TransactionSummaryTable({
                                     </option>
                                   ))}
                                 </select>
-                              ) : <span>无需分类</span>}
+                              ) : <span>{t("无需分类", "No category required")}</span>}
                             </div>
                           );
                         })}
@@ -1342,18 +1400,18 @@ function FixedAssetTable({
   const [sort, setSort] = useState<SortState>(null);
   const sorted = sortRows(rows, sort, (row, key) => row[key as keyof FixedAsset]);
   return (
-    <Section title={`固定资产（${rows.length} 项）`}>
+    <Section title={t(`固定资产（${rows.length} 项）`, `Fixed assets (${rows.length})`)}>
       <div className="asset-track-table-scroll">
         <table>
           <thead>
             <tr>
               {[
-                ["asset_name", "名称"],
-                ["category", "类别"],
-                ["purchase_date", "购置日"],
-                ["purchase_price", "购买价"],
-                ["status", "状态"],
-                ["note", "备注"]
+                ["asset_name", t("名称", "Name")],
+                ["category", t("类别", "Category")],
+                ["purchase_date", t("购置日", "Purchase date")],
+                ["purchase_price", t("购买价", "Purchase price")],
+                ["status", t("状态", "Status")],
+                ["note", t("备注", "Notes")]
               ].map(([field, label]) => (
                 <th key={field}>
                   <SortButton field={field} label={label} sort={sort} onSort={setSort} />
@@ -1386,7 +1444,7 @@ function FixedAssetTable({
                     onChange={(event) => onUpdate(originalIndex, "status", event.target.value)}
                   >
                     {["在用", "闲置", "已出售", "已报废"].map((value) => (
-                      <option key={value}>{value}</option>
+                      <option key={value} value={value}>{businessLabel(value)}</option>
                     ))}
                   </select>
                 </td>
@@ -1397,14 +1455,14 @@ function FixedAssetTable({
                   />
                 </td>
                 <td>
-                  <button onClick={() => onDelete(originalIndex)}>删除</button>
+                  <button onClick={() => onDelete(originalIndex)}>{t("删除", "Delete")}</button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <button onClick={onAdd}>新增资产</button>
+      <button onClick={onAdd}>{t("新增资产", "Add asset")}</button>
     </Section>
   );
 }
@@ -1437,7 +1495,7 @@ function CollectionEditor({
   loadRef.current = load;
   saveRef.current = save;
   const reload = useCallback(async () => {
-    setState({ kind: "pending", message: "加载…" });
+    setState({ kind: "pending", message: t("加载…", "Loading…") });
     try {
       const result = await loadRef.current();
       setRevision(result.revision);
@@ -1456,12 +1514,12 @@ function CollectionEditor({
     onDirty(true);
   };
   const commit = async () => {
-    setState({ kind: "pending", message: "保存…" });
+    setState({ kind: "pending", message: t("保存…", "Saving…") });
     try {
       await saveRef.current(revision, rows);
       await reload();
       onSaved();
-      setState({ kind: "success", message: "已保存。" });
+      setState({ kind: "success", message: t("已保存。", "Saved.") });
     } catch (error) {
       setState({ kind: "error", message: messageFor(error) });
     }
@@ -1481,11 +1539,11 @@ function CollectionEditor({
               onDirty(true);
             }}
           >
-            新增
+            {t("新增", "Add")}
           </button>
-          <button onClick={() => void reload()}>放弃并重载</button>
+          <button onClick={() => void reload()}>{t("放弃并重载", "Discard and reload")}</button>
           <button className="mod-cta" onClick={() => void commit()}>
-            整体保存
+            {t("整体保存", "Save all")}
           </button>
         </div>
       </section>
@@ -1539,7 +1597,7 @@ function CollectionEditor({
                       onDirty(true);
                     }}
                   >
-                    删除
+                    {t("删除", "Delete")}
                   </button>
                 </td>
               </tr>
@@ -1566,7 +1624,7 @@ function RulesEditor({
   const [ruleSort, setRuleSort] = useState<SortState>(null);
   const [state, setState] = useState<OperationState>({ kind: "idle" });
   const load = useCallback(async () => {
-    setState({ kind: "pending", message: "加载分类与规则…" });
+    setState({ kind: "pending", message: t("加载分类与规则…", "Loading categories and rules…") });
     try {
       const [categoryData, ruleData] = await Promise.all([api.categories(), api.rules()]);
       setCategories(categoryData);
@@ -1581,14 +1639,14 @@ function RulesEditor({
   if (!categories || !rules) return <Status state={state} />;
 
   const saveAll = async () => {
-    setState({ kind: "pending", message: "保存分类与规则…" });
+    setState({ kind: "pending", message: t("保存分类与规则…", "Saving categories and rules…") });
     try {
       const categoryResult = await api.saveCategories(categories.revision, categories.rows);
       await api.saveRules(rules.revision, rules.rows);
       setCategories(categoryResult);
       await load();
       onSaved();
-      setState({ kind: "success", message: "分类和交易匹配规则已保存。" });
+      setState({ kind: "success", message: t("分类和交易匹配规则已保存。", "Categories and transaction matching rules saved.") });
     } catch (error) {
       setState({ kind: "error", message: messageFor(error) });
     }
@@ -1607,24 +1665,24 @@ function RulesEditor({
     <main className="asset-track-editor">
       <section className="asset-track-month-header">
         <div>
-          <h2>规则</h2>
-          <span>分类定义与交易对方／商品匹配</span>
+          <h2>{t("规则", "Rules")}</h2>
+          <span>{t("分类定义与交易对方／商品匹配", "Category definitions and counterparty/item matching")}</span>
         </div>
         <button className="mod-cta" onClick={() => void saveAll()}>
-          整体保存
+          {t("整体保存", "Save all")}
         </button>
       </section>
       <Status state={state} />
-      <Section title="分类定义">
+      <Section title={t("分类定义", "Category definitions")}>
         <div className="asset-track-table-scroll">
           <table>
             <thead>
               <tr>
                 {[
-                  ["name", "名称"], ["transaction_type", "收支"],
-                  ["necessity", "必要性"], ["pattern", "消费频率"],
-                  ["is_big_ticket", "大额"], ["color", "颜色"],
-                  ["is_active", "启用"], ["transaction_count", "影响"]
+                  ["name", t("名称", "Name")], ["transaction_type", t("收支", "Type")],
+                  ["necessity", t("必要性", "Necessity")], ["pattern", t("消费频率", "Frequency")],
+                  ["is_big_ticket", t("大额", "Large")], ["color", t("颜色", "Color")],
+                  ["is_active", t("启用", "Enabled")], ["transaction_count", t("影响", "Impact")]
                 ].map(([field, label]) => <th key={field}>
                   <SortButton field={field} label={label} sort={categorySort} onSort={setCategorySort} />
                 </th>)}<th />
@@ -1642,17 +1700,17 @@ function RulesEditor({
                     const rows = clone(categories.rows);
                     rows[index].transaction_type = event.target.value as "支出" | "收入";
                     setCategories({ ...categories, rows }); onDirty(true);
-                  }}><option>支出</option><option>收入</option></select></td>
+                  }}><option value="支出">{businessLabel("支出")}</option><option value="收入">{businessLabel("收入")}</option></select></td>
                   <td><select value={row.necessity} onChange={(event) => {
                     const rows = clone(categories.rows);
                     rows[index].necessity = event.target.value as CategoryDefinition["necessity"];
                     setCategories({ ...categories, rows }); onDirty(true);
-                  }}>{["必要", "可控", "不适用"].map((value) => <option key={value}>{value}</option>)}</select></td>
+                  }}>{["必要", "可控", "不适用"].map((value) => <option key={value} value={value}>{businessLabel(value)}</option>)}</select></td>
                   <td><select value={row.pattern} onChange={(event) => {
                     const rows = clone(categories.rows);
                     rows[index].pattern = event.target.value as CategoryDefinition["pattern"];
                     setCategories({ ...categories, rows }); onDirty(true);
-                  }}>{["周期", "日常", "偶尔", "不适用"].map((value) => <option key={value}>{value}</option>)}</select></td>
+                  }}>{["周期", "日常", "偶尔", "不适用"].map((value) => <option key={value} value={value}>{businessLabel(value)}</option>)}</select></td>
                   <td><input type="checkbox" checked={row.is_big_ticket} onChange={(event) => {
                     const rows = clone(categories.rows); rows[index].is_big_ticket = event.target.checked;
                     setCategories({ ...categories, rows }); onDirty(true);
@@ -1665,11 +1723,11 @@ function RulesEditor({
                     const rows = clone(categories.rows); rows[index].is_active = event.target.checked;
                     setCategories({ ...categories, rows }); onDirty(true);
                   }} /></td>
-                  <td>{row.transaction_count ?? 0} 行 / {row.impact_months?.length ?? 0} 月</td>
+                  <td>{row.transaction_count ?? 0} {t("行", "rows")} / {row.impact_months?.length ?? 0} {t("月", "months")}</td>
                   <td><button onClick={() => {
                     const rows = categories.rows.filter((_, item) => item !== index);
                     setCategories({ ...categories, rows }); onDirty(true);
-                  }}>{(row.transaction_count ?? 0) + (row.rule_count ?? 0) > 0 ? "停用" : "删除"}</button></td>
+                  }}>{(row.transaction_count ?? 0) + (row.rule_count ?? 0) > 0 ? t("停用", "Deactivate") : t("删除", "Delete")}</button></td>
                 </tr>
               ))}
             </tbody>
@@ -1690,16 +1748,16 @@ function RulesEditor({
               sort_order: categories.rows.length
             }]
           }); onDirty(true);
-        }}>新增分类</button>
+        }}>{t("新增分类", "Add category")}</button>
       </Section>
-      <Section title="交易匹配规则">
+      <Section title={t("交易匹配规则", "Transaction matching rules")}>
         <div className="asset-track-table-scroll">
           <table>
             <thead><tr>{[
-              ["transaction_type", "收支"],
-              ["counterparty", "交易对方"], ["product", "商品"],
-              ["category", "分类"], ["occurrences", "历史次数"],
-              ["last_month", "最近月份"]
+              ["transaction_type", t("收支", "Type")],
+              ["counterparty", t("交易对方", "Counterparty")], ["product", t("商品", "Item")],
+              ["category", t("分类", "Category")], ["occurrences", t("历史次数", "Historical occurrences")],
+              ["last_month", t("最近月份", "Latest month")]
             ].map(([field, label]) => <th key={field}>
               <SortButton field={field} label={label} sort={ruleSort} onSort={setRuleSort} />
             </th>)}<th /></tr></thead>
@@ -1709,7 +1767,7 @@ function RulesEditor({
                   const next = clone(rules.rows); next[index].transaction_type = event.target.value;
                   next[index].category_key = ""; next[index].category = "";
                   setRules({ ...rules, rows: next }); onDirty(true);
-                }}><option>支出</option><option>收入</option></select></td>
+                }}><option value="支出">{businessLabel("支出")}</option><option value="收入">{businessLabel("收入")}</option></select></td>
                 <td><input value={scalarText(row.counterparty)} onChange={(event) => {
                   const next = clone(rules.rows); next[index].counterparty = event.target.value;
                   setRules({ ...rules, rows: next }); onDirty(true);
@@ -1724,13 +1782,13 @@ function RulesEditor({
                   next[index].category_key = event.target.value;
                   next[index].category = definition?.name ?? "";
                   setRules({ ...rules, rows: next }); onDirty(true);
-                }}><option value="">请选择</option>{activeForType(row.transaction_type).map((category) => (
+                }}><option value="">{t("请选择", "Select")}</option>{activeForType(row.transaction_type).map((category) => (
                   <option key={category.category_key} value={category.category_key}>{category.name}</option>
                 ))}</select></td>
                 <td>{scalarText(row.occurrences)}</td><td>{scalarText(row.last_month)}</td>
                 <td><button onClick={() => {
                   setRules({ ...rules, rows: rules.rows.filter((_, item) => item !== index) }); onDirty(true);
-                }}>删除</button></td>
+                }}>{t("删除", "Delete")}</button></td>
               </tr>
             ))}</tbody>
           </table>
@@ -1741,7 +1799,7 @@ function RulesEditor({
             transaction_type: "支出", counterparty: "", product: "",
             category_key: definition?.category_key ?? "", category: definition?.name ?? ""
           }] }); onDirty(true);
-        }}>新增规则</button>
+        }}>{t("新增规则", "Add rule")}</button>
       </Section>
     </main>
   );
@@ -1756,19 +1814,20 @@ function IssueList({
 }) {
   return (
     <div className="asset-track-issues" role="alert">
-      <strong>必须先修正以下问题：</strong>
+      <strong>{t("必须先修正以下问题：", "Fix the following issues first:")}</strong>
       <ul>
         {issues.map((issue, index) => {
           const globalIndex = Number(issue.row_index ?? 0);
           const type = scalarText(
-            issue.type ?? rows[globalIndex]?.type ?? "流水"
+            issue.type ?? rows[globalIndex]?.type ?? t("流水", "Transaction")
           );
           const blockRow = transactionBlockNumber(rows, globalIndex);
           return (
             <li key={index}>
-              {type}第 {Math.max(1, blockRow)} 行／
-              {scalarText(issue.field) || "字段"}／
-              {scalarText(issue.issue) || "无效"}
+              {t(
+                `${businessLabel(type)}第 ${Math.max(1, blockRow)} 行／${scalarText(issue.field) || "字段"}／${scalarText(issue.issue) || "无效"}`,
+                `${businessLabel(type)} row ${Math.max(1, blockRow)} / ${businessLabel(scalarText(issue.field) || "字段")} / ${displayError(scalarText(issue.issue) || "无效")}`
+              )}
             </li>
           );
         })}

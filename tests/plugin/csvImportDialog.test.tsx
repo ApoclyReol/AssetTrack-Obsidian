@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { CsvInspection } from "../../src/types";
 import { CsvImportDialog } from "../../src/ui/CsvImportDialog";
+import { setTestLanguage } from "../mocks/obsidian";
 
 const inspection: CsvInspection = {
   month: "2026-07",
@@ -64,5 +65,23 @@ describe("CSV import dialog accessibility", () => {
     view.unmount();
     expect(document.activeElement).toBe(trigger);
     triggerView.unmount();
+  });
+
+  it("renders English when the app language is English", () => {
+    setTestLanguage("en-US");
+    const view = render(
+      <CsvImportDialog
+        hostWindow={window}
+        inspection={inspection}
+        onCancel={vi.fn()}
+        onPreview={vi.fn()}
+        onApply={vi.fn()}
+      />
+    );
+    expect(screen.getByRole("dialog", { name: "Import statement" }))
+      .toBeTruthy();
+    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+    view.unmount();
+    setTestLanguage("zh-CN");
   });
 });

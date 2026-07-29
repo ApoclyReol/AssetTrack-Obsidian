@@ -15,6 +15,8 @@
   弹窗可访问性、主题响应式和大流水表性能问题。
 - [Release v1.0.5](release-v1.0.5.md)：修复 Community Plugins manifest、README、
   动态脚本扫描、剪贴板提示和 Release 资产来源证明。
+- [Release v1.1.0](release-v1.1.0.md)：新增跟随 Obsidian 语言的完整中英文界面，
+  保持 schema 9、用户内容和数据库业务值不变。
 
 后续每次正式更新新增 `release-vN.N.N.md`，至少记录：
 

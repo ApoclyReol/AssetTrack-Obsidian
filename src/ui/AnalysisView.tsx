@@ -30,6 +30,7 @@ import {
   sampleAnnualRows,
   savingsColor
 } from "./analysisModel";
+import { businessLabel, displayError, getLocale, t } from "../i18n";
 
 const INFLOW = INFLOW_COLOR;
 const OUTFLOW = OUTFLOW_COLOR;
@@ -57,7 +58,7 @@ type LoadState<T> =
 function money(value: unknown): string {
   const parsed = Number(value);
   return Number.isFinite(parsed)
-    ? new Intl.NumberFormat("zh-CN", {
+    ? new Intl.NumberFormat(getLocale(), {
         style: "currency",
         currency: "CNY",
         maximumFractionDigits: 1
@@ -80,7 +81,7 @@ function signed(value: unknown, formatter: (input: unknown) => string): string {
 function axis(value: unknown): string {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return "—";
-  if (Math.abs(parsed) >= 10_000) return `${(parsed / 10_000).toFixed(1)}万`;
+  if (Math.abs(parsed) >= 10_000 && getLocale() === "zh-CN") return `${(parsed / 10_000).toFixed(1)}万`;
   return String(Math.round(parsed));
 }
 
@@ -170,7 +171,7 @@ interface ComparisonBarLabelProps {
   width?: number | string;
   height?: number | string;
   value?: number | string;
-  prefix: "上月" | "本月";
+  prefix: string;
   color: string;
 }
 
@@ -239,7 +240,7 @@ export function AnalysisView({
             className={mode === item ? "is-active" : ""}
             onClick={() => selectMode(item)}
           >
-            {{ home: "Home", annual: "年度", monthly: "月度" }[item]}
+            {{ home: "Home", annual: t("年度", "Annual"), monthly: t("月度", "Monthly") }[item]}
           </button>
         ))}
         {mode === "annual" && (
@@ -264,7 +265,7 @@ export function AnalysisView({
       {mode === "monthly" && month && (
         <MonthlyAnalysis api={api} month={month} dataVersion={dataVersion} />
       )}
-      {mode === "monthly" && !month && <Empty text="尚无可分析月份。" />}
+      {mode === "monthly" && !month && <Empty text={t("尚无可分析月份。", "No months are available for analysis.")} />}
     </main>
   );
 }
@@ -294,61 +295,61 @@ function HomeAnalysis({
       }));
     return () => { active = false; };
   }, [api, dataVersion]);
-  if (state.kind === "loading") return <Empty text="正在加载资产首页…" />;
+  if (state.kind === "loading") return <Empty text={t("正在加载资产首页…", "Loading asset overview…")} />;
   if (state.kind === "error") return <Empty text={state.message} />;
   const { current, month } = state.data;
   const metrics = month?.overview.metrics;
   return (
     <>
       <div className="asset-track-analysis-heading">
-        <div><h2>资产首页</h2><span>最近月份：{current.month ?? "—"}</span></div>
+        <div><h2>{t("资产首页", "Asset overview")}</h2><span>{t("最近月份：", "Latest month: ")}{current.month ?? "—"}</span></div>
       </div>
       <Cards items={[
-        { label: "现金", value: money(current.cash) },
-        { label: "理财本金", value: money(current.principal) },
-        { label: "借款", value: money(current.debt) },
-        { label: "总资产", value: money(current.total_assets) }
+        { label: t("现金", "Cash"), value: money(current.cash) },
+        { label: t("理财本金", "Investment principal"), value: money(current.principal) },
+        { label: t("借款", "Debt"), value: money(current.debt) },
+        { label: t("总资产", "Total assets"), value: money(current.total_assets) }
       ]} />
       {metrics && (
         <Cards items={[
-          { label: "最近月收入", value: money(metrics.total_income), tone: "inflow" },
-          { label: "最近月净支出", value: money(metrics.total_expense), tone: "outflow" },
+          { label: t("最近月收入", "Latest monthly income"), value: money(metrics.total_income), tone: "inflow" },
+          { label: t("最近月净支出", "Latest monthly net expense"), value: money(metrics.total_expense), tone: "outflow" },
           {
-            label: "最近月储蓄",
+            label: t("最近月储蓄", "Latest monthly savings"),
             value: money(metrics.surplus),
             tone: metrics.surplus >= 0 ? "inflow" : "outflow"
           },
           {
-            label: "最近月储蓄率",
+            label: t("最近月储蓄率", "Latest monthly savings rate"),
             value: metrics.savings_rate === null
-              ? "不可计算"
+              ? t("不可计算", "Unavailable")
               : percent(metrics.savings_rate)
           },
           {
-            label: "资产环比",
-            value: metrics.asset_delta === null ? "不可比较" : money(metrics.asset_delta),
+            label: t("资产环比", "Asset change"),
+            value: metrics.asset_delta === null ? t("不可比较", "Unavailable") : money(metrics.asset_delta),
             tone: changeTone(metrics.asset_delta)
           }
         ]} />
       )}
-      <ChartPanel title="固定资产摘要">
+      <ChartPanel title={t("固定资产摘要", "Fixed asset summary")}>
         {current.fixed_assets.length ? (
           <div className="asset-track-table-scroll">
             <table>
-              <thead><tr><th>名称</th><th>类别</th><th>状态</th><th>购买价格</th></tr></thead>
+              <thead><tr><th>{t("名称", "Name")}</th><th>{t("类别", "Category")}</th><th>{t("状态", "Status")}</th><th>{t("购买价格", "Purchase price")}</th></tr></thead>
               <tbody>
                 {current.fixed_assets.map((row) => (
                   <tr key={row.asset_key ?? row.id}>
                     <td>{row.asset_name}</td>
                     <td>{row.category}</td>
-                    <td>{row.status}</td>
+                    <td>{businessLabel(row.status)}</td>
                     <td>{money(row.purchase_price)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        ) : <Empty text="当前没有在用或闲置的固定资产。" />}
+        ) : <Empty text={t("当前没有在用或闲置的固定资产。", "There are no fixed assets in use or idle.")} />}
       </ChartPanel>
     </>
   );
@@ -375,10 +376,10 @@ function AnnualAnalysis({
       }));
     return () => { active = false; };
   }, [api, dataVersion, year]);
-  if (state.kind === "loading") return <Empty text={`正在加载 ${year} 年度分析…`} />;
+  if (state.kind === "loading") return <Empty text={t(`正在加载 ${year} 年度分析…`, `Loading ${year} annual analysis…`)} />;
   if (state.kind === "error") return <Empty text={state.message} />;
   const data = state.data;
-  if (!data.rows.length) return <Empty text={`${year} 暂无数据。`} />;
+  if (!data.rows.length) return <Empty text={t(`${year} 暂无数据。`, `No data is available for ${year}.`)} />;
   const latest = data.latest;
   const monthlySavings = data.rolling_rows.filter(
     (row) => row.savings_rate !== null
@@ -387,30 +388,30 @@ function AnnualAnalysis({
   return (
     <>
       <div className="asset-track-analysis-heading">
-        <div><h2>{year} 年度总览</h2><span>自然年汇总与近 12 月滚动观察</span></div>
+        <div><h2>{t(`${year} 年度总览`, `${year} annual overview`)}</h2><span>{t("自然年汇总与近 12 月滚动观察", "Calendar-year summary and rolling 12-month view")}</span></div>
       </div>
       <Cards items={[
-        { label: "年度收入", value: money(data.metrics.total_income), tone: "inflow" },
-        { label: "年度净支出", value: money(data.metrics.total_expense), tone: "outflow" },
+        { label: t("年度收入", "Annual income"), value: money(data.metrics.total_income), tone: "inflow" },
+        { label: t("年度净支出", "Annual net expense"), value: money(data.metrics.total_expense), tone: "outflow" },
         {
-          label: "年度储蓄",
+          label: t("年度储蓄", "Annual savings"),
           value: money(data.metrics.savings),
           tone: data.metrics.savings >= 0 ? "inflow" : "outflow"
         },
         {
-          label: "年度储蓄率",
+          label: t("年度储蓄率", "Annual savings rate"),
           value: data.metrics.savings_rate === null
-            ? "不可计算"
+            ? t("不可计算", "Unavailable")
             : percent(data.metrics.savings_rate)
         }
       ]} />
       <Cards items={[
-        { label: "年末现金", value: money(latest?.cash) },
-        { label: "年末理财本金", value: money(latest?.principal) },
-        { label: "年末借款", value: money(latest?.debt) },
-        { label: "年末总资产", value: money(latest?.total_assets) }
+        { label: t("年末现金", "Year-end cash"), value: money(latest?.cash) },
+        { label: t("年末理财本金", "Year-end investment principal"), value: money(latest?.principal) },
+        { label: t("年末借款", "Year-end debt"), value: money(latest?.debt) },
+        { label: t("年末总资产", "Year-end total assets"), value: money(latest?.total_assets) }
       ]} />
-      <ChartPanel title="近 12 个月综合趋势" className="is-wide">
+      <ChartPanel title={t("近 12 个月综合趋势", "Combined 12-month trend")} className="is-wide">
         <ResponsiveContainer width="100%" height={340}>
           <ComposedChart data={data.rolling_rows}>
             <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
@@ -419,15 +420,15 @@ function AnnualAnalysis({
             <YAxis yAxisId="asset" orientation="right" tickFormatter={axis} />
             <Tooltip formatter={(value: number | string) => money(value)} />
             <Legend />
-            <Bar yAxisId="flow" dataKey="total_income" name="收入" fill={INFLOW} />
-            <Bar yAxisId="flow" dataKey="total_expense" name="支出" fill={OUTFLOW} />
-            <Line yAxisId="asset" type="monotone" dataKey="cash" name="现金" stroke={GOLD} strokeWidth={2} dot={false} />
-            <Line yAxisId="asset" type="monotone" dataKey="principal" name="理财本金" stroke={BLUE} strokeWidth={2} dot={false} />
-            <Line yAxisId="asset" type="monotone" dataKey="total_assets" name="总资产" stroke={PURPLE} strokeWidth={3} dot={false} />
+            <Bar yAxisId="flow" dataKey="total_income" name={t("收入", "Income")} fill={INFLOW} />
+            <Bar yAxisId="flow" dataKey="total_expense" name={t("支出", "Expense")} fill={OUTFLOW} />
+            <Line yAxisId="asset" type="monotone" dataKey="cash" name={t("现金", "Cash")} stroke={GOLD} strokeWidth={2} dot={false} />
+            <Line yAxisId="asset" type="monotone" dataKey="principal" name={t("理财本金", "Investment principal")} stroke={BLUE} strokeWidth={2} dot={false} />
+            <Line yAxisId="asset" type="monotone" dataKey="total_assets" name={t("总资产", "Total assets")} stroke={PURPLE} strokeWidth={3} dot={false} />
           </ComposedChart>
         </ResponsiveContainer>
       </ChartPanel>
-      <ChartPanel title="近 12 月逐月储蓄率" className="is-wide">
+      <ChartPanel title={t("近 12 月逐月储蓄率", "Monthly savings rate over 12 months")} className="is-wide">
         {monthlySavings.length ? (
           <ResponsiveContainer width="100%" height={300}>
             <ComposedChart data={monthlySavings}>
@@ -436,7 +437,7 @@ function AnnualAnalysis({
               <YAxis tickFormatter={(value) => `${Number(value).toFixed(0)}%`} />
               <Tooltip formatter={(value: number | string) => percent(value)} />
               <ReferenceLine y={0} stroke="var(--text-muted)" />
-              <Bar dataKey="savings_rate" name="单月储蓄率">
+              <Bar dataKey="savings_rate" name={t("单月储蓄率", "Monthly savings rate")}>
                 {monthlySavings.map((row) => (
                   <Cell
                     key={row.month}
@@ -446,44 +447,44 @@ function AnnualAnalysis({
               </Bar>
             </ComposedChart>
           </ResponsiveContainer>
-        ) : <Empty text="近 12 月没有收入大于零的月份。" />}
+        ) : <Empty text={t("近 12 月没有收入大于零的月份。", "No month in the last 12 months has income above zero.")} />}
       </ChartPanel>
       <div className="asset-track-analysis-grid">
-        <ChartPanel title="年度分类成本">
+        <ChartPanel title={t("年度分类成本", "Annual category costs")}>
           <ResponsiveContainer width="100%" height={Math.max(280, data.cost_audit.categories.length * 32)}>
             <ComposedChart layout="vertical" data={[...data.cost_audit.categories].reverse()}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
               <XAxis type="number" tickFormatter={axis} />
               <YAxis type="category" dataKey="category" width={80} />
               <Tooltip formatter={(value: number | string) => money(value)} />
-              <Bar dataKey="total" name="年度金额" fill={PURPLE} />
+              <Bar dataKey="total" name={t("年度金额", "Annual amount")} fill={PURPLE} />
             </ComposedChart>
           </ResponsiveContainer>
         </ChartPanel>
-        <ChartPanel title="消费频率">
+        <ChartPanel title={t("消费频率", "Spending frequency")}>
           <ResponsiveContainer width="100%" height={300}>
             <ComposedChart data={data.cost_audit.patterns}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
               <XAxis dataKey="pattern" />
               <YAxis tickFormatter={axis} />
               <Tooltip formatter={(value: number | string) => money(value)} />
-              <Bar dataKey="total" name="年度金额" fill={GOLD} />
+              <Bar dataKey="total" name={t("年度金额", "Annual amount")} fill={GOLD} />
             </ComposedChart>
           </ResponsiveContainer>
         </ChartPanel>
       </div>
       <Cards items={[
-        { label: "必要支出", value: money(data.cost_audit.necessary_total) },
-        { label: "可控支出", value: money(data.cost_audit.controlled_total) },
-        { label: "可控占比", value: percent(data.cost_audit.controlled_percent) },
+        { label: t("必要支出", "Essential expenses"), value: money(data.cost_audit.necessary_total) },
+        { label: t("可控支出", "Discretionary expenses"), value: money(data.cost_audit.controlled_total) },
+        { label: t("可控占比", "Discretionary share"), value: percent(data.cost_audit.controlled_percent) },
         {
-          label: "总资产支撑月",
+          label: t("总资产支撑月", "Months supported by total assets"),
           value: data.cost_audit.asset_support_months === null
-            ? "不可计算"
-            : `${data.cost_audit.asset_support_months.toFixed(1)} 个月`
+            ? t("不可计算", "Unavailable")
+            : t(`${data.cost_audit.asset_support_months.toFixed(1)} 个月`, `${data.cost_audit.asset_support_months.toFixed(1)} months`)
         }
       ]} />
-      <ChartPanel title="全历史趋势" className="is-wide">
+      <ChartPanel title={t("全历史趋势", "All-time trend")} className="is-wide">
         <ResponsiveContainer width="100%" height={340}>
           <ComposedChart data={history}>
             <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
@@ -492,11 +493,11 @@ function AnnualAnalysis({
             <YAxis yAxisId="asset" orientation="right" tickFormatter={axis} />
             <Tooltip formatter={(value: number | string) => money(value)} />
             <Legend />
-            <Bar yAxisId="flow" dataKey="total_income" name="收入" fill={INFLOW} />
-            <Bar yAxisId="flow" dataKey="total_expense" name="支出" fill={OUTFLOW} />
-            <Line yAxisId="asset" type="monotone" dataKey="cash" name="现金" stroke={GOLD} dot={false} />
-            <Line yAxisId="asset" type="monotone" dataKey="principal" name="理财本金" stroke={BLUE} dot={false} />
-            <Line yAxisId="asset" type="monotone" dataKey="total_assets" name="总资产" stroke={PURPLE} strokeWidth={2.5} dot={false} />
+            <Bar yAxisId="flow" dataKey="total_income" name={t("收入", "Income")} fill={INFLOW} />
+            <Bar yAxisId="flow" dataKey="total_expense" name={t("支出", "Expense")} fill={OUTFLOW} />
+            <Line yAxisId="asset" type="monotone" dataKey="cash" name={t("现金", "Cash")} stroke={GOLD} dot={false} />
+            <Line yAxisId="asset" type="monotone" dataKey="principal" name={t("理财本金", "Investment principal")} stroke={BLUE} dot={false} />
+            <Line yAxisId="asset" type="monotone" dataKey="total_assets" name={t("总资产", "Total assets")} stroke={PURPLE} strokeWidth={2.5} dot={false} />
           </ComposedChart>
         </ResponsiveContainer>
       </ChartPanel>
@@ -525,22 +526,22 @@ function MonthlyAnalysis({
       }));
     return () => { active = false; };
   }, [api, dataVersion, month]);
-  if (state.kind === "loading") return <Empty text={`正在加载 ${month} 月度分析…`} />;
+  if (state.kind === "loading") return <Empty text={t(`正在加载 ${month} 月度分析…`, `Loading ${month} monthly analysis…`)} />;
   if (state.kind === "error") return <Empty text={state.message} />;
   const overview = state.data.overview;
-  if (!overview.available || !overview.metrics) return <Empty text={`${month} 暂无可分析数据。`} />;
+  if (!overview.available || !overview.metrics) return <Empty text={t(`${month} 暂无可分析数据。`, `No analyzable data is available for ${month}.`)} />;
   const structure = overview.structure;
   const necessity = structure
     ? [
-        { name: "必要", value: structure.necessary },
-        { name: "可控", value: structure.controlled }
+        { name: t("必要", "Essential"), value: structure.necessary },
+        { name: t("可控", "Discretionary"), value: structure.controlled }
       ].filter((item) => item.value > 0)
     : [];
   const pattern = structure
     ? [
-        { name: "周期", value: structure.periodic },
-        { name: "日常", value: structure.daily },
-        { name: "偶尔", value: structure.occasional }
+        { name: t("周期", "Recurring"), value: structure.periodic },
+        { name: t("日常", "Everyday"), value: structure.daily },
+        { name: t("偶尔", "Occasional"), value: structure.occasional }
       ].filter((item) => item.value > 0)
     : [];
   const categories = overview.category_summary ?? [];
@@ -549,54 +550,54 @@ function MonthlyAnalysis({
   return (
     <>
       <div className="asset-track-analysis-heading">
-        <div><h2>{month} 月度分析</h2><span>固定资产不参与资产、对账和消费计算</span></div>
+        <div><h2>{t(`${month} 月度分析`, `${month} monthly analysis`)}</h2><span>{t("固定资产不参与资产、对账和消费计算", "Fixed assets are excluded from assets, reconciliation, and spending calculations")}</span></div>
       </div>
       <Cards items={[
-        { label: "收入", value: money(overview.metrics.total_income), tone: "inflow" },
-        { label: "净支出", value: money(overview.metrics.total_expense), tone: "outflow" },
+        { label: t("收入", "Income"), value: money(overview.metrics.total_income), tone: "inflow" },
+        { label: t("净支出", "Net expense"), value: money(overview.metrics.total_expense), tone: "outflow" },
         {
-          label: "储蓄",
+          label: t("储蓄", "Savings"),
           value: money(overview.metrics.surplus),
           tone: overview.metrics.surplus >= 0 ? "inflow" : "outflow"
         },
-        { label: "总资产", value: money(overview.metrics.total_assets) },
+        { label: t("总资产", "Total assets"), value: money(overview.metrics.total_assets) },
         {
-          label: "资产环比",
+          label: t("资产环比", "Asset change"),
           value: overview.metrics.asset_delta === null
-            ? "不可比较"
+            ? t("不可比较", "Unavailable")
             : money(overview.metrics.asset_delta),
           tone: changeTone(overview.metrics.asset_delta)
         },
         {
-          label: "对账差额",
+          label: t("对账差额", "Reconciliation difference"),
           value: overview.reconciliation?.available
             ? money(overview.reconciliation.discrepancy)
-            : "不可比较",
+            : t("不可比较", "Unavailable"),
           tone: overview.reconciliation?.available
             ? changeTone(overview.reconciliation.discrepancy)
             : undefined,
           suffix: overview.reconciliation?.available
-            ? reconciliationStatus(overview.reconciliation.discrepancy)
+            ? businessLabel(reconciliationStatus(overview.reconciliation.discrepancy))
             : undefined
         }
       ]} />
       <div className="asset-track-analysis-grid">
-        <ChartPanel title="现金账户">
+        <ChartPanel title={t("现金账户", "Cash accounts")}>
           <div className="asset-track-analysis-list">
             {(overview.cash_accounts ?? []).map((row) => (
               <div key={row.account}><span>{row.account}</span><strong>{money(row.balance)}</strong></div>
             ))}
-            <div><span>现金合计</span><strong>{money(overview.cash_total)}</strong></div>
+            <div><span>{t("现金合计", "Total cash")}</span><strong>{money(overview.cash_total)}</strong></div>
           </div>
         </ChartPanel>
-        <ChartPanel title="理财状态">
+        <ChartPanel title={t("理财状态", "Investment status")}>
           <div className="asset-track-analysis-list">
-            <div><span>本金</span><strong>{money(overview.investment?.principal)}</strong></div>
-            <div><span>市值</span><strong>{money(overview.investment?.market_value)}</strong></div>
-            <div><span>流动现金</span><strong>{money(overview.investment?.cash_balance)}</strong></div>
-            <div><span>收益率</span><strong>{percent(overview.investment?.roi_percent)}</strong></div>
+            <div><span>{t("本金", "Principal")}</span><strong>{money(overview.investment?.principal)}</strong></div>
+            <div><span>{t("市值", "Market value")}</span><strong>{money(overview.investment?.market_value)}</strong></div>
+            <div><span>{t("流动现金", "Liquid cash")}</span><strong>{money(overview.investment?.cash_balance)}</strong></div>
+            <div><span>{t("收益率", "Return")}</span><strong>{percent(overview.investment?.roi_percent)}</strong></div>
             <div>
-              <span>对比上月</span>
+              <span>{t("对比上月", "Compared with previous month")}</span>
               <strong className={
                 (overview.investment?.comparison.amount_delta ?? 0) > 0
                   ? "is-growth"
@@ -612,21 +613,21 @@ function MonthlyAnalysis({
                     overview.investment.comparison.percent_delta,
                     percent
                   )}）`
-                  : "不可比较"}
+                  : t("不可比较", "Unavailable")}
               </strong>
             </div>
           </div>
         </ChartPanel>
       </div>
       <div className="asset-track-analysis-grid is-three">
-        <PiePanel title="必要 / 可控" data={necessity} />
-        <PiePanel title="周期 / 日常 / 偶尔" data={pattern} />
+        <PiePanel title={t("必要 / 可控", "Essential / discretionary")} data={necessity} />
+        <PiePanel title={t("周期 / 日常 / 偶尔", "Recurring / everyday / occasional")} data={pattern} />
         <PiePanel
-          title="具体分类"
+          title={t("具体分类", "Categories")}
           data={categories.map((row) => ({ name: row.category, value: row.amount }))}
         />
       </div>
-      <ChartPanel title={`分类与上月对比${comparison?.previous_month ? `（${comparison.previous_month}）` : ""}`}>
+      <ChartPanel title={t(`分类与上月对比${comparison?.previous_month ? `（${comparison.previous_month}）` : ""}`, `Category comparison with previous month${comparison?.previous_month ? ` (${comparison.previous_month})` : ""}`)}>
         {comparison?.available && comparisonRows.length ? (
           <ResponsiveContainer width="100%" height={Math.max(300, comparisonRows.length * 48)}>
             <ComposedChart
@@ -644,29 +645,29 @@ function MonthlyAnalysis({
               <Tooltip formatter={(value: number | string) => money(value)} />
               <Bar
                 dataKey="previous"
-                name="上月"
+                name={t("上月", "Previous month")}
                 fill="var(--text-faint)"
                 label={
                   <ComparisonBarLabel
-                    prefix="上月"
+                    prefix={t("上月", "Previous")}
                     color="var(--text-muted)"
                   />
                 }
               />
               <Bar
                 dataKey="current"
-                name="本月"
+                name={t("本月", "Current month")}
                 fill={PURPLE}
                 label={
                   <ComparisonBarLabel
-                    prefix="本月"
+                    prefix={t("本月", "Current")}
                     color="var(--text-normal)"
                   />
                 }
               />
             </ComposedChart>
           </ResponsiveContainer>
-        ) : <Empty text="严格上一个自然月没有可比较数据。" />}
+        ) : <Empty text={t("严格上一个自然月没有可比较数据。", "The immediately preceding calendar month has no comparable data.")} />}
       </ChartPanel>
       <div className="asset-track-analysis-grid asset-track-anomaly-grid">
         <BigTicketPanel rows={overview.big_tickets ?? []} />
@@ -697,7 +698,7 @@ function PiePanel({
             <Legend />
           </PieChart>
         </ResponsiveContainer>
-      ) : <Empty text="暂无数据。" />}
+      ) : <Empty text={t("暂无数据。", "No data.")} />}
     </ChartPanel>
   );
 }
@@ -708,24 +709,24 @@ function BigTicketPanel({
   rows: Array<{ product: string; category: string; amount: number }>;
 }) {
   return (
-    <ChartPanel title="大额支出" className="asset-track-big-ticket-panel">
+    <ChartPanel title={t("大额支出", "Large expenses")} className="asset-track-big-ticket-panel">
       {rows.length ? (
         <div className="asset-track-table-scroll">
           <table>
             <thead>
-              <tr><th scope="col">商品</th><th scope="col">金额</th></tr>
+              <tr><th scope="col">{t("商品", "Item")}</th><th scope="col">{t("金额", "Amount")}</th></tr>
             </thead>
             <tbody>
               {rows.map((row, index) => (
                 <tr key={`${row.product}-${index}`}>
-                  <td>{row.product || "未填写商品"}</td>
+                  <td>{row.product || t("未填写商品", "Item not specified")}</td>
                   <td>{money(row.amount)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      ) : <Empty text="暂无记录。" />}
+      ) : <Empty text={t("暂无记录。", "No records.")} />}
     </ChartPanel>
   );
 }
@@ -737,15 +738,15 @@ function AnomalyPanel({
 }) {
   const rows = buildAnomalyDisplayRows(anomalies);
   return (
-    <ChartPanel title="异常与变化" className="asset-track-anomaly-panel">
+    <ChartPanel title={t("异常与变化", "Anomalies and changes")} className="asset-track-anomaly-panel">
       {rows.length ? (
         <div className="asset-track-table-scroll">
           <table>
             <thead>
               <tr>
-                <th scope="col">分类</th>
-                <th scope="col">金额</th>
-                <th scope="col">异常情况</th>
+                <th scope="col">{t("分类", "Category")}</th>
+                <th scope="col">{t("金额", "Amount")}</th>
+                <th scope="col">{t("异常情况", "Anomaly")}</th>
               </tr>
             </thead>
             <tbody>
@@ -753,13 +754,13 @@ function AnomalyPanel({
                 <tr key={row.category}>
                   <td>{row.category}</td>
                   <td>{money(row.amount)}</td>
-                  <td>{row.situation}</td>
+                  <td>{displayError(row.situation)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      ) : <Empty text="暂无达到阈值的异常变化。" />}
+      ) : <Empty text={t("暂无达到阈值的异常变化。", "No anomalous changes reached the threshold.")} />}
     </ChartPanel>
   );
 }

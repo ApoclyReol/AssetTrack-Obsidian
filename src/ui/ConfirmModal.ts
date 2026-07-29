@@ -3,6 +3,7 @@ import {
   Modal,
   Setting
 } from "obsidian";
+import { t } from "../i18n";
 
 class ConfirmationModal extends Modal {
   private settled = false;
@@ -22,7 +23,7 @@ class ConfirmationModal extends Modal {
     this.contentEl.createEl("p", { text: this.message });
     new Setting(this.contentEl)
       .addButton((button) =>
-        button.setButtonText("取消").onClick(() => this.finish(false))
+        button.setButtonText(t("取消", "Cancel")).onClick(() => this.finish(false))
       )
       .addButton((button) => {
         button.buttonEl.addClass("mod-warning");
@@ -51,7 +52,7 @@ export function confirmAction(
   app: App,
   title: string,
   message: string,
-  confirmText = "继续"
+  confirmText = t("继续", "Continue")
 ): Promise<boolean> {
   return new Promise((resolve) => {
     new ConfirmationModal(

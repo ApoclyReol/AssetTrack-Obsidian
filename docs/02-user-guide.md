@@ -1,5 +1,14 @@
 # 02 用户指南
 
+## 界面语言
+
+Asset Track 自动跟随当前 Obsidian 语言。中文语言代码（包括 `zh-CN`、`zh-TW`
+及其他 `zh-*` 变体）显示中文，其他语言显示英文。修改 Obsidian 语言后重新加载
+插件或重启应用即可。
+
+切换界面语言不会修改数据库。账户名、分类名、交易对方、商品和流水说明等用户内容
+始终保持录入时的原文。
+
 ## 首次使用
 
 AssetTrack 目前尚未进入 Obsidian Community Plugins，必须从 GitHub Releases

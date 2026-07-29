@@ -12,6 +12,7 @@ import { AssetTrackEditorApp } from "../ui/AssetTrackEditorApp";
 import type AssetTrackPlugin from "../main";
 import type { CsvColumnMapping } from "../types";
 import { confirmAction } from "../ui/ConfirmModal";
+import { displayError, t } from "../i18n";
 
 export interface AssetTrackViewState extends Record<string, unknown> {
   mode?: EditorMode;
@@ -84,9 +85,12 @@ export class AssetTrackEditorView extends ItemView {
     if (
       this.dirty
       && !await this.confirmAction(
-        "放弃未保存草稿？",
-        "当前 Asset Track 草稿尚未保存。放弃后继续？",
-        "放弃并继续"
+        t("放弃未保存草稿？", "Discard unsaved changes?"),
+        t(
+          "当前 Asset Track 草稿尚未保存。放弃后继续？",
+          "The current Asset Track draft has not been saved. Discard it and continue?"
+        ),
+        t("放弃并继续", "Discard and continue")
       )
     ) {
       return;
@@ -133,18 +137,28 @@ export class AssetTrackEditorView extends ItemView {
       this.root = null;
       this.contentEl.empty();
       const guide = this.contentEl.createDiv("asset-track-setup-guide");
-      guide.createEl("h2", { text: "Asset track 尚未配置" });
+      guide.createEl("h2", {
+        text: t("Asset Track 尚未配置", "Asset Track is not configured")
+      });
       guide.createEl("p", {
         text: this.plugin.databaseState === "initializing"
-          ? "正在初始化数据库……"
-          : "请先在插件设置中选择当前 Vault 内的 Asset-track 数据目录，然后创建或载入数据库。"
+          ? t("正在初始化数据库……", "Initializing the database…")
+          : t(
+              "请先在插件设置中选择当前 Vault 内的 Asset-track 数据目录，然后创建或载入数据库。",
+              "Choose an Asset Track data directory inside the current vault in plugin settings, then create or load a database."
+            )
       });
       if (this.plugin.databaseError) {
         guide.createEl("p", {
-          text: `数据库未载入，原文件未修改：${this.plugin.databaseError}`
+          text: t(
+            `数据库未载入，原文件未修改：${displayError(this.plugin.databaseError)}`,
+            `Database not loaded; original files were not changed: ${displayError(this.plugin.databaseError)}`
+          )
         });
       }
-      const button = guide.createEl("button", { text: "打开插件设置" });
+      const button = guide.createEl("button", {
+        text: t("打开插件设置", "Open plugin settings")
+      });
       this.registerDomEvent(
         button,
         "click",
@@ -178,9 +192,12 @@ export class AssetTrackEditorView extends ItemView {
   async onClose(): Promise<void> {
     if (this.dirty) {
       const discard = await this.confirmAction(
-        "关闭并放弃草稿？",
-        "Asset Track 编辑器仍有未保存草稿。关闭将放弃这些更改，是否继续？",
-        "关闭并放弃"
+        t("关闭并放弃草稿？", "Close and discard the draft?"),
+        t(
+          "Asset Track 编辑器仍有未保存草稿。关闭将放弃这些更改，是否继续？",
+          "The Asset Track editor still has unsaved changes. Closing it will discard them. Continue?"
+        ),
+        t("关闭并放弃", "Close and discard")
       );
       if (!discard) {
         const hostWindow = this.containerEl.ownerDocument.defaultView;

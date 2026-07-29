@@ -13,24 +13,25 @@ import type {
   ImportMode
 } from "../types";
 import { scalarText } from "../domain/text";
+import { businessLabel, displayError, t } from "../i18n";
 
 const TYPES = ["支出", "收入", "代付", "加仓", "提现", "忽略"] as const;
 const REQUIRED_FIELDS: Array<[keyof CsvColumnMapping, string]> = [
-  ["date_column", "日期/时间"],
-  ["product_column", "商品或说明"],
-  ["amount_column", "金额"],
-  ["type_column", "收支方向"]
+  ["date_column", t("日期/时间", "Date/time")],
+  ["product_column", t("商品或说明", "Item or description")],
+  ["amount_column", t("金额", "Amount")],
+  ["type_column", t("收支方向", "Income/expense type")]
 ];
 const OPTIONAL_FIELDS: Array<[keyof CsvColumnMapping, string]> = [
-  ["counterparty_column", "交易对方（可选）"],
-  ["category_column", "分类（可选）"],
-  ["status_column", "交易状态（可选）"]
+  ["counterparty_column", t("交易对方（可选）", "Counterparty (optional)")],
+  ["category_column", t("分类（可选）", "Category (optional)")],
+  ["status_column", t("交易状态（可选）", "Transaction status (optional)")]
 ];
 const FILTER_LABELS: Record<string, string> = {
-  outside_month: "跨月",
-  status_filtered: "状态过滤",
-  ignored_type: "忽略类型",
-  invalid: "无效字段"
+  outside_month: t("跨月", "Outside month"),
+  status_filtered: t("状态过滤", "Status filtered"),
+  ignored_type: t("忽略类型", "Ignored type"),
+  invalid: t("无效字段", "Invalid field")
 };
 const FOCUSABLE_SELECTOR = [
   "button:not([disabled])",
@@ -50,8 +51,10 @@ function canFocus(
 
 function describeExample(example: Record<string, unknown>): string {
   return Object.entries(example)
-    .map(([key, value]) => `${key === "row" ? "第" : key} ${String(value)}${key === "row" ? " 行" : ""}`)
-    .join("，");
+    .map(([key, value]) => key === "row"
+      ? t(`第 ${String(value)} 行`, `row ${String(value)}`)
+      : `${key} ${String(value)}`)
+    .join(t("，", ", "));
 }
 
 function initialMapping(
@@ -169,7 +172,7 @@ export function CsvImportDialog({
     try {
       setPreview(await onPreview(mapping));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(displayError(reason));
     } finally {
       setBusy(false);
     }
@@ -181,7 +184,7 @@ export function CsvImportDialog({
     try {
       await onApply(preview, mode, mapping);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(displayError(reason));
       setBusy(false);
     }
   };
@@ -230,14 +233,17 @@ export function CsvImportDialog({
       >
         <header>
           <div>
-            <h2 id={titleId}>导入账单</h2>
-            <span>{inspection.filename} · {inspection.row_count} 行</span>
+            <h2 id={titleId}>{t("导入账单", "Import statement")}</h2>
+            <span>{inspection.filename} · {inspection.row_count} {t("行", "rows")}</span>
           </div>
-          <button onClick={onCancel} disabled={busy}>关闭</button>
+          <button onClick={onCancel} disabled={busy}>{t("关闭", "Close")}</button>
         </header>
 
         <p id={descriptionId} className="asset-track-import-warning">
-          推荐先根据真实账单整理列名和无关记录；系统仍会要求确认字段、收支方向和交易状态。
+          {t(
+            "推荐先根据真实账单整理列名和无关记录；系统仍会要求确认字段、收支方向和交易状态。",
+            "We recommend cleaning up column names and irrelevant rows first. You will still confirm the fields, income/expense types, and transaction statuses."
+          )}
         </p>
 
         <div className="asset-track-import-mode">
@@ -247,7 +253,7 @@ export function CsvImportDialog({
               checked={mode === "append"}
               onChange={() => setMode("append")}
             />
-            增量导入（追加全部）
+            {t("增量导入（追加全部）", "Incremental import (append all)")}
           </label>
           <label>
             <input
@@ -255,12 +261,15 @@ export function CsvImportDialog({
               checked={mode === "replace"}
               onChange={() => setMode("replace")}
             />
-            覆盖当前月份
+            {t("覆盖当前月份", "Replace current month")}
           </label>
         </div>
         {mode === "append" && (
           <p className="asset-track-import-warning">
-            本模式不去重。重复导入同一账单会再次追加全部有效记录，请自行确认账单范围。
+            {t(
+              "本模式不去重。重复导入同一账单会再次追加全部有效记录，请自行确认账单范围。",
+              "This mode does not deduplicate. Importing the same statement again appends every valid row again, so verify the statement range."
+            )}
           </p>
         )}
 
@@ -272,10 +281,13 @@ export function CsvImportDialog({
                 value={scalarText(mapping[field])}
                 onChange={(event) => setColumn(field, event.target.value)}
               >
-                <option value="">请选择</option>
+                <option value="">{t("请选择", "Select")}</option>
                 {field === "date_column" && (
                   <option value="__month_start__">
-                    当前月 1 日（简化 CSV 无日期时使用）
+                    {t(
+                      "当前月 1 日（简化 CSV 无日期时使用）",
+                      "First day of current month (for CSV files without dates)"
+                    )}
                   </option>
                 )}
                 {inspection.headers.map((header) => (
@@ -288,7 +300,7 @@ export function CsvImportDialog({
 
         {directionValues.length > 0 && (
           <section className="asset-track-import-values">
-            <strong>收支值映射</strong>
+            <strong>{t("收支值映射", "Income/expense value mapping")}</strong>
             {directionValues.map((raw) => (
               <label key={raw}>
                 <span>{raw}</span>
@@ -305,8 +317,10 @@ export function CsvImportDialog({
                     }));
                   }}
                 >
-                  <option value="">请选择</option>
-                  {TYPES.map((value) => <option key={value}>{value}</option>)}
+                  <option value="">{t("请选择", "Select")}</option>
+                  {TYPES.map((value) => (
+                    <option key={value} value={value}>{businessLabel(value)}</option>
+                  ))}
                 </select>
               </label>
             ))}
@@ -315,7 +329,10 @@ export function CsvImportDialog({
 
         {mapping.status_column && statusValues.length > 0 && (
           <section className="asset-track-import-statuses">
-            <strong>文件中的交易状态（请选择允许导入的值）</strong>
+            <strong>{t(
+              "文件中的交易状态（请选择允许导入的值）",
+              "Transaction statuses in the file (select the values to import)"
+            )}</strong>
             <div>
               {statusValues.map((status) => (
                 <label key={status}>
@@ -342,7 +359,7 @@ export function CsvImportDialog({
         )}
 
         <details>
-          <summary>查看原始数据样例</summary>
+          <summary>{t("查看原始数据样例", "View raw data samples")}</summary>
           <div className="asset-track-table-scroll">
             <table>
               <thead>
@@ -363,19 +380,19 @@ export function CsvImportDialog({
 
         {preview && (
           <div className="asset-track-import-preview">
-            <strong>导入预览</strong>
-            <span>接受 {preview.import_stats.accepted_rows} / {preview.import_stats.source_rows} 行</span>
-            <span>跨月 {preview.import_stats.filtered.outside_month ?? 0} 行</span>
-            <span>状态过滤 {preview.import_stats.filtered.status_filtered ?? 0} 行</span>
-            <span>忽略类型 {preview.import_stats.filtered.ignored_type ?? 0} 行</span>
-            <span>无效 {preview.import_stats.filtered.invalid ?? 0} 行</span>
-            <span>待修正 {preview.issues.length} 项</span>
+            <strong>{t("导入预览", "Import preview")}</strong>
+            <span>{t("接受", "Accepted")} {preview.import_stats.accepted_rows} / {preview.import_stats.source_rows} {t("行", "rows")}</span>
+            <span>{t("跨月", "Outside month")} {preview.import_stats.filtered.outside_month ?? 0} {t("行", "rows")}</span>
+            <span>{t("状态过滤", "Status filtered")} {preview.import_stats.filtered.status_filtered ?? 0} {t("行", "rows")}</span>
+            <span>{t("忽略类型", "Ignored type")} {preview.import_stats.filtered.ignored_type ?? 0} {t("行", "rows")}</span>
+            <span>{t("无效", "Invalid")} {preview.import_stats.filtered.invalid ?? 0} {t("行", "rows")}</span>
+            <span>{t("待修正", "Issues to fix")} {preview.issues.length}</span>
             {Object.entries(preview.import_stats.examples)
               .filter(([, examples]) => examples.length > 0)
               .map(([kind, examples]) => (
                 <small key={kind}>
-                  {FILTER_LABELS[kind] ?? kind}示例：
-                  {examples.map(describeExample).join("；")}
+                  {FILTER_LABELS[kind] ?? kind}{t("示例：", " examples: ")}
+                  {examples.map(describeExample).join(t("；", "; "))}
                 </small>
               ))}
           </div>
@@ -387,19 +404,21 @@ export function CsvImportDialog({
         )}
 
         <footer>
-          <button onClick={onCancel} disabled={busy}>取消</button>
+          <button onClick={onCancel} disabled={busy}>{t("取消", "Cancel")}</button>
           <button
             onClick={() => void createPreview()}
             disabled={!valid || busy}
           >
-            {busy && !preview ? "正在解析…" : "生成预览"}
+            {busy && !preview
+              ? t("正在解析…", "Parsing…")
+              : t("生成预览", "Generate preview")}
           </button>
           <button
             className="mod-cta"
             onClick={() => void apply()}
             disabled={!preview || busy}
           >
-            应用到草稿
+            {t("应用到草稿", "Apply to draft")}
           </button>
         </footer>
       </section>

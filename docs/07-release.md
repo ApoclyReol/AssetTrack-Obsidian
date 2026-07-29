@@ -1,6 +1,6 @@
 # 07 构建与发行
 
-当前发布文案见 [Release v1.0.5](logs/release-v1.0.5.md)。
+当前发布文案见 [Release v1.1.0](logs/release-v1.1.0.md)。
 
 ## 安装产物
 
@@ -28,7 +28,7 @@ Release 的 `main.js`、`manifest.json` 和 `styles.css`。更新时保留已有
 
 ## GitHub Release
 
-- tag 与 manifest 版本完全一致，即 `1.0.5`；
+- tag 与 manifest 版本完全一致，即 `1.1.0`；
 - 推送版本 tag 后由 `.github/workflows/release.yml` 重新执行完整验证和生产构建；
 - 只上传 `main.js`、`manifest.json` 和 `styles.css`，不上传插件 ZIP；
 - 对标准三文件生成 GitHub artifact attestations；

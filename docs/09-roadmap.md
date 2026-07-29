@@ -2,21 +2,22 @@
 
 ## 当前版本
 
-v1.0.5 已完成纯 TypeScript 架构、账单体验与社区审核发布自动化：
+v1.1.0 已完成纯 TypeScript 架构、账单体验、自动中英文界面与社区审核发布自动化：
 
 - TypeScript Service/Repository 和 `node:sqlite`；
 - schema 9、交易对方和当前备份兼容；
 - 标准三文件、跨 CPU 架构产物；
 - 月份事务、revision、计算、CSV/XLSX/XLS、规则、账户和备份恢复测试。
 - 路径与 schema 结构校验、失败导入原子性、可访问弹窗和可视行渲染。
+- 中文环境显示中文，其他语言回退英文；用户内容和数据库规范值保持不变。
 
 ## Community 发布门槛
 
 1. 完成 Linux 最新 Obsidian 安装器真实 smoke；macOS 和 Windows 已完成。
 2. 使用复制 Vault 验证 schema 9 备份恢复、数据库替换和锁释放。
-3. 处理 v1.0.5 三平台本地验证反馈，保持 schema 9 和财务口径冻结。
+3. 处理 v1.1.0 Linux 本地验证反馈，保持 schema 9 和财务口径冻结。
 4. 从正式产物采集界面截图、插件加载耗时，并完成 Community Plugin 质量清单。
-5. 使用同一 v1.0.5 三文件产物提交 Community Plugins。
+5. 使用同一 v1.1.0 三文件产物提交 Community Plugins。
 
 ## 后续考虑
 

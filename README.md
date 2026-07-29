@@ -39,6 +39,17 @@ Bill import supports CSV, XLSX, and XLS files. The mapping dialog can map date,
 amount, income/expense type, description, counterparty, and transaction status.
 Parsing and rule matching happen locally.
 
+## Language
+
+Asset Track follows the current app language automatically. Chinese locales
+(`zh`, `zh-CN`, `zh-TW`, and other `zh-*` variants) use the Chinese interface;
+all other locales use English as the fallback. Restart or reload the plugin after
+changing the app language.
+
+Only product interface text and built-in business labels are translated. Names
+and content created by the user—including accounts, categories, counterparties,
+items, and transaction descriptions—are always displayed exactly as stored.
+
 ## Data and backups
 
 The database and automatic protection snapshots are stored at:
@@ -71,7 +82,7 @@ See [SECURITY.md](SECURITY.md) for the complete security and disclosure boundary
 
 ## Compatibility
 
-- Current version: 1.0.5; SQLite schema: 9.
+- Current version: 1.1.0; SQLite schema: 9.
 - Desktop only: macOS, Windows, and Linux; mobile is not supported.
 - Minimum app version: 1.9.10.
 - The desktop runtime must provide Node.js 22.16 or later, `DatabaseSync`, and
@@ -126,8 +137,38 @@ Asset Track 是桌面版、本地优先的个人财务工具，用于记录月�
 3. 从命令面板或侧边栏打开编辑器，配置账户与分类后录入或导入数据。
 4. 导入真实账单前，先从设置页导出并验证一份手动 ZIP 备份。
 
+### 语言
+
+Asset Track 自动跟随当前应用语言。`zh`、`zh-CN`、`zh-TW` 及其他 `zh-*`
+中文环境显示中文，其他语言环境统一回退英文。修改应用语言后，请重新加载插件或
+重启应用。
+
+插件只翻译产品界面和内置业务标签。用户创建的账户、分类、交易对方、商品和流水
+说明始终按数据库原文显示，不会因切换语言而修改。
+
+### 数据、备份与隐私
+
 数据库固定保存为 `<数据目录>/accounting_system.db`，保护快照位于
-`<数据目录>/backups/`。禁用或卸载插件不会删除这些数据。
+`<数据目录>/backups/`。迁移数据目录、切换数据库和恢复操作前会创建保护快照；
+设置页可以导出并校验完整 ZIP 备份。插件不执行定时或在线备份，禁用或卸载插件
+也不会删除数据库、保护快照或手动备份。
+
+插件仅支持桌面版 macOS、Windows 和 Linux，最低应用版本为 1.9.10。SQLite、
+一致性快照和 ZIP 备份恢复需要直接文件系统访问；插件不联网、不含遥测，也不读取
+或写入系统剪贴板。完整权限边界见 [SECURITY.md](SECURITY.md)。
+
+### 开发
+
+```bash
+npm ci
+npm run typecheck
+npm run lint
+npm test
+npm run build
+npm run release:check
+```
+
+当前版本为 1.1.0，数据库 schema 为 9。项目长期文档位于 [docs/](docs/)。
 
 本项目使用 [MIT License](LICENSE)。直接生产依赖的许可证见
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

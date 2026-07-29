@@ -1,5 +1,14 @@
 # 04 架构
 
+## 国际化边界
+
+`src/i18n.ts` 是界面语言的唯一入口，通过 Obsidian `getLanguage()` 把 `zh-*`
+映射为 `zh-CN`，其他语言映射为英文。React 界面、Setting API、Modal、Notice
+和 Electron 原生文件选择器共享该入口。
+
+国际化只存在于展示层。Repository、Service、schema 9、CSV 解析和财务计算继续
+使用既有规范值；中文业务枚举在展示时映射为英文标签，提交时仍写入原规范值。
+
 ## 当前运行链
 
 ```mermaid
