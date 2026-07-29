@@ -52,6 +52,7 @@ SQLite 是唯一事实源；无需账户，不联网，也不含遥测。
 正式社区发布前的三平台真实 Obsidian smoke 状态与测试矩阵见
 [Community Plugins 发布规划](docs/10-community-release-plan.md)。界面截图将在该
 真实 smoke 中从正式 v1.0.4 三文件产物采集，避免使用与发布版本不一致的示意图。
+macOS 和 Windows 已完成测试，Linux 尚待验证。
 
 ## 隐私与安全
 

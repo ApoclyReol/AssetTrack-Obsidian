@@ -48,6 +48,7 @@
 
 ## 尚需人工完成
 
-- macOS、Windows、Linux 真实 Obsidian Vault smoke 仍为未测试。
-- 发布前需验证弹出窗口、窄窗口、键盘导航、CSV/XLSX/XLS、备份恢复、锁释放及
-  真实 1 万行以上月份的滚动体验。
+- macOS 与 Windows 真实 Obsidian Vault smoke 已于 2026-07-29 使用 v1.0.4
+  完成，覆盖安装、数据库、导入、备份恢复、重启、弹出窗口、键盘交互、窄窗口
+  和大流水表场景。
+- Linux 真实 Obsidian Vault smoke 仍为未测试。

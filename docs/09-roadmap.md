@@ -12,7 +12,7 @@ v1.0.4 已完成纯 TypeScript 架构、账单体验与基础社区发布自动�
 
 ## Community 发布门槛
 
-1. 在 macOS、Windows、Linux 最新 Obsidian 安装器完成真实 smoke。
+1. 完成 Linux 最新 Obsidian 安装器真实 smoke；macOS 和 Windows 已完成。
 2. 使用复制 Vault 验证 schema 9 备份恢复、数据库替换和锁释放。
 3. 处理 v1.0.4 三平台本地验证反馈，保持 schema 9 和财务口径冻结。
 4. 从正式产物采集界面截图、插件加载耗时，并完成 Community Plugin 质量清单。
