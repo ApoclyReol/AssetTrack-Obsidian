@@ -6,9 +6,10 @@ BUILD="$ROOT/build/obsidian"
 BUNDLE="$BUILD/asset-track"
 VERSION="$(node -p "JSON.parse(require('fs').readFileSync('$ROOT/manifest.json','utf8')).version")"
 ARCHIVE="$ROOT/build/AssetTrack-$VERSION.zip"
+CACHE_ROOT="${TMPDIR:-/tmp}/asset-track-obsidian-npm-cache"
 
 echo "[1/4] 安装依赖并验证 TypeScript 插件"
-npm ci --prefix "$ROOT" --cache /private/tmp/asset-track-obsidian-npm-cache --no-audit --no-fund
+npm ci --prefix "$ROOT" --cache "$CACHE_ROOT" --no-audit --no-fund
 npm run typecheck --prefix "$ROOT"
 npm run lint --prefix "$ROOT"
 npm run test --prefix "$ROOT"

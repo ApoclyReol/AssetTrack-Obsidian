@@ -3,6 +3,25 @@
   overflow: auto;
 }
 
+.asset-track-view,
+.asset-track-settings {
+  --asset-track-inflow: var(--color-red);
+  --asset-track-outflow: var(--color-green);
+  --asset-track-cash: var(--color-yellow);
+  --asset-track-investment: var(--color-blue);
+  --asset-track-total-assets: var(--color-purple);
+  --asset-track-chart-1: var(--interactive-accent);
+  --asset-track-chart-2: var(--color-green);
+  --asset-track-chart-3: var(--color-red);
+  --asset-track-chart-4: var(--color-yellow);
+  --asset-track-chart-5: var(--color-blue);
+  --asset-track-chart-6: var(--color-purple);
+  --asset-track-chart-7: var(--color-orange);
+  --asset-track-chart-8: var(--color-cyan);
+  --asset-track-chart-9: var(--text-muted);
+  --asset-track-chart-10: var(--color-pink);
+}
+
 .asset-track-setup-guide {
   max-width: 560px;
   margin: 72px auto;
@@ -17,7 +36,7 @@
 }
 
 .asset-track-app {
-  min-width: 760px;
+  min-width: 0;
   color: var(--text-normal);
   background: var(--background-primary);
 }
@@ -26,7 +45,7 @@
 .asset-track-modal button:not(:disabled),
 .asset-track-setup-guide button:not(:disabled),
 .asset-track-settings button:not(:disabled) {
-  cursor: pointer !important;
+  cursor: pointer;
   transition:
     background-color 140ms ease,
     border-color 140ms ease,
@@ -94,7 +113,7 @@
 .asset-track-modal button:disabled,
 .asset-track-setup-guide button:disabled,
 .asset-track-settings button:disabled {
-  cursor: not-allowed !important;
+  cursor: not-allowed;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -269,7 +288,7 @@
   inset: 0;
   display: grid;
   padding: 24px;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--background-modifier-cover);
   place-items: center;
 }
 
@@ -419,9 +438,12 @@
 }
 
 .asset-track-virtual-table {
-  min-width: 760px;
+  --asset-track-virtual-row-height: 50px;
+
+  max-height: 58vh;
+  min-width: 0;
   margin-bottom: 12px;
-  overflow-x: auto;
+  overflow: auto;
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s);
 }
@@ -433,7 +455,9 @@
   align-items: center;
   gap: 6px;
   min-width: 1040px;
-  min-height: 42px;
+  box-sizing: border-box;
+  height: var(--asset-track-virtual-row-height);
+  min-height: var(--asset-track-virtual-row-height);
   padding: 4px 7px;
   border-bottom: 1px solid var(--background-modifier-border);
 }
@@ -452,6 +476,79 @@
 
 .asset-track-virtual-body {
   overflow: visible;
+}
+
+.asset-track-virtual-spacer {
+  min-height: 0;
+  pointer-events: none;
+}
+
+.asset-track-virtual-spacer.is-1 {
+  height: calc(var(--asset-track-virtual-row-height) * 1);
+}
+
+.asset-track-virtual-spacer.is-2 {
+  height: calc(var(--asset-track-virtual-row-height) * 2);
+}
+
+.asset-track-virtual-spacer.is-4 {
+  height: calc(var(--asset-track-virtual-row-height) * 4);
+}
+
+.asset-track-virtual-spacer.is-8 {
+  height: calc(var(--asset-track-virtual-row-height) * 8);
+}
+
+.asset-track-virtual-spacer.is-16 {
+  height: calc(var(--asset-track-virtual-row-height) * 16);
+}
+
+.asset-track-virtual-spacer.is-32 {
+  height: calc(var(--asset-track-virtual-row-height) * 32);
+}
+
+.asset-track-virtual-spacer.is-64 {
+  height: calc(var(--asset-track-virtual-row-height) * 64);
+}
+
+.asset-track-virtual-spacer.is-128 {
+  height: calc(var(--asset-track-virtual-row-height) * 128);
+}
+
+.asset-track-virtual-spacer.is-256 {
+  height: calc(var(--asset-track-virtual-row-height) * 256);
+}
+
+.asset-track-virtual-spacer.is-512 {
+  height: calc(var(--asset-track-virtual-row-height) * 512);
+}
+
+.asset-track-virtual-spacer.is-1024 {
+  height: calc(var(--asset-track-virtual-row-height) * 1024);
+}
+
+.asset-track-virtual-spacer.is-2048 {
+  height: calc(var(--asset-track-virtual-row-height) * 2048);
+}
+
+.asset-track-virtual-spacer.is-4096 {
+  height: calc(var(--asset-track-virtual-row-height) * 4096);
+}
+
+.asset-track-virtual-spacer.is-8192 {
+  height: calc(var(--asset-track-virtual-row-height) * 8192);
+}
+
+.asset-track-virtual-spacer.is-16384 {
+  height: calc(var(--asset-track-virtual-row-height) * 16384);
+}
+
+.asset-track-virtual-spacer.is-32768 {
+  height: calc(var(--asset-track-virtual-row-height) * 32768);
+}
+
+.asset-track-virtual-spacer.is-65536 {
+  height: calc(var(--asset-track-virtual-row-height) * 65536);
 }
 
 .asset-track-row-number {
@@ -601,11 +698,19 @@
 }
 
 .asset-track-analysis-card.inflow strong {
-  color: #d94f45;
+  color: var(--asset-track-inflow);
 }
 
 .asset-track-analysis-card.outflow strong {
-  color: #2ca58d;
+  color: var(--asset-track-outflow);
+}
+
+.asset-track-analysis-list strong.is-growth {
+  color: var(--asset-track-inflow);
+}
+
+.asset-track-analysis-list strong.is-decline {
+  color: var(--asset-track-outflow);
 }
 
 .asset-track-analysis-grid {
@@ -698,7 +803,8 @@
 }
 
 .asset-track-analysis .recharts-default-tooltip {
-  color: #1f2430;
+  color: var(--text-normal);
+  background: var(--background-primary);
 }
 
 @media (max-width: 1000px) {
@@ -711,6 +817,26 @@
 }
 
 @media (max-width: 720px) {
+  .asset-track-toolbar,
+  .asset-track-month-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .asset-track-editor,
+  .asset-track-analysis {
+    padding: 12px;
+  }
+
+  .asset-track-analysis-cards,
+  .asset-track-analysis-grid,
+  .asset-track-analysis-grid.is-three,
+  .asset-track-mapping-grid,
+  .asset-track-investment-row,
+  .asset-track-summary-details > div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .asset-track-analysis-grid.asset-track-anomaly-grid {
     grid-template-columns: minmax(0, 1fr);
   }

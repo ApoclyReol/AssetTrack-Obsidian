@@ -1,5 +1,7 @@
-export function isMonth(value: unknown): value is string {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}$/.test(value)) return false;
+import { scalarText } from "./text";
+
+export function isMonth(value: string): boolean {
+  if (!/^\d{4}-\d{2}$/.test(value)) return false;
   const month = Number(value.slice(5));
   return month >= 1 && month <= 12;
 }
@@ -31,7 +33,7 @@ export function shiftMonth(month: string, delta: number): string {
 }
 
 export function normalizeDate(value: unknown, defaultMonth?: string): string {
-  let raw = String(value ?? "").trim();
+  let raw = scalarText(value).trim();
   if (!raw && defaultMonth) raw = `${defaultMonth}-01`;
   raw = raw.split(/[T ]/, 1)[0]
     .replace(/年/g, "-")

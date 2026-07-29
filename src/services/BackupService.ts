@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import {
-  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -17,10 +16,11 @@ import type { DatabaseSync } from "node:sqlite";
 import { DatabaseManager } from "../database/DatabaseManager";
 import {
   BACKUP_FORMAT_VERSION,
-  CURRENT_SCHEMA_VERSION,
   REQUIRED_TABLES
 } from "../database/schema";
 import { AssetTrackError } from "./AssetTrackService";
+import { loadSqliteModule } from "./desktopRuntime";
+import { scalarText } from "../domain/text";
 
 type Row = Record<string, unknown>;
 
@@ -150,7 +150,7 @@ function sha256File(path: string): string {
 
 function csvCell(value: unknown): string {
   if (value === null || value === undefined) return "";
-  const raw = String(value);
+  const raw = scalarText(value);
   return /[",\r\n]/.test(raw) ? `"${raw.replaceAll("\"", "\"\"")}"` : raw;
 }
 
@@ -336,32 +336,16 @@ function unzip(buffer: Buffer, destination: string): void {
 }
 
 function validateSqlite(path: string): BackupValidation["schema"] {
-  const runtime = require("node:sqlite") as typeof import("node:sqlite");
-  const db = new runtime.DatabaseSync(path, { readOnly: true });
-  try {
-    const integrity = String(
-      (db.prepare("PRAGMA integrity_check").get() as Row).integrity_check
-    );
-    const tables = new Set(
-      (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Row[])
-        .map((row) => String(row.name))
-    );
-    const missing = REQUIRED_TABLES.filter((table) => !tables.has(table));
-    const version = Number(
-      (db.prepare("PRAGMA user_version").get() as Row).user_version
-    );
-    if (integrity !== "ok" || missing.length || version !== CURRENT_SCHEMA_VERSION) {
-      fail(`SQLite 校验失败：缺少 ${missing.join(",")}，integrity=${integrity}`);
-    }
-    return {
-      valid: true,
-      integrity_check: "ok",
-      missing_tables: [],
-      schema_version: version
-    };
-  } finally {
-    db.close();
+  const inspection = DatabaseManager.inspect(path);
+  if (!inspection.valid || !inspection.validation) {
+    fail(inspection.error ?? "SQLite schema 校验失败");
   }
+  return {
+    valid: true,
+    integrity_check: "ok",
+    missing_tables: inspection.validation.missing_tables,
+    schema_version: inspection.validation.schema_version
+  };
 }
 
 function parseCsv(path: string): { headers: string[]; rows: string[][] } {
@@ -409,7 +393,7 @@ async function materialize(source: string): Promise<{
     if (resolved.toLocaleLowerCase("en-US").endsWith(".zip")) {
       unzip(readFileSync(resolved), temporary);
     } else if (/\.(db|sqlite|sqlite3)$/i.test(resolved)) {
-      const runtime = require("node:sqlite") as typeof import("node:sqlite");
+      const runtime = loadSqliteModule();
       const sourceDb = new runtime.DatabaseSync(resolved, { readOnly: true });
       try {
         await runtime.backup(sourceDb, join(temporary, DATABASE_NAME));
@@ -482,7 +466,7 @@ export class BackupService {
       const snapshot = join(temporary, DATABASE_NAME);
       await this.manager.snapshot(snapshot);
       validateSqlite(snapshot);
-      const runtime = require("node:sqlite") as typeof import("node:sqlite");
+      const runtime = loadSqliteModule();
       const db = new runtime.DatabaseSync(snapshot, { readOnly: true });
       try {
         for (const config of CONFIG) {
@@ -554,7 +538,7 @@ export class BackupService {
           }
         }
       }
-      const runtime = require("node:sqlite") as typeof import("node:sqlite");
+      const runtime = loadSqliteModule();
       const db = new runtime.DatabaseSync(databasePath, { readOnly: true });
       try {
         const rowCounts: Record<string, number> = {};
@@ -607,7 +591,7 @@ export class BackupService {
     mkdirSync(directory, { recursive: true });
     const databasePath = join(directory, DATABASE_NAME);
     await this.manager.snapshot(databasePath);
-    const runtime = require("node:sqlite") as typeof import("node:sqlite");
+    const runtime = loadSqliteModule();
     const db = new runtime.DatabaseSync(databasePath, { readOnly: true });
     try {
       for (const config of CONFIG) {
@@ -637,7 +621,7 @@ export class BackupService {
         `before-restore-${timestamp()}`
       );
       rmSync(incoming, { force: true });
-      const runtime = require("node:sqlite") as typeof import("node:sqlite");
+      const runtime = loadSqliteModule();
       const sourceDb = new runtime.DatabaseSync(incomingSource, { readOnly: true });
       try {
         await runtime.backup(sourceDb, incoming);

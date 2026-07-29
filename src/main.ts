@@ -26,18 +26,19 @@ import type {
   CsvMappingProfile
 } from "./types";
 import {
+  assertPathInsideVault,
   databaseVaultPath,
   backupsVaultPath,
   normalizeDataDirectory
 } from "./services/workspacePath";
+import { parseAssetTrackSettings } from "./services/settingsValidation";
+import { loadElectronModule } from "./services/desktopRuntime";
 import {
   AssetTrackEditorView,
   type AssetTrackViewState
 } from "./views/AssetTrackEditorView";
 
-const electronShell = require("electron").shell as {
-  showItemInFolder(path: string): void;
-};
+const electronShell = loadElectronModule().shell;
 
 export type DatabaseState = "unconfigured" | "initializing" | "ready" | "error";
 export type DirectorySwitchMode = "migrate" | "load";
@@ -52,27 +53,20 @@ export default class AssetTrackPlugin extends Plugin {
   api!: AssetTrackService;
   databaseState: DatabaseState = "unconfigured";
   databaseError: string | null = null;
+  settingsIssues: string[] = [];
   private databaseManager: DatabaseManager | null = null;
   private readonly dataListeners = new Set<() => void>();
 
   async onload(): Promise<void> {
-    const stored = await this.loadData() as Partial<AssetTrackSettings> | null;
-    this.settings = {
-      dataDirectory: normalizeDataDirectory(
-        typeof stored?.dataDirectory === "string"
-          ? stored.dataDirectory
-          : ""
-      ),
-      csvMappings: Array.isArray(stored?.csvMappings)
-        ? stored.csvMappings
-        : []
-    };
+    const parsed = parseAssetTrackSettings(await this.loadData());
+    this.settings = parsed.settings;
+    this.settingsIssues = parsed.issues;
     this.registerView(
       VIEW_TYPE_ASSET_TRACK,
       (leaf) => new AssetTrackEditorView(leaf, this)
     );
     this.addSettingTab(new AssetTrackSettingTab(this.app, this));
-    this.addRibbonIcon("landmark", "打开 Asset Track", () => {
+    this.addRibbonIcon("landmark", "打开资产追踪", () => {
       void this.openEditor("analysis", undefined, "home");
     });
 
@@ -85,6 +79,7 @@ export default class AssetTrackPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+    this.settingsIssues = [];
   }
 
   async openEditor(
@@ -101,7 +96,7 @@ export default class AssetTrackPlugin extends Plugin {
       active: true,
       state: { mode, month, analysisMode } satisfies AssetTrackViewState
     });
-    this.app.workspace.revealLeaf(leaf);
+    await this.app.workspace.revealLeaf(leaf);
   }
 
   isDatabaseReady(): boolean {
@@ -230,6 +225,7 @@ export default class AssetTrackPlugin extends Plugin {
   private buildService(dataDirectory: string): ServiceContext {
     const adapter = this.filesystemAdapter();
     const workspaceRoot = adapter.getFullPath(dataDirectory);
+    assertPathInsideVault(adapter.getBasePath(), workspaceRoot);
     const manager = new DatabaseManager(this.fullDatabasePath(dataDirectory));
     return {
       manager,
@@ -248,12 +244,13 @@ export default class AssetTrackPlugin extends Plugin {
     this.databaseState = "initializing";
     this.databaseError = null;
     await this.refreshViews();
-    const inspection = await this.inspectDataDirectory(dataDirectory);
-    if (!createIfMissing && (!inspection.exists || !inspection.valid)) {
-      throw new Error(inspection.error ?? "所选目录没有有效数据库");
-    }
-    const next = this.buildService(dataDirectory);
+    let next: ServiceContext | null = null;
     try {
+      const inspection = await this.inspectDataDirectory(dataDirectory);
+      if (!createIfMissing && (!inspection.exists || !inspection.valid)) {
+        throw new Error(inspection.error ?? "所选目录没有有效数据库");
+      }
+      next = this.buildService(dataDirectory);
       await next.api.meta();
       await this.saveData({
         dataDirectory,
@@ -265,7 +262,7 @@ export default class AssetTrackPlugin extends Plugin {
       this.databaseState = "ready";
       await this.refreshViews();
     } catch (error) {
-      await next.api.close();
+      if (next) await next.api.close();
       this.databaseState = "error";
       this.databaseError = error instanceof Error ? error.message : String(error);
       await this.refreshViews();
@@ -274,7 +271,10 @@ export default class AssetTrackPlugin extends Plugin {
   }
 
   private fullDatabasePath(dataDirectory: string): string {
-    return this.filesystemAdapter().getFullPath(databaseVaultPath(dataDirectory));
+    const adapter = this.filesystemAdapter();
+    const databasePath = adapter.getFullPath(databaseVaultPath(dataDirectory));
+    assertPathInsideVault(adapter.getBasePath(), databasePath);
+    return databasePath;
   }
 
   private async createProtectionBackup(prefix: string): Promise<string> {
@@ -360,14 +360,16 @@ export default class AssetTrackPlugin extends Plugin {
       source_revision: meta.source_revision,
       runtime: "typescript"
     };
-    await navigator.clipboard.writeText(JSON.stringify(diagnostic, null, 2));
+    await activeWindow.navigator.clipboard.writeText(
+      JSON.stringify(diagnostic, null, 2)
+    );
   }
 
   async reopenDatabase(): Promise<void> {
     await this.api.reopen();
   }
 
-  async onunload(): Promise<void> {
-    if (this.isDatabaseReady()) await this.api.close();
+  onunload(): void {
+    if (this.isDatabaseReady()) void this.api.close();
   }
 }

@@ -1,13 +1,13 @@
 {
   "name": "asset-track-obsidian",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "license": "MIT",
   "type": "module",
   "scripts": {
     "build": "node esbuild.config.mjs production",
     "dev": "node esbuild.config.mjs",
-    "lint": "eslint . --quiet",
+    "lint": "eslint .",
     "release:check": "node scripts/validate-release.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
@@ -20,6 +20,8 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
@@ -28,6 +30,7 @@
     "eslint-plugin-obsidianmd": "^0.4.1",
     "globals": "^17.8.0",
     "jiti": "^2.7.0",
+    "jsdom": "^30.0.1",
     "obsidian": "^1.9.10",
     "typescript": "~5.7.2",
     "typescript-eslint": "^8.65.0",

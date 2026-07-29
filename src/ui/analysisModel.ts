@@ -5,8 +5,8 @@ import type {
   Transaction
 } from "../types";
 
-export const INFLOW_COLOR = "#D94F45";
-export const OUTFLOW_COLOR = "#2CA58D";
+export const INFLOW_COLOR = "var(--asset-track-inflow)";
+export const OUTFLOW_COLOR = "var(--asset-track-outflow)";
 
 export const TRANSACTION_SECTIONS: Transaction["type"][] = [
   "支出",
@@ -48,6 +48,15 @@ export function transactionBlockNumber(
   const type = rows[index]?.type;
   if (!type) return 0;
   return rows.slice(0, index + 1).filter((row) => row.type === type).length;
+}
+
+export function transactionBlockNumbers(rows: Transaction[]): number[] {
+  const counts = new Map<string, number>();
+  return rows.map((row) => {
+    const next = (counts.get(row.type) ?? 0) + 1;
+    counts.set(row.type, next);
+    return next;
+  });
 }
 
 export function changeTone(

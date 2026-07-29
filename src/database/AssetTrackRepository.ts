@@ -4,7 +4,6 @@ import type {
   AccountDefinition,
   AnnualCostAudit,
   AnnualOverview,
-  AnnualRow,
   CashAccountBalance,
   CategoryDefinition,
   CurrentAsset,
@@ -36,6 +35,7 @@ import {
 } from "../domain/dates";
 import { finiteNumber, roundHalfEven, sum } from "../domain/money";
 import { applyRules, normalizeProductKey, RULE_TYPES } from "../domain/rules";
+import { scalarText } from "../domain/text";
 import {
   validateTransactions,
   type ValidationIssue
@@ -46,7 +46,6 @@ import { DatabaseManager } from "./DatabaseManager";
 
 type Row = Record<string, unknown>;
 
-const ACTIVE_ASSET_STATUSES = new Set(["在用", "闲置"]);
 const ASSET_STATUSES = new Set(["在用", "闲置", "已出售", "已报废"]);
 
 export class RevisionConflictError extends AssetTrackError {
@@ -67,7 +66,7 @@ export class RepositoryValidationError extends AssetTrackError {
 }
 
 function text(value: unknown): string {
-  return value === null || value === undefined ? "" : String(value).trim();
+  return scalarText(value).trim();
 }
 
 function boolean(value: unknown): boolean {
@@ -509,7 +508,7 @@ export class AssetTrackRepository {
       sort_order: Number(row.sort_order),
       share_percent: total > 0
         ? roundHalfEven(Number(row.balance ?? 0) / total * 100, 1) : 0
-    } as CashAccountBalance & { share_percent: number }));
+    }));
   }
 
   private investmentAccounts(db: DatabaseSync, month: string): InvestmentAccountBalance[] {
@@ -1551,12 +1550,10 @@ export class AssetTrackRepository {
     const savings = roundHalfEven(totalIncome - totalExpense);
     const latest = annual.at(-1)!;
     const rollingStart = shiftMonth(latest.month, -11);
-    const publicRows = (values: ExtendedAnnualRow[]): AnnualRow[] =>
-      values as AnnualRow[];
     return {
       year,
       months: annual.map((row) => row.month),
-      rows: publicRows(annual),
+      rows: annual,
       metrics: {
         total_income: totalIncome,
         total_expense: totalExpense,
@@ -1565,10 +1562,10 @@ export class AssetTrackRepository {
           ? roundHalfEven(savings / totalIncome * 100, 1) : 0
       },
       latest,
-      rolling_rows: publicRows(full.filter(
+      rolling_rows: full.filter(
         (row) => row.month >= rollingStart && row.month <= latest.month
-      )),
-      all_trend_rows: publicRows(full),
+      ),
+      all_trend_rows: full,
       cost_audit: this.annualCostAudit(db, year, annual, this.categoryRows(db))
     };
   }

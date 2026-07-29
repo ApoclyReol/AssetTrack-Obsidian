@@ -4,6 +4,7 @@ import {
   Notice,
   PluginSettingTab,
   Setting,
+  type SettingDefinitionItem,
   TFolder
 } from "obsidian";
 import {
@@ -20,6 +21,8 @@ import {
   chooseBackupDirectory,
   chooseBackupFile
 } from "./services/nativeDialogs";
+import { scalarText } from "./domain/text";
+import { confirmAction } from "./ui/ConfirmModal";
 
 export const DEFAULT_SETTINGS: AssetTrackSettings = {
   dataDirectory: "",
@@ -93,23 +96,38 @@ export class AssetTrackSettingTab extends PluginSettingTab {
     super(app, plugin);
   }
 
+  getSettingDefinitions(): SettingDefinitionItem[] {
+    return [];
+  }
+
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.addClass("asset-track-settings");
-    containerEl.createEl("h2", { text: "Asset Track" });
     containerEl.createEl("p", {
       text:
-        "SQLite 是唯一事实源。数据库若位于同步目录，请勿在多台设备并发写入。",
+        "本地数据库是唯一事实源。数据库若位于同步目录，请勿在多台设备并发写入。",
       cls: "asset-track-settings-warning"
     });
+    if (this.plugin.settingsIssues.length) {
+      containerEl.createEl("p", {
+        text: this.plugin.settingsIssues.join("；"),
+        cls: "asset-track-settings-warning",
+        attr: { role: "alert" }
+      });
+    }
 
     new Setting(containerEl).setName("数据库存储").setHeading();
 
     let selectedPath = this.plugin.settings.dataDirectory;
     const pathStatus = containerEl.createEl("p", {
       text: this.databaseStatusText(),
-      cls: "asset-track-settings-status"
+      cls: "asset-track-settings-status",
+      attr: {
+        role: "status",
+        "aria-live": "polite",
+        "aria-atomic": "true"
+      }
     });
     const rootSetting = new Setting(containerEl)
       .setName("Asset-track 数据目录");
@@ -181,20 +199,25 @@ export class AssetTrackSettingTab extends PluginSettingTab {
 
     const backupStatus = containerEl.createEl("p", {
       text: "尚未执行操作。",
-      cls: "asset-track-settings-status"
+      cls: "asset-track-settings-status",
+      attr: {
+        role: "status",
+        "aria-live": "polite",
+        "aria-atomic": "true"
+      }
     });
     let exportedPath = "";
     let revealButton: { setDisabled(value: boolean): unknown } | undefined;
     new Setting(containerEl)
       .setName("立即备份")
-      .setDesc("选择保存目录后生成一个完整 ZIP 备份。")
+      .setDesc("选择保存目录后生成一个完整 zip 备份。")
       .addButton((button) =>
         button.setButtonText("选择目录并导出").onClick(async () => {
           try {
             const directory = await chooseBackupDirectory();
             if (!directory) return;
             button.setDisabled(true);
-            backupStatus.setText("正在创建并校验一致性 ZIP 备份…");
+            backupStatus.setText("正在创建并校验一致性 zip 备份…");
             const result = await this.plugin.api.backup(directory);
             exportedPath = result.path;
             revealButton?.setDisabled(false);
@@ -209,7 +232,7 @@ export class AssetTrackSettingTab extends PluginSettingTab {
       .addButton((button) => {
         revealButton = button;
         button
-          .setButtonText("在 Finder 中显示")
+          .setButtonText("在文件管理器中显示")
           .setDisabled(true)
           .onClick(() => {
             if (exportedPath) this.plugin.showPathInFinder(exportedPath);
@@ -227,8 +250,8 @@ export class AssetTrackSettingTab extends PluginSettingTab {
         "备份校验通过",
         `流水 ${rows?.transactions ?? 0} 行`,
         manifest?.created_at
-          ? `创建时间 ${String(manifest.created_at)}`
-          : "SQLite 数据库文件",
+          ? `创建时间 ${scalarText(manifest.created_at)}`
+          : "数据库文件",
         restorePath
       ].join(" · ");
     };
@@ -252,7 +275,7 @@ export class AssetTrackSettingTab extends PluginSettingTab {
     };
     new Setting(containerEl)
       .setName("恢复备份")
-      .setDesc("选择 AssetTrack ZIP 备份或 SQLite 数据库文件。")
+      .setDesc("选择完整备份 zip 或数据库文件。")
       .addButton((button) =>
         button.setButtonText("选择备份文件").onClick(() =>
           void selectAndValidate(() => chooseBackupFile())
@@ -260,17 +283,19 @@ export class AssetTrackSettingTab extends PluginSettingTab {
       )
       .addButton((button) => {
         restoreButton = button;
+        button.buttonEl.addClass("mod-warning");
         button
-          .setWarning()
           .setButtonText("确认恢复")
           .setDisabled(true)
           .onClick(async () => {
           if (!restorePath || !restoreValidated) return;
-          if (
-            !window.confirm(
-              `将恢复：\n${restorePath}\n\n恢复前会创建当前数据库一致性安全备份。继续？`
-            )
-          ) return;
+          const confirmed = await confirmAction(
+            this.app,
+            "恢复数据库备份？",
+            `将恢复：${restorePath}。恢复前会创建当前数据库一致性安全备份。`,
+            "确认恢复"
+          );
+          if (!confirmed) return;
           button.setDisabled(true);
           backupStatus.setText("正在 staging 恢复数据库…");
           try {
@@ -287,10 +312,15 @@ export class AssetTrackSettingTab extends PluginSettingTab {
           });
       });
 
-    containerEl.createEl("h3", { text: "现金与理财账户" });
+    new Setting(containerEl).setName("现金与理财账户").setHeading();
     const accountStatus = containerEl.createEl("p", {
       text: "正在读取账户定义…",
-      cls: "asset-track-settings-status"
+      cls: "asset-track-settings-status",
+      attr: {
+        role: "status",
+        "aria-live": "polite",
+        "aria-atomic": "true"
+      }
     });
     const accountRoot = containerEl.createDiv("asset-track-settings-accounts");
     void this.renderAccounts(accountRoot, accountStatus);

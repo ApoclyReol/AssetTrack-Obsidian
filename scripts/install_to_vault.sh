@@ -8,8 +8,9 @@ fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VAULT="$(cd "$1" && pwd)"
-BUNDLE="$ROOT/build/obsidian/asset-track"
-TARGET="$VAULT/.obsidian/plugins/asset-track"
+BUNDLE="${ASSET_TRACK_BUNDLE:-$ROOT/build/obsidian/asset-track}"
+PLUGIN_ROOT="$VAULT/.obsidian/plugins"
+TARGET="$PLUGIN_ROOT/asset-track"
 
 test -d "$VAULT/.obsidian" || {
   echo "目标不是 Obsidian Vault（缺少 .obsidian）：$VAULT" >&2
@@ -20,13 +21,39 @@ test -s "$BUNDLE/main.js" || {
   exit 1
 }
 
-TEMP_TARGET="$VAULT/.obsidian/plugins/.asset-track-installing"
-rm -rf "$TEMP_TARGET"
-mkdir -p "$TEMP_TARGET"
-cp -R "$BUNDLE/." "$TEMP_TARGET/"
+mkdir -p "$PLUGIN_ROOT"
+STAGE_ROOT="$(mktemp -d "$PLUGIN_ROOT/.asset-track-installing.XXXXXX")"
+BACKUP_ROOT=""
+cleanup() {
+  rm -rf "$STAGE_ROOT"
+}
+trap cleanup EXIT
+
+STAGED_TARGET="$STAGE_ROOT/asset-track"
+mkdir -p "$STAGED_TARGET"
+cp -R "$BUNDLE/." "$STAGED_TARGET/"
 if [[ -f "$TARGET/data.json" ]]; then
-  cp "$TARGET/data.json" "$TEMP_TARGET/data.json"
+  cp "$TARGET/data.json" "$STAGED_TARGET/data.json"
 fi
-rm -rf "$TARGET"
-mv "$TEMP_TARGET" "$TARGET"
+
+if [[ -d "$TARGET" ]]; then
+  BACKUP_ROOT="$(mktemp -d "$PLUGIN_ROOT/.asset-track-previous.XXXXXX")"
+  mv "$TARGET" "$BACKUP_ROOT/asset-track"
+fi
+
+if ! mv "$STAGED_TARGET" "$TARGET"; then
+  if [[ -n "$BACKUP_ROOT" && -d "$BACKUP_ROOT/asset-track" ]]; then
+    if ! mv "$BACKUP_ROOT/asset-track" "$TARGET"; then
+      echo "自动恢复失败，原插件保留在：$BACKUP_ROOT/asset-track" >&2
+      exit 1
+    fi
+  fi
+  echo "插件安装失败，已恢复原目录" >&2
+  exit 1
+fi
+
+if [[ -n "$BACKUP_ROOT" ]]; then
+  rm -rf "$BACKUP_ROOT"
+  BACKUP_ROOT=""
+fi
 echo "$TARGET"

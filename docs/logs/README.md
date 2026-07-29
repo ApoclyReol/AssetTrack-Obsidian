@@ -11,6 +11,8 @@
   lint/CI、发布校验和按钮 hover 反馈。
 - [Release v1.0.3](release-v1.0.3.md)：加强按钮 hover、手型指针、按下反馈与
   键盘焦点可见性。
+- [Release v1.0.4](release-v1.0.4.md)：修复数据边界校验、导入失败原子性、
+  弹窗可访问性、主题响应式和大流水表性能问题。
 
 后续每次正式更新新增 `release-vN.N.N.md`，至少记录：
 

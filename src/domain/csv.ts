@@ -6,6 +6,7 @@ import type {
   CsvInspection,
   Transaction
 } from "../types";
+import { scalarText } from "./text";
 import { normalizeDate } from "./dates";
 
 const ALLOWED_TYPES = new Set(["支出", "收入", "代付", "加仓", "提现"]);
@@ -180,7 +181,7 @@ export function previewCsv(
     ["type_column", "收支方向"]
   ];
   for (const [field, label] of required) {
-    const selected = String(mapping[field] ?? "").trim();
+    const selected = scalarText(mapping[field]).trim();
     if (!selected || (selected !== "__month_start__" && !headers.includes(selected))) {
       throw new Error(`请选择有效的${label}列`);
     }
@@ -190,7 +191,7 @@ export function previewCsv(
     "category_column",
     "status_column"
   ] as const) {
-    const selected = String(mapping[field] ?? "").trim();
+    const selected = scalarText(mapping[field]).trim();
     if (selected && !headers.includes(selected)) {
       const labels = {
         counterparty_column: "交易对方",

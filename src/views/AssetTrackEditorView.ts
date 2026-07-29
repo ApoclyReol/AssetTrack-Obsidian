@@ -10,6 +10,8 @@ import {
 } from "../constants";
 import { AssetTrackEditorApp } from "../ui/AssetTrackEditorApp";
 import type AssetTrackPlugin from "../main";
+import type { CsvColumnMapping } from "../types";
+import { confirmAction } from "../ui/ConfirmModal";
 
 export interface AssetTrackViewState extends Record<string, unknown> {
   mode?: EditorMode;
@@ -24,6 +26,38 @@ export class AssetTrackEditorView extends ItemView {
     analysisMode: "home"
   };
   private dirty = false;
+  private readonly onDirtyChange = (dirty: boolean): void => {
+    this.dirty = dirty;
+  };
+  private readonly onStateChange = (
+    mode: EditorMode,
+    analysisMode: AnalysisMode,
+    month: string
+  ): void => {
+    this.state = { mode, analysisMode, month };
+    void this.app.workspace.requestSaveLayout();
+  };
+  private readonly subscribeDataChanges = (
+    listener: () => void
+  ): (() => void) => this.plugin.onDataChange(listener);
+  private readonly getCsvMapping = (
+    signature: string
+  ): CsvColumnMapping | undefined =>
+    this.plugin.csvMapping(signature)?.mapping;
+  private readonly saveCsvMapping = (
+    headerSignature: string,
+    mapping: CsvColumnMapping
+  ): Promise<void> => this.plugin.saveCsvMapping({
+    header_signature: headerSignature,
+    mapping,
+    updated_at: new Date().toISOString()
+  });
+  private readonly confirmAction = (
+    title: string,
+    message: string,
+    confirmText?: string
+  ): Promise<boolean> =>
+    confirmAction(this.app, title, message, confirmText);
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: AssetTrackPlugin) {
     super(leaf);
@@ -47,18 +81,27 @@ export class AssetTrackEditorView extends ItemView {
     state: Record<string, unknown>,
     result: ViewStateResult
   ): Promise<void> {
-    if (this.dirty && !window.confirm("当前 Asset Track 草稿尚未保存。放弃后继续？")) {
+    if (
+      this.dirty
+      && !await this.confirmAction(
+        "放弃未保存草稿？",
+        "当前 Asset Track 草稿尚未保存。放弃后继续？",
+        "放弃并继续"
+      )
+    ) {
       return;
     }
-    const requestedMode = String(state.mode ?? "");
+    const requestedMode = typeof state.mode === "string" ? state.mode : "";
+    const requestedAnalysisMode =
+      typeof state.analysisMode === "string" ? state.analysisMode : "";
     this.state = {
       mode: EDITOR_MODES.includes(requestedMode as EditorMode)
         ? requestedMode as EditorMode
         : "analysis",
       analysisMode: ANALYSIS_MODES.includes(
-        String(state.analysisMode ?? "") as AnalysisMode
+        requestedAnalysisMode as AnalysisMode
       )
-        ? state.analysisMode as AnalysisMode
+        ? requestedAnalysisMode as AnalysisMode
         : "home",
       month: state.month as string | undefined
     };
@@ -90,7 +133,7 @@ export class AssetTrackEditorView extends ItemView {
       this.root = null;
       this.contentEl.empty();
       const guide = this.contentEl.createDiv("asset-track-setup-guide");
-      guide.createEl("h2", { text: "Asset Track 尚未配置" });
+      guide.createEl("h2", { text: "Asset track 尚未配置" });
       guide.createEl("p", {
         text: this.plugin.databaseState === "initializing"
           ? "正在初始化数据库……"
@@ -102,7 +145,11 @@ export class AssetTrackEditorView extends ItemView {
         });
       }
       const button = guide.createEl("button", { text: "打开插件设置" });
-      button.addEventListener("click", () => this.plugin.openPluginSettings());
+      this.registerDomEvent(
+        button,
+        "click",
+        () => this.plugin.openPluginSettings()
+      );
       return;
     }
     if (!this.root) {
@@ -115,40 +162,29 @@ export class AssetTrackEditorView extends ItemView {
         initialMode: this.state.mode ?? "analysis",
         initialAnalysisMode: this.state.analysisMode ?? "home",
         initialMonth: this.state.month,
-        onDirtyChange: (dirty: boolean) => {
-          this.dirty = dirty;
-        },
-        onStateChange: (
-          mode: EditorMode,
-          analysisMode: AnalysisMode,
-          month: string
-        ) => {
-          this.state = { mode, analysisMode, month };
-          this.app.workspace.requestSaveLayout();
-        },
-        subscribeDataChanges: (listener: () => void) =>
-          this.plugin.onDataChange(listener),
-        getCsvMapping: (signature: string) =>
-          this.plugin.csvMapping(signature)?.mapping,
-        saveCsvMapping: (
-          header_signature: string,
-          mapping: import("../types").CsvColumnMapping
-        ) => this.plugin.saveCsvMapping({
-          header_signature,
-          mapping,
-          updated_at: new Date().toISOString()
-        })
+        hostWindow: this.contentEl.ownerDocument.defaultView
+          ?? this.containerEl.ownerDocument.defaultView
+          ?? activeWindow,
+        confirmAction: this.confirmAction,
+        onDirtyChange: this.onDirtyChange,
+        onStateChange: this.onStateChange,
+        subscribeDataChanges: this.subscribeDataChanges,
+        getCsvMapping: this.getCsvMapping,
+        saveCsvMapping: this.saveCsvMapping
       })
     );
   }
 
   async onClose(): Promise<void> {
     if (this.dirty) {
-      const discard = window.confirm(
-        "Asset Track 编辑器仍有未保存草稿。关闭将放弃这些更改，是否继续？"
+      const discard = await this.confirmAction(
+        "关闭并放弃草稿？",
+        "Asset Track 编辑器仍有未保存草稿。关闭将放弃这些更改，是否继续？",
+        "关闭并放弃"
       );
       if (!discard) {
-        window.setTimeout(
+        const hostWindow = this.containerEl.ownerDocument.defaultView;
+        hostWindow?.setTimeout(
           () => void this.plugin.openEditor(
             this.state.mode,
             this.state.month,

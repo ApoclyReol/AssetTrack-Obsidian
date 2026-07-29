@@ -1,10 +1,18 @@
-import { useMemo, useState } from "react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent
+} from "react";
 import type {
   CsvColumnMapping,
   CsvImportPreview,
   CsvInspection,
   ImportMode
 } from "../types";
+import { scalarText } from "../domain/text";
 
 const TYPES = ["支出", "收入", "代付", "加仓", "提现", "忽略"] as const;
 const REQUIRED_FIELDS: Array<[keyof CsvColumnMapping, string]> = [
@@ -24,6 +32,21 @@ const FILTER_LABELS: Record<string, string> = {
   ignored_type: "忽略类型",
   invalid: "无效字段"
 };
+const FOCUSABLE_SELECTOR = [
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])"
+].join(",");
+
+function canFocus(
+  element: Element | null
+): element is Element & { focus(): void } {
+  return element !== null
+    && "focus" in element
+    && typeof element.focus === "function";
+}
 
 function describeExample(example: Record<string, unknown>): string {
   return Object.entries(example)
@@ -66,12 +89,14 @@ function initialMapping(
 }
 
 export function CsvImportDialog({
+  hostWindow,
   inspection,
   savedMapping,
   onCancel,
   onPreview,
   onApply
 }: {
+  hostWindow: Window;
   inspection: CsvInspection;
   savedMapping?: CsvColumnMapping;
   onCancel: () => void;
@@ -84,6 +109,9 @@ export function CsvImportDialog({
     mapping: CsvColumnMapping
   ) => Promise<void>;
 }) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const titleId = useId();
+  const descriptionId = useId();
   const [mapping, setMapping] = useState<CsvColumnMapping>(() =>
     initialMapping(inspection, savedMapping)
   );
@@ -91,6 +119,18 @@ export function CsvImportDialog({
   const [preview, setPreview] = useState<CsvImportPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  useEffect(() => {
+    const previousFocus = hostWindow.document.activeElement;
+    const first = dialogRef.current?.querySelector<HTMLElement>(
+      FOCUSABLE_SELECTOR
+    );
+    first?.focus();
+    return () => {
+      if (canFocus(previousFocus)) {
+        previousFocus.focus();
+      }
+    };
+  }, [hostWindow]);
   const directionValues = useMemo(
     () => inspection.distinct_values[mapping.type_column] ?? [],
     [inspection, mapping.type_column]
@@ -118,7 +158,7 @@ export function CsvImportDialog({
     });
   };
   const valid = REQUIRED_FIELDS.every(([field]) =>
-    String(mapping[field] ?? "").trim()
+    scalarText(mapping[field]).trim()
   )
     && directionValues.every((value) => Boolean(mapping.type_values[value]))
     && (!mapping.status_column || mapping.included_statuses.length > 0);
@@ -145,19 +185,58 @@ export function CsvImportDialog({
       setBusy(false);
     }
   };
+  const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === "Escape" && !busy) {
+      event.preventDefault();
+      onCancel();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = Array.from(
+      dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR) ?? []
+    );
+    if (!focusable.length) {
+      event.preventDefault();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    const active = hostWindow.document.activeElement;
+    if (event.shiftKey && active === first) {
+      event.preventDefault();
+      last?.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   return (
-    <div className="asset-track-modal-backdrop" role="presentation">
-      <section className="asset-track-modal" role="dialog" aria-modal="true">
+    <div
+      className="asset-track-modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !busy) onCancel();
+      }}
+    >
+      <section
+        ref={dialogRef}
+        className="asset-track-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        onKeyDown={handleKeyDown}
+      >
         <header>
           <div>
-            <h2>导入账单</h2>
+            <h2 id={titleId}>导入账单</h2>
             <span>{inspection.filename} · {inspection.row_count} 行</span>
           </div>
           <button onClick={onCancel} disabled={busy}>关闭</button>
         </header>
 
-        <p className="asset-track-import-warning">
+        <p id={descriptionId} className="asset-track-import-warning">
           推荐先根据真实账单整理列名和无关记录；系统仍会要求确认字段、收支方向和交易状态。
         </p>
 
@@ -190,7 +269,7 @@ export function CsvImportDialog({
             <label key={field}>
               {label}
               <select
-                value={String(mapping[field] ?? "")}
+                value={scalarText(mapping[field])}
                 onChange={(event) => setColumn(field, event.target.value)}
               >
                 <option value="">请选择</option>
@@ -301,7 +380,11 @@ export function CsvImportDialog({
               ))}
           </div>
         )}
-        {error && <p className="asset-track-status is-error">{error}</p>}
+        {error && (
+          <p className="asset-track-status is-error" role="alert">
+            {error}
+          </p>
+        )}
 
         <footer>
           <button onClick={onCancel} disabled={busy}>取消</button>

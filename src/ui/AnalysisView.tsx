@@ -17,7 +17,6 @@ import {
 import { ANALYSIS_MODES, type AnalysisMode } from "../constants";
 import type {
   AnnualOverview,
-  AnnualRow,
   CurrentAsset,
   MonthWorkspace
 } from "../types";
@@ -34,12 +33,20 @@ import {
 
 const INFLOW = INFLOW_COLOR;
 const OUTFLOW = OUTFLOW_COLOR;
-const GOLD = "#E0A106";
-const BLUE = "#2F80ED";
-const PURPLE = "#8E63CE";
+const GOLD = "var(--asset-track-cash)";
+const BLUE = "var(--asset-track-investment)";
+const PURPLE = "var(--asset-track-total-assets)";
 const PIE_COLORS = [
-  "#635BFF", "#2CA58D", "#D94F45", "#E0A106", "#2F80ED",
-  "#8E63CE", "#E76F51", "#43AA8B", "#577590", "#F4A261"
+  "var(--asset-track-chart-1)",
+  "var(--asset-track-chart-2)",
+  "var(--asset-track-chart-3)",
+  "var(--asset-track-chart-4)",
+  "var(--asset-track-chart-5)",
+  "var(--asset-track-chart-6)",
+  "var(--asset-track-chart-7)",
+  "var(--asset-track-chart-8)",
+  "var(--asset-track-chart-9)",
+  "var(--asset-track-chart-10)"
 ];
 
 type LoadState<T> =
@@ -428,7 +435,7 @@ function AnnualAnalysis({
               <XAxis dataKey="month" />
               <YAxis tickFormatter={(value) => `${Number(value).toFixed(0)}%`} />
               <Tooltip formatter={(value: number | string) => percent(value)} />
-              <ReferenceLine y={0} stroke="#8A8A8A" />
+              <ReferenceLine y={0} stroke="var(--text-muted)" />
               <Bar dataKey="savings_rate" name="单月储蓄率">
                 {monthlySavings.map((row) => (
                   <Cell
@@ -638,7 +645,7 @@ function MonthlyAnalysis({
               <Bar
                 dataKey="previous"
                 name="上月"
-                fill="#A8A8B3"
+                fill="var(--text-faint)"
                 label={
                   <ComparisonBarLabel
                     prefix="上月"

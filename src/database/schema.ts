@@ -1,14 +1,9 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { CATEGORY_COLORS } from "../domain/categoryColors";
 
 export const CURRENT_SCHEMA_VERSION = 9;
 export const BACKUP_FORMAT_VERSION = 3;
-
-export const CATEGORY_COLORS = [
-  "#e53935", "#f4511e", "#fb8c00", "#fdd835", "#c0ca33",
-  "#7cb342", "#43a047", "#00897b", "#00acc1", "#039be5",
-  "#1e88e5", "#3949ab", "#5e35b1", "#8e24aa", "#d81b60"
-] as const;
 
 export const CATEGORY_METADATA = {
   "居住固定": { type: "支出", necessity: "必要", pattern: "周期" },
@@ -39,6 +34,132 @@ export const REQUIRED_TABLES = [
   "auto_rules",
   "month_status"
 ] as const;
+
+export const REQUIRED_COLUMNS: Record<
+  typeof REQUIRED_TABLES[number],
+  readonly string[]
+> = {
+  category_definitions: [
+    "category_key",
+    "name",
+    "transaction_type",
+    "necessity",
+    "pattern",
+    "is_big_ticket",
+    "color",
+    "is_active",
+    "sort_order"
+  ],
+  account_definitions: [
+    "account_key",
+    "name",
+    "account_type",
+    "is_active",
+    "sort_order"
+  ],
+  transactions: [
+    "id",
+    "month",
+    "transaction_date",
+    "type",
+    "category_key",
+    "category",
+    "counterparty",
+    "product",
+    "amount"
+  ],
+  cash_account_balances: ["month", "account_key", "balance"],
+  investment_account_balances: [
+    "month",
+    "account_key",
+    "principal",
+    "market_value",
+    "cash_balance"
+  ],
+  fixed_assets: [
+    "id",
+    "month",
+    "asset_key",
+    "asset_name",
+    "category",
+    "purchase_date",
+    "purchase_price",
+    "status",
+    "note"
+  ],
+  debt_manager: [
+    "id",
+    "description",
+    "counterparty",
+    "amount",
+    "start_date",
+    "is_paid",
+    "paid_date"
+  ],
+  auto_rules: [
+    "id",
+    "transaction_type",
+    "counterparty",
+    "product",
+    "category_key",
+    "category"
+  ],
+  month_status: [
+    "month",
+    "status",
+    "locked_at",
+    "updated_at",
+    "fixed_assets_initialized",
+    "revision"
+  ]
+};
+
+export const REQUIRED_INDEXES = [
+  "idx_transactions_month",
+  "idx_transactions_type",
+  "idx_transactions_category_key",
+  "idx_transactions_month_date",
+  "idx_cash_balances_month",
+  "idx_investment_balances_month",
+  "idx_fixed_assets_month",
+  "idx_debt_start",
+  "idx_debt_paid",
+  "idx_auto_rules_match"
+] as const;
+
+export interface RequiredForeignKey {
+  table: typeof REQUIRED_TABLES[number];
+  from: string;
+  targetTable: typeof REQUIRED_TABLES[number];
+  targetColumn: string;
+}
+
+export const REQUIRED_FOREIGN_KEYS: readonly RequiredForeignKey[] = [
+  {
+    table: "transactions",
+    from: "category_key",
+    targetTable: "category_definitions",
+    targetColumn: "category_key"
+  },
+  {
+    table: "cash_account_balances",
+    from: "account_key",
+    targetTable: "account_definitions",
+    targetColumn: "account_key"
+  },
+  {
+    table: "investment_account_balances",
+    from: "account_key",
+    targetTable: "account_definitions",
+    targetColumn: "account_key"
+  },
+  {
+    table: "auto_rules",
+    from: "category_key",
+    targetTable: "category_definitions",
+    targetColumn: "category_key"
+  }
+];
 
 export function categoryKey(name: string): string {
   return `cat-${createHash("sha256").update(name, "utf8").digest("hex").slice(0, 16)}`;

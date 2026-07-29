@@ -1,7 +1,7 @@
 {
   "id": "asset-track",
   "name": "Asset Track",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "minAppVersion": "1.9.10",
   "description": "在 Obsidian 中完成本地个人财务记录、计算和实时分析。",
   "author": "Apocly",

@@ -2,7 +2,7 @@
 
 ## 当前结论
 
-v1.0.3 已具备标准 Community Plugin 三文件结构、根目录 MIT LICENSE、依赖声明、
+v1.0.4 已具备标准 Community Plugin 三文件结构、根目录 MIT LICENSE、依赖声明、
 lint、CI 和发布校验：
 
 ```text
@@ -20,11 +20,11 @@ smoke 仍是提交前发布门槛；未实测的平台不得标记完成。** Co
 - `manifest.json` 最低 Obsidian 版本为 1.9.10。
 - 运行时探测 Node ≥22.16、`DatabaseSync` 和 `sqlite.backup`；旧桌面安装器只显示
   升级提示，不修改数据。
-- `versions.json` 声明 1.0.3 最低兼容 Obsidian 1.9.10。
+- `versions.json` 声明 1.0.4 最低兼容 Obsidian 1.9.10。
 - 稳定版冻结 schema 9；Community 插件不包含旧数据库自动迁移路径。
 - 生产 `main.js` 打包 React、Recharts 和 SheetJS；许可证与 lockfile 边界见根目录
-  `THIRD_PARTY_NOTICES.md`。v1.0.3 文件为 1,895,071 bytes；SheetJS 当前静态
-  导入，Recharts 2.x 已停止活跃维护。
+  `THIRD_PARTY_NOTICES.md`。生产文件大小由当前 `release:check` 记录；SheetJS
+  当前静态导入，Recharts 2.x 已停止活跃维护。
 
 ## 三平台真实 smoke matrix
 
@@ -41,6 +41,9 @@ smoke 仍是提交前发布门槛；未实测的平台不得标记完成。** Co
 | 迁移当前库、载入目标库 | 未测试 | 未测试 | 未测试 |
 | 禁用、重启、重新启用与锁释放 | 未测试 | 未测试 | 未测试 |
 | 多 ItemView 与未保存草稿 | 未测试 | 未测试 | 未测试 |
+| 弹出窗口、Escape 与焦点恢复 | 未测试 | 未测试 | 未测试 |
+| 20 MiB 文件门禁和导入失败重试 | 未测试 | 未测试 | 未测试 |
+| 窄窗口和大流水表滚动 | 未测试 | 未测试 | 未测试 |
 | 旧桌面安装器兼容提示且不写库 | 未测试 | 未测试 | 未测试 |
 | 插件加载耗时与主要界面截图 | 未测试 | 未测试 | 未测试 |
 
@@ -50,21 +53,23 @@ smoke 仍是提交前发布门槛；未实测的平台不得标记完成。** Co
 
 ## 自动化与人工门槛
 
-- CI 顺序为 `npm ci → typecheck → lint → test → build → release:check`。
+- CI 在 Ubuntu、macOS 和 Windows 执行
+  `npm ci → typecheck → lint → test → build → release:check`。
+- Ubuntu package job 生成并上传标准三文件与 zip；push 构建生成 provenance。
 - `release:check` 校验 package/manifest/versions、MIT 声明、三发布源文件、
   SheetJS CDN lockfile integrity，并记录生产 `dist/main.js` 字节数。
 - bundle 脚本复查安装目录仅有三个文件，ZIP 仅有一个 `asset-track/` 顶层目录。
 - README、长期文档、CHANGELOG、SECURITY、release 日志与 release 资产一致。
 - Git 不包含数据库、备份、真实账单、Vault、日志、密钥、依赖或构建缓存。
-- 从正式 v1.0.3 bundle 采集主要功能截图，并记录一次冷启动/插件加载耗时。
+- 从正式 v1.0.4 bundle 采集主要功能截图，并记录一次冷启动/插件加载耗时。
 - 三平台 smoke 全部完成，Community Directory 名称与 ID 再次确认无冲突。
 
 ## GitHub Release 与提交
 
-1. tag、`package.json`、manifest 和 `versions.json` 的 1.0.3 完全一致。
+1. tag、`package.json`、manifest 和 `versions.json` 的 1.0.4 完全一致。
 2. Release 上传 `main.js`、`manifest.json` 和 `styles.css`。
 3. 用全新 Vault 和已有 schema 9 数据库的复制 Vault从 Release 安装验证。
-4. 完成上表并保存脱敏记录后，以 `1.0.3` 提交 Community Plugins。
+4. 完成上表并保存脱敏记录后，以 `1.0.4` 提交 Community Plugins。
 5. 按官方
    [Submit your plugin](https://docs.obsidian.md/Plugins/Releasing/Submit%20your%20plugin)
    流程提交仓库和 manifest。

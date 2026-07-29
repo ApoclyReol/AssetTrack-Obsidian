@@ -1,9 +1,10 @@
 import type { Transaction } from "../types";
+import { scalarText } from "./text";
 
 export const RULE_TYPES = new Set(["支出", "收入"]);
 
 export function normalizeProductKey(value: unknown): string {
-  return String(value ?? "")
+  return scalarText(value)
     .trim()
     .toLocaleLowerCase("zh-CN")
     .replace(/\s+/g, " ")

@@ -1,6 +1,6 @@
 # 07 构建与发行
 
-当前发布文案见 [Release v1.0.3](logs/release-v1.0.3.md)。
+当前发布文案见 [Release v1.0.4](logs/release-v1.0.4.md)。
 
 ## 安装产物
 
@@ -12,7 +12,7 @@ build/obsidian/asset-track/
 ```
 
 三个文件组成统一桌面插件，不包含 sidecar、Python、平台二进制或架构目录。
-构建同时生成 `build/AssetTrack-1.0.3.zip`，ZIP 内只有一个 `asset-track/`
+构建同时生成 `build/AssetTrack-1.0.4.zip`，ZIP 内只有一个 `asset-track/`
 顶层目录及上述三个文件。
 
 ## 构建与验证
@@ -40,7 +40,7 @@ zsh scripts/install_to_vault.sh "/path/to/obsidian-vault"
 
 ## GitHub Release
 
-- tag 与 manifest 版本完全一致，即 `1.0.3`；
+- tag 与 manifest 版本完全一致，即 `1.0.4`；
 - 上传 `main.js`、`manifest.json` 和 `styles.css`；
 - 仓库根目录保留 `versions.json`，声明各版本最低兼容 Obsidian 版本；
 - 首次正式版先使用复制 Vault，真实数据测试前创建并校验 ZIP 备份；

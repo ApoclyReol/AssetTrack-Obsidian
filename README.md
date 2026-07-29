@@ -4,13 +4,22 @@ AssetTrack 是运行在桌面版 Obsidian 中的本地个人财务工具，用�
 流水、借款和固定资产，并提供实时分析、账单导入、规则归类与一致性备份。
 SQLite 是唯一事实源；无需账户，不联网，也不含遥测。
 
+> [!IMPORTANT]
+> AssetTrack 目前尚未发布到 Obsidian Community Plugins，无法在 Obsidian
+> 的社区插件市场中搜索或自动安装。请从 GitHub Releases 下载 `1.0.4` 的
+> `main.js`、`manifest.json` 和 `styles.css`，按下方说明手动安装。
+
 ## 快速开始
 
-1. 安装并启用插件，在 Obsidian 设置中打开 **Asset Track**。
-2. 选择 Vault 内一个专用的“Asset-track 数据目录”。
-3. 对空目录点击“创建新数据库”；对已有有效数据库点击“载入数据库”。
-4. 从命令面板打开 Asset Track 编辑器，先配置账户与分类，再录入月份数据。
-5. 在设置页导出并验证第一份手动 ZIP 备份，然后再导入真实账单。
+1. 在 Vault 的 `.obsidian/plugins/` 下创建 `asset-track/` 目录。
+2. 将同一 GitHub Release 的 `main.js`、`manifest.json` 和 `styles.css` 放入
+   `asset-track/`；也可以下载 `AssetTrack-1.0.4.zip`，解压其中完整目录。
+3. 重启 Obsidian，或刷新“设置 → 第三方插件”，然后启用 **Asset Track**。
+4. 在 Obsidian 设置中打开 **Asset Track**。
+5. 选择 Vault 内一个专用的“Asset-track 数据目录”。
+6. 对空目录点击“创建新数据库”；对已有有效数据库点击“载入数据库”。
+7. 从命令面板打开 Asset Track 编辑器，先配置账户与分类，再录入月份数据。
+8. 在设置页导出并验证第一份手动 ZIP 备份，然后再导入真实账单。
 
 账单导入支持 CSV、XLSX 和 XLS。导入界面允许映射日期、金额、收支类型、商品、
 交易对方和状态字段；解析和规则匹配全部在本机完成。
@@ -33,7 +42,7 @@ SQLite 是唯一事实源；无需账户，不联网，也不含遥测。
 
 ## 兼容要求
 
-- 当前版本：1.0.3；SQLite schema：9。
+- 当前版本：1.0.4；SQLite schema：9。
 - 仅支持 macOS、Windows、Linux 桌面版 Obsidian，不支持移动端。
 - 最低 Obsidian 版本为 1.9.10，并要求桌面运行时具备 Node ≥22.16、
   `DatabaseSync` 和 `sqlite.backup`。
@@ -42,7 +51,7 @@ SQLite 是唯一事实源；无需账户，不联网，也不含遥测。
 
 正式社区发布前的三平台真实 Obsidian smoke 状态与测试矩阵见
 [Community Plugins 发布规划](docs/10-community-release-plan.md)。界面截图将在该
-真实 smoke 中从正式 v1.0.3 三文件产物采集，避免使用与发布版本不一致的示意图。
+真实 smoke 中从正式 v1.0.4 三文件产物采集，避免使用与发布版本不一致的示意图。
 
 ## 隐私与安全
 
@@ -68,7 +77,7 @@ zsh scripts/build_plugin_bundle.sh
 ```
 
 产物位于 `build/obsidian/asset-track/`，只包含 `main.js`、`manifest.json` 和
-`styles.css`；同时生成 `build/AssetTrack-1.0.3.zip`。手动安装时必须先解压完整
+`styles.css`；同时生成 `build/AssetTrack-1.0.4.zip`。手动安装时必须先解压完整
 `asset-track/` 目录到 `<Vault>/.obsidian/plugins/`，不能把 ZIP 留在插件目录。
 
 ## 文档

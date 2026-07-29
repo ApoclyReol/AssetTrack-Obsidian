@@ -11,6 +11,7 @@ import {
   sampleAnnualRows,
   savingsColor,
   transactionBlockNumber,
+  transactionBlockNumbers,
   transactionIndexes,
   TRANSACTION_SECTIONS
 } from "../../src/ui/analysisModel";
@@ -77,14 +78,35 @@ describe("real-time analysis model", () => {
     expect(transactionIndexes([withdraw, income], "收入")).toEqual([1]);
     expect(transactionBlockNumber([withdraw, income], 1)).toBe(1);
     expect(transactionBlockNumber([withdraw, income, income], 2)).toBe(2);
+    expect(transactionBlockNumbers([withdraw, income, income])).toEqual([
+      1,
+      1,
+      2
+    ]);
+  });
+
+  it("precomputes 50k block numbers without repeated scans", () => {
+    const rows = Array.from({ length: 50_000 }, (_, index) => ({
+      transaction_date: "2026-07-01",
+      type: index % 2 ? "收入" : "支出",
+      category: "",
+      product: `流水-${index}`,
+      amount: index
+    }));
+    const started = performance.now();
+    const numbers = transactionBlockNumbers(rows);
+    expect(numbers.at(-1)).toBe(25_000);
+    expect(performance.now() - started).toBeLessThan(250);
   });
 
   it("uses original App red-growth and green-decline semantics", () => {
     expect(changeTone(1)).toBe("inflow");
     expect(changeTone(-1)).toBe("outflow");
     expect(changeTone(0)).toBeUndefined();
-    expect(savingsColor(20)).toBe(INFLOW_COLOR);
-    expect(savingsColor(-20)).toBe(OUTFLOW_COLOR);
+    expect(savingsColor(20)).toBe("var(--asset-track-inflow)");
+    expect(savingsColor(-20)).toBe("var(--asset-track-outflow)");
+    expect(INFLOW_COLOR).toContain("inflow");
+    expect(OUTFLOW_COLOR).toContain("outflow");
     expect(reconciliationStatus(0.6)).toBe("平账");
     expect(reconciliationStatus(-99.99)).toBe("平账");
     expect(reconciliationStatus(100)).toBe("多消费少支出");
