@@ -30,21 +30,20 @@ jobs:
         run: |
           version="$(node -p "require('./manifest.json').version")"
           test "${GITHUB_REF_NAME}" = "${version}"
-      - name: Stage standard plugin assets
+      - name: Verify standard plugin assets
         shell: bash
         run: |
-          mkdir release
-          cp dist/main.js release/main.js
-          cp manifest.json styles.css release/
-          test "$(find release -type f | wc -l)" -eq 3
+          test "$(find build/obsidian/asset-track -type f | wc -l)" -eq 3
       - name: Attest release assets
         uses: actions/attest@v4
         with:
-          subject-path: "release/*"
+          subject-path: "build/obsidian/asset-track/*"
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
           gh release create "${GITHUB_REF_NAME}"
-          release/main.js release/manifest.json release/styles.css
+          build/obsidian/asset-track/main.js
+          build/obsidian/asset-track/manifest.json
+          build/obsidian/asset-track/styles.css
           --verify-tag --generate-notes

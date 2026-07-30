@@ -14,6 +14,6 @@ SheetJS 使用固定 CDN tarball，`package-lock.json` 同时锁定下载地址�
 integrity。当前 SheetJS 由账单解析模块静态导入，因此随 React、Recharts 一起进入
 初始 `main.js`，尚未延迟加载。
 
-当前 v1.1.0 生产 `dist/main.js` 为 1812726 bytes。
+当前 v1.1.0 生产 `build/obsidian/asset-track/main.js` 为 1812726 bytes。
 
 Obsidian、Electron 和开发/测试工具未打入插件的三个发布文件，分别遵循其自身许可。

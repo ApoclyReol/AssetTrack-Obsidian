@@ -13,6 +13,12 @@ const versions = readJson("versions.json");
 const lock = readJson("package-lock.json");
 const failures = [];
 const manifestDescription = manifest.description.trim();
+const bundlePath = "build/obsidian/asset-track/main.js";
+const pluginAssetPaths = [
+  bundlePath,
+  "build/obsidian/asset-track/manifest.json",
+  "build/obsidian/asset-track/styles.css"
+];
 
 if (pkg.version !== manifest.version) failures.push("package.json 与 manifest.json 版本不一致");
 if (pkg.license !== "MIT") failures.push("package.json license 必须为 MIT");
@@ -29,7 +35,7 @@ if (!/^[\x20-\x7E]+$/.test(manifestDescription)) {
   failures.push("manifest.json description 必须提供英文目录描述");
 }
 
-for (const path of ["LICENSE", "dist/main.js", "manifest.json", "styles.css"]) {
+for (const path of ["LICENSE", ...pluginAssetPaths]) {
   try {
     if (statSync(resolve(root, path)).size === 0) failures.push(`${path} 为空`);
   } catch {
@@ -43,7 +49,17 @@ if (!lockedXlsx?.resolved?.startsWith("https://cdn.sheetjs.com/")) {
 }
 if (!lockedXlsx?.integrity) failures.push("SheetJS lockfile 条目缺少 integrity");
 
-const bundle = readFileSync(resolve(root, "dist/main.js"), "utf8");
+const builtManifest = readJson("build/obsidian/asset-track/manifest.json");
+if (JSON.stringify(builtManifest) !== JSON.stringify(manifest)) {
+  failures.push("build/obsidian/asset-track/manifest.json 与根目录 manifest.json 不一致");
+}
+if (
+  readFileSync(resolve(root, "build/obsidian/asset-track/styles.css"), "utf8")
+  !== readFileSync(resolve(root, "styles.css"), "utf8")
+) {
+  failures.push("build/obsidian/asset-track/styles.css 与根目录 styles.css 不一致");
+}
+const bundle = readFileSync(resolve(root, bundlePath), "utf8");
 const forbiddenBundlePatterns = [
   [/(?:createElement|createEl)\(\s*["']script["']\s*\)/, "动态 script 元素创建"],
   [/\b(?:getFiles|getMarkdownFiles)\s*\(/, "Vault 全库枚举 API"],
@@ -53,7 +69,7 @@ const forbiddenBundlePatterns = [
   ]
 ];
 for (const [pattern, label] of forbiddenBundlePatterns) {
-  if (pattern.test(bundle)) failures.push(`dist/main.js 包含${label}`);
+  if (pattern.test(bundle)) failures.push(`${bundlePath} 包含${label}`);
 }
 
 const readme = readFileSync(resolve(root, "README.md"), "utf8");
@@ -78,5 +94,5 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-const bytes = statSync(resolve(root, "dist/main.js")).size;
-console.log(`发布校验通过：v${manifest.version}，dist/main.js ${bytes} bytes`);
+const bytes = statSync(resolve(root, bundlePath)).size;
+console.log(`发布校验通过：v${manifest.version}，${bundlePath} ${bytes} bytes`);

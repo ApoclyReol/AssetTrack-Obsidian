@@ -41,8 +41,9 @@ docs/                                   当前架构、用户、开发与发行�
 
 ## 当前 handoff
 
-- v1.1.0 是当前待发布版本：保持 schema 9 和财务口径，新增跟随 Obsidian
-  语言的中英文界面，并延续标准三文件与 artifact attestations 发布。
+- Asset Track 已在 Community Plugins 上线，社区目录是推荐安装与更新方式；
+  v1.1.0 是当前版本，保持 schema 9 和财务口径并提供跟随 Obsidian 语言的中英文
+  界面。当前仓库只进行常规维护，没有待发布的新功能版本。
 - 确认操作使用 Obsidian 原生 Modal，CSV 映射窗口支持焦点陷阱、Escape 和状态
   播报；流水逐项表按可视行渲染，分块编号为线性预计算。
 - schema 8 私有数据已在 2026-07-28 使用一次性离线流程迁移并核验；迁移工具及

@@ -35,9 +35,27 @@ npm run notices:update
 npm run release:check
 ```
 
-`notices:update` 从 lockfile、当前插件版本和 `dist/main.js` 生成第三方依赖声明。
+`npm run build` 生成完整可安装目录：
+
+```text
+build/obsidian/asset-track/
+├── main.js
+├── manifest.json
+└── styles.css
+```
+
+`notices:update` 从 lockfile、当前插件版本和
+`build/obsidian/asset-track/main.js` 生成第三方依赖声明。
 `release:check` 会重新计算并验证依赖版本、许可证、插件版本与 bundle 实际大小，
 防止声明漂移。
+
+正常验证结果应满足：
+
+- `typecheck` 无错误退出；
+- `lint` 零 error、零 warning；
+- `test` 中的 `tests/plugin/` 测试全部通过；
+- `build` 只在上述可安装目录生成标准三文件；
+- `release:check` 验证版本、许可证、标准三文件和生产 bundle。
 
 测试覆盖 schema 9、中文路径、WAL、整体事务、revision、冻结 golden、
 CSV/XLSX/XLS、备份恢复、5 万笔流水和数据库锁释放。恢复和写入只能使用隔离
@@ -52,3 +70,19 @@ Vault 与合成数据库。
 
 长期文档按 `docs/00-*.md` 至 `docs/10-*.md` 维护；每次发行的详细 handoff 写入
 `docs/logs/release-vN.N.N.md`。
+
+## 任务到代码入口
+
+| 修改目标 | 主要入口 | 重点测试 |
+| --- | --- | --- |
+| 财务公式与对账 | `src/domain/calculator.ts`、`src/database/AssetTrackRepository.ts` | `tests/plugin/databaseRepository.test.ts`、`analysisModel.test.ts` |
+| schema 与结构校验 | `src/database/schema.ts`、`DatabaseManager.ts` | `schemaValidation.test.ts`、`databaseRepository.test.ts` |
+| 月份校验和保存 | `AssetTrackRepository.saveMonth()` | `databaseRepository.test.ts` |
+| 账单解析与字段映射 | `src/domain/csv.ts` | `csvService.test.ts` |
+| 导入交互与草稿提交 | `CsvImportDialog.tsx`、`csvImportCommit.ts` | `csvImportDialog.test.tsx`、`csvImportCommit.test.ts` |
+| 备份与恢复 | `src/services/BackupService.ts` | `backupService.test.ts` |
+| 数据目录生命周期 | `src/main.ts`、`src/services/workspacePath.ts` | `workspacePath.test.ts`、`settingsValidation.test.ts` |
+| 分析界面 | `src/ui/AnalysisView.tsx`、`analysisModel.ts` | `analysisModel.test.ts` |
+
+真实 Obsidian smoke 不能由单元测试代替；版本状态见
+`docs/logs/release-vN.N.N.md` 和 `docs/10-community-release-plan.md`。

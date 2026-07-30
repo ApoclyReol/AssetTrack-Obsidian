@@ -35,7 +35,9 @@ export function renderThirdPartyNotices() {
   const pkg = readJson("package.json");
   const lock = readJson("package-lock.json");
   const manifest = readJson("manifest.json");
-  const bundleBytes = statSync(resolve(root, "dist/main.js")).size;
+  const bundleBytes = statSync(
+    resolve(root, "build/obsidian/asset-track/main.js")
+  ).size;
   const declaredNames = Object.keys(pkg.dependencies ?? {}).sort();
   const coveredNames = dependencyGroups.flatMap(({ packages }) => packages).sort();
   if (JSON.stringify(declaredNames) !== JSON.stringify(coveredNames)) {
@@ -78,7 +80,7 @@ SheetJS 使用固定 CDN tarball，\`package-lock.json\` 同时锁定下载地�
 integrity。当前 SheetJS 由账单解析模块静态导入，因此随 React、Recharts 一起进入
 初始 \`main.js\`，尚未延迟加载。
 
-当前 v${manifest.version} 生产 \`dist/main.js\` 为 ${bundleBytes} bytes。
+当前 v${manifest.version} 生产 \`build/obsidian/asset-track/main.js\` 为 ${bundleBytes} bytes。
 
 Obsidian、Electron 和开发/测试工具未打入插件的三个发布文件，分别遵循其自身许可。
 `;

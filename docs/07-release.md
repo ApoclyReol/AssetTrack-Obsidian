@@ -17,8 +17,8 @@ npm run build
 npm run release:check
 ```
 
-构建产物为 `dist/main.js`；发布时将它以 `main.js` 为附件名上传，并同时上传仓库
-根目录的 `manifest.json` 和 `styles.css`。
+构建产物为完整的 `build/obsidian/asset-track/`，其中只包含 `main.js`、
+`manifest.json` 和 `styles.css`。发布 workflow 直接上传该目录中的标准三文件。
 
 ## 本地安装
 

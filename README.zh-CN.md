@@ -101,8 +101,8 @@ npm run build
 npm run release:check
 ```
 
-生产构建输出为 `dist/main.js`。GitHub Release 只包含将其重命名后的
-`main.js`，以及 `manifest.json` 和 `styles.css`。
+生产构建输出为完整可安装目录 `build/obsidian/asset-track/`。GitHub Release
+直接发布该目录中的 `main.js`、`manifest.json` 和 `styles.css`。
 
 项目文档：
 

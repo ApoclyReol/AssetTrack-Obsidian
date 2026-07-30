@@ -24,8 +24,8 @@ styles.css
 - `versions.json` 声明当前版本最低兼容 Obsidian 版本。
 - 稳定版冻结 schema 9，不包含旧数据库自动迁移路径。
 - 生产 `main.js` 打包 React、Recharts 和 SheetJS。根目录
-  `THIRD_PARTY_NOTICES.md` 由 lockfile、当前插件版本和实际生产 bundle 自动生成，
-  并由 `release:check` 验证。
+  `THIRD_PARTY_NOTICES.md` 由 lockfile、当前插件版本和
+  `build/obsidian/asset-track/main.js` 自动生成，并由 `release:check` 验证。
 
 ## 发布后质量路线
 

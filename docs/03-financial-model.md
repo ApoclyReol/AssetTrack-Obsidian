@@ -134,7 +134,7 @@ occasional = 偶尔支出
 - 分类元数据包含 `is_big_ticket: True`；或
 - 单笔支出金额 `amount >= 1000`。
 
-### 4.4 借款余额 `calc_debt_for_month(month)`
+### 4.4 借款余额 `AssetTrackRepository.activeDebt()`
 
 借款记录按月份动态生效，不写入月度快照表。
 
@@ -156,7 +156,8 @@ debt_balance = SUM(active_debt.amount)
 
 ## 5. 跨月递推与连续月份保护
 
-`build_annual_df()` 不会对不连续月份强行计算差额。它先检查上一行是否确实是当前月份的前一个月：
+`src/domain/calculator.ts` 中的 `buildAnnualRows()` 不会对不连续月份强行计算
+差额。它先检查上一行是否确实是当前月份的前一个月：
 
 ```text
 prev_month_valid =
