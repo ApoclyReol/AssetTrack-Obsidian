@@ -17,7 +17,7 @@
 | 07 | [构建与发行](07-release.md) | 生成、安装和验证完整插件 bundle |
 | 08 | [故障排查](08-troubleshooting.md) | 处理启动、恢复、revision 和重复流水 |
 | 09 | [路线图](09-roadmap.md) | 查看当前验证和后续方向 |
-| 10 | [Community Plugins 发布规划](10-community-release-plan.md) | 核对社区发布门槛 |
+| 10 | [发布后质量与功能路线](10-community-release-plan.md) | 跟踪发布后质量与功能演进 |
 
 ## 更新日志
 

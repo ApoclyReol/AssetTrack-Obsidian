@@ -1,5 +1,9 @@
 import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
+import {
+  renderThirdPartyNotices,
+  thirdPartyNoticesPath
+} from "./third-party-notices.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const readJson = (path) => JSON.parse(readFileSync(resolve(root, path), "utf8"));
@@ -55,6 +59,18 @@ for (const [pattern, label] of forbiddenBundlePatterns) {
 const readme = readFileSync(resolve(root, "README.md"), "utf8");
 for (const heading of ["## Installation", "## Getting started"]) {
   if (!readme.includes(heading)) failures.push(`README.md 缺少英文 ${heading} 章节`);
+}
+
+try {
+  const expectedNotices = renderThirdPartyNotices();
+  const actualNotices = readFileSync(thirdPartyNoticesPath(), "utf8");
+  if (actualNotices !== expectedNotices) {
+    failures.push(
+      "THIRD_PARTY_NOTICES.md 与 lockfile、插件版本或生产 bundle 不一致；运行 npm run notices:update"
+    );
+  }
+} catch (error) {
+  failures.push(`第三方依赖声明校验失败：${error instanceof Error ? error.message : String(error)}`);
 }
 
 if (failures.length > 0) {

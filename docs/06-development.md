@@ -31,8 +31,13 @@ git diff --check
 
 ```bash
 npm run build
+npm run notices:update
 npm run release:check
 ```
+
+`notices:update` 从 lockfile、当前插件版本和 `dist/main.js` 生成第三方依赖声明。
+`release:check` 会重新计算并验证依赖版本、许可证、插件版本与 bundle 实际大小，
+防止声明漂移。
 
 测试覆盖 schema 9、中文路径、WAL、整体事务、revision、冻结 golden、
 CSV/XLSX/XLS、备份恢复、5 万笔流水和数据库锁释放。恢复和写入只能使用隔离

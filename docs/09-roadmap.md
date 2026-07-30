@@ -11,13 +11,15 @@ v1.1.0 已完成纯 TypeScript 架构、账单体验、自动中英文界面与�
 - 路径与 schema 结构校验、失败导入原子性、可访问弹窗和可视行渲染。
 - 中文环境显示中文，其他语言回退英文；用户内容和数据库规范值保持不变。
 
-## Community 发布门槛
+## 发布后质量路线
 
-1. 完成 Linux 最新 Obsidian 安装器真实 smoke；macOS 和 Windows 已完成。
+Asset Track 已通过 Community Plugins 审核并支持从社区目录直接安装。后续质量
+工作不再作为首次发布门槛：
+
+1. 补充 Linux 最新 Obsidian 安装器真实 smoke；macOS 和 Windows 已完成。
 2. 使用复制 Vault 验证 schema 9 备份恢复、数据库替换和锁释放。
-3. 处理 v1.1.0 Linux 本地验证反馈，保持 schema 9 和财务口径冻结。
-4. 从正式产物采集界面截图、插件加载耗时，并完成 Community Plugin 质量清单。
-5. 使用同一 v1.1.0 三文件产物提交 Community Plugins。
+3. 处理 Linux 本地验证反馈，保持 schema 9 和财务口径冻结。
+4. 持续采集正式产物的插件加载耗时并维护 Community Plugin 质量清单。
 
 ## 后续考虑
 

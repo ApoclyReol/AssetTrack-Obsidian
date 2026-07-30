@@ -27,13 +27,16 @@
 - 新增语言判定测试和英文账单导入界面测试。
 - typecheck、53 项测试、lint、生产构建、release:check 和 `git diff --check`
   已通过。
-- macOS 与 Windows 已完成 v1.1.0 主要功能及中英文界面 smoke；Linux 仍未测试。
-- Obsidian 与操作系统的具体版本信息尚未提供，正式提交 Community Plugins 前
-  需补录到脱敏测试记录。
+- macOS 与 Windows 已完成 v1.1.0 主要功能及中英文界面 smoke；Linux 验证作为
+  发布后质量任务继续补充。
+- Asset Track 已通过 Community Plugins 审核，可直接从社区目录安装；手动安装
+  三文件仅作为备用方式。
 
 ## 发布边界
 
 - 最低 Obsidian 版本仍为 1.9.10。
+- `release:check` 从 lockfile 和当前生产构建验证第三方依赖版本、许可证、插件
+  版本及 `main.js` 实际大小，避免声明依赖人工同步。
 - Release tag 必须为与 manifest 完全一致的 `1.1.0`，不能使用 `v1.1.0`。
 - Release 只包含 `main.js`、`manifest.json` 和 `styles.css`，三文件继续生成
   GitHub artifact attestations。

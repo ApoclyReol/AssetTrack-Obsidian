@@ -8,6 +8,7 @@
     "build": "node esbuild.config.mjs production",
     "dev": "node esbuild.config.mjs",
     "lint": "eslint .",
+    "notices:update": "node scripts/third-party-notices.mjs",
     "release:check": "node scripts/validate-release.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

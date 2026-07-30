@@ -11,11 +11,18 @@ SQLite is the single source of truth. The plugin requires no account, makes no
 network requests, includes no telemetry, and keeps financial data in a directory
 the user explicitly selects inside the vault.
 
-> [!IMPORTANT]
-> Asset Track is not yet available in the Community Plugins directory. Until it is
-> accepted, install the three files from the matching GitHub release manually.
+Asset Track has passed Community Plugins review and can be installed directly
+from the community directory. Manual installation is available as a fallback.
 
 ## Installation
+
+### Community directory
+
+1. Open **Settings → Community plugins → Browse**.
+2. Search for **Asset Track**, select it, and choose **Install**.
+3. Enable **Asset Track**.
+
+### Manual fallback
 
 1. Download `main.js`, `manifest.json`, and `styles.css` from the same GitHub
    release.
@@ -92,8 +99,9 @@ See [SECURITY.md](SECURITY.md) for the complete security and disclosure boundary
 - Python, a separate Node.js installation, sidecars, and native extension packages
   are not required.
 
-macOS and Windows smoke tests have passed. Linux testing remains a release gate;
-see the [Community Plugins release plan](docs/10-community-release-plan.md).
+macOS and Windows smoke tests have passed. Linux validation remains a
+post-release quality task; see the
+[post-release quality and feature plan](docs/10-community-release-plan.md).
 
 ## Development
 
@@ -117,5 +125,5 @@ Project documentation:
 - [Development guide](docs/06-development.md)
 - [Release guide](docs/07-release.md)
 - [Troubleshooting](docs/08-troubleshooting.md)
-- [Community Plugins release plan](docs/10-community-release-plan.md)
+- [Post-release quality and feature plan](docs/10-community-release-plan.md)
 - [Release history](docs/logs/README.md)

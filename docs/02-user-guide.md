@@ -11,11 +11,16 @@ Asset Track 自动跟随当前 Obsidian 语言。中文语言代码（包括 `zh
 
 ## 首次使用
 
-AssetTrack 目前尚未进入 Obsidian Community Plugins，必须从 GitHub Releases
-下载安装文件，不能在 Obsidian 社区插件市场中搜索安装。
+Asset Track 已通过 Community Plugins 审核。推荐打开“设置 → 第三方插件 →
+浏览”，搜索并安装 **Asset Track**，然后启用插件。
 
-1. 把完整 `asset-track/` 目录放入 Vault 的 `.obsidian/plugins/` 并启用。目录内
-   只需 `main.js`、`manifest.json` 和 `styles.css`。
+社区目录不可用时，可从同一个 GitHub Release 下载 `main.js`、`manifest.json`
+和 `styles.css`，放入 Vault 的 `.obsidian/plugins/asset-track/` 后启用。不要
+使用 GitHub 自动生成的源码压缩包。
+
+安装完成后：
+
+1. 启用 Asset Track。
 2. 打开“设置 → Asset Track”。
 3. 在“Asset-track 数据目录”中输入关键词，从 Vault 文件夹联想列表选择目录。
 4. 空目录点击“创建新数据库”；目录中已有有效的 `accounting_system.db` 时点击
