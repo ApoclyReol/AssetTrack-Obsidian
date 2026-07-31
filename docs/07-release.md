@@ -21,8 +21,9 @@ npm run build
 npm run release:check
 ```
 
-构建产物为完整的 `build/obsidian/asset-track/`，其中只包含 `main.js`、
-`manifest.json` 和 `styles.css`。发布 workflow 直接上传该目录中的标准三文件。
+项目只使用 `build/` 作为产物目录，不创建 `dist/` 或 `out/`。构建前会清空
+`build/`；完成后其根部只包含 `main.js`、`manifest.json` 和 `styles.css`，
+不生成 ZIP 或子目录。发布 workflow 直接上传这三个文件。
 
 ## 本地安装
 

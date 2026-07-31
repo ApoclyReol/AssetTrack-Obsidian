@@ -36,19 +36,17 @@ describe("CSV import commit", () => {
       mode: "append",
       headerSignature: "signature",
       mapping,
-      saveMapping: vi.fn().mockResolvedValue(undefined),
-      loadRuleCandidates: vi.fn().mockRejectedValue(new Error("候选生成失败"))
-    })).rejects.toThrow("候选生成失败");
+      saveMapping: vi.fn().mockRejectedValue(new Error("映射保存失败"))
+    })).rejects.toThrow("映射保存失败");
     expect(current).toEqual([existing]);
   });
 
   it("returns one append after a failed attempt is retried", async () => {
     const current = [existing];
     let attempts = 0;
-    const loadRuleCandidates = vi.fn(async (rows: Transaction[]) => {
+    const saveMapping = vi.fn(async () => {
       attempts += 1;
       if (attempts === 1) throw new Error("临时失败");
-      return { count: rows.length };
     });
     const options = {
       currentTransactions: current,
@@ -56,12 +54,10 @@ describe("CSV import commit", () => {
       mode: "append" as const,
       headerSignature: "signature",
       mapping,
-      saveMapping: vi.fn().mockResolvedValue(undefined),
-      loadRuleCandidates
+      saveMapping
     };
     await expect(prepareCsvImportCommit(options)).rejects.toThrow("临时失败");
     const retried = await prepareCsvImportCommit(options);
     expect(retried.transactions).toEqual([existing, imported]);
-    expect(retried.candidates).toEqual({ count: 2 });
   });
 });

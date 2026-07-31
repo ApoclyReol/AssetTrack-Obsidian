@@ -107,8 +107,9 @@ npm run build
 npm run release:check
 ```
 
-生产构建输出为完整可安装目录 `build/obsidian/asset-track/`。GitHub Release
-直接发布该目录中的 `main.js`、`manifest.json` 和 `styles.css`。
+生产构建会先清空 `build/`，再将 `main.js`、`manifest.json` 和 `styles.css`
+直接写入其中。项目不创建 `dist/`、`out/`、ZIP 或构建子目录。GitHub Release
+直接发布相同的三个文件。
 
 项目文档：
 

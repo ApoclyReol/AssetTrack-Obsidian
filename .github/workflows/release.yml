@@ -33,20 +33,21 @@ jobs:
       - name: Verify standard plugin assets
         shell: bash
         run: |
-          test "$(find build/obsidian/asset-track -type f | wc -l)" -eq 3
+          test "$(find build -maxdepth 1 -type f | wc -l)" -eq 3
+          test "$(find build -mindepth 1 -maxdepth 1 | wc -l)" -eq 3
       - name: Attest release assets
         uses: actions/attest@v4
         with:
-          subject-path: "build/obsidian/asset-track/*"
+          subject-path: "build/*"
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           assets=(
-            build/obsidian/asset-track/main.js
-            build/obsidian/asset-track/manifest.json
-            build/obsidian/asset-track/styles.css
+            build/main.js
+            build/manifest.json
+            build/styles.css
           )
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --clobber

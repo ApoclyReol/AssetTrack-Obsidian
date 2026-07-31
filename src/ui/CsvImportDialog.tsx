@@ -53,8 +53,19 @@ function describeExample(example: Record<string, unknown>): string {
   return Object.entries(example)
     .map(([key, value]) => key === "row"
       ? t(`第 ${String(value)} 行`, `row ${String(value)}`)
+      : key === "status" && !String(value)
+        ? `${key} ${t("（空状态）", "(empty status)")}`
       : `${key} ${String(value)}`)
     .join(t("，", ", "));
+}
+
+function statusValuesFor(
+  inspection: CsvInspection,
+  column: string
+): string[] {
+  const values = [...inspection.distinct_values[column] ?? []];
+  if (inspection.empty_values[column] && !values.includes("")) values.push("");
+  return values;
 }
 
 function initialMapping(
@@ -83,11 +94,15 @@ function initialMapping(
     }
   }
   const actualStatuses = new Set(
-    inspection.distinct_values[base.status_column ?? ""] ?? []
+    statusValuesFor(inspection, base.status_column ?? "")
   );
-  base.included_statuses = base.included_statuses.filter(
-    (status) => actualStatuses.has(status)
-  );
+  if (!saved && base.status_column && actualStatuses.has("")) {
+    base.included_statuses = [""];
+  } else {
+    base.included_statuses = base.included_statuses.filter(
+      (status) => actualStatuses.has(status)
+    );
+  }
   return base;
 }
 
@@ -139,7 +154,7 @@ export function CsvImportDialog({
     [inspection, mapping.type_column]
   );
   const statusValues = useMemo(
-    () => inspection.distinct_values[mapping.status_column ?? ""] ?? [],
+    () => statusValuesFor(inspection, mapping.status_column ?? ""),
     [inspection, mapping.status_column]
   );
   const setColumn = (field: keyof CsvColumnMapping, value: string) => {
@@ -155,7 +170,9 @@ export function CsvImportDialog({
         );
       }
       if (field === "status_column") {
-        next.included_statuses = [];
+        next.included_statuses = statusValuesFor(inspection, value).includes("")
+          ? [""]
+          : [];
       }
       return next;
     });
@@ -351,7 +368,7 @@ export function CsvImportDialog({
                       }));
                     }}
                   />
-                  {status}
+                  {status || t("（空状态）", "(empty status)")}
                 </label>
               ))}
             </div>
@@ -386,7 +403,16 @@ export function CsvImportDialog({
             <span>{t("状态过滤", "Status filtered")} {preview.import_stats.filtered.status_filtered ?? 0} {t("行", "rows")}</span>
             <span>{t("忽略类型", "Ignored type")} {preview.import_stats.filtered.ignored_type ?? 0} {t("行", "rows")}</span>
             <span>{t("无效", "Invalid")} {preview.import_stats.filtered.invalid ?? 0} {t("行", "rows")}</span>
+            <span>{t("日期补为月初", "Dates defaulted to month start")} {preview.import_stats.defaulted.date ?? 0} {t("行", "rows")}</span>
             <span>{t("待修正", "Issues to fix")} {preview.issues.length}</span>
+            {Object.entries(preview.import_stats.defaulted_examples)
+              .filter(([, examples]) => examples.length > 0)
+              .map(([kind, examples]) => (
+                <small key={`defaulted-${kind}`}>
+                  {t("已使用默认值示例：", "Defaulted value examples: ")}
+                  {examples.map(describeExample).join(t("；", "; "))}
+                </small>
+              ))}
             {Object.entries(preview.import_stats.examples)
               .filter(([, examples]) => examples.length > 0)
               .map(([kind, examples]) => (

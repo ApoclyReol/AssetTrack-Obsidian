@@ -35,12 +35,15 @@ export interface CsvInspection {
   row_count: number;
   sample_rows: Array<Record<string, string>>;
   distinct_values: Record<string, string[]>;
+  empty_values: Record<string, boolean>;
   suggested_mapping: Partial<CsvColumnMapping>;
 }
 
 export interface CsvImportStats {
   source_rows: number;
   accepted_rows: number;
+  defaulted: Record<string, number>;
+  defaulted_examples: Record<string, Array<Record<string, unknown>>>;
   filtered: Record<string, number>;
   examples: Record<string, Array<Record<string, unknown>>>;
 }
@@ -60,11 +63,40 @@ export interface RuleCandidate {
   counterparty: string;
   variants: string[];
   category: string;
+  category_counts?: Array<{ category: string; occurrences: number }>;
   category_confidence: number;
   has_category_conflict: boolean;
   occurrences: number;
   months_count: number;
   last_month: string;
+}
+
+export interface HistoricalProductStat {
+  transaction_type: "支出" | "收入";
+  product: string;
+  counterparty: string;
+  variants: string[];
+  category_counts: Array<{ category: string; occurrences: number }>;
+  recommended_category: string;
+  category_confidence: number;
+  has_category_conflict: boolean;
+  occurrences: number;
+  months_count: number;
+  total_amount: number;
+  average_amount: number;
+  latest_amount: number;
+  last_date: string;
+  last_month: string;
+  matching_rule_count: number;
+  matching_rule_ids: number[];
+  rule_status: "未创建" | "已覆盖" | "重复" | "冲突";
+}
+
+export interface RuleInsights {
+  rules_revision: number;
+  min_occurrences: number;
+  recommendations: RuleCandidate[];
+  historical_products: HistoricalProductStat[];
 }
 
 export interface Transaction {

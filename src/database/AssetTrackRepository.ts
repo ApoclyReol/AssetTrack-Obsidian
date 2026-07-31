@@ -8,11 +8,13 @@ import type {
   CategoryDefinition,
   CurrentAsset,
   FixedAsset,
+  HistoricalProductStat,
   InvestmentAccountBalance,
   MonthCreationPolicy,
   MonthOverview,
   MonthWorkspace,
   RuleCandidate,
+  RuleInsights,
   RecurringExpenseSummary,
   Transaction
 } from "../types";
@@ -35,7 +37,14 @@ import {
   shiftMonth
 } from "../domain/dates";
 import { finiteNumber, roundHalfEven, sum } from "../domain/money";
-import { applyRules, normalizeProductKey, RULE_TYPES } from "../domain/rules";
+import {
+  applyRules,
+  normalizeProductKey,
+  rulesEquivalent,
+  rulesOverlap,
+  RULE_TYPES,
+  type RuleRow
+} from "../domain/rules";
 import { scalarText } from "../domain/text";
 import {
   validateTransactions,
@@ -614,24 +623,37 @@ export class AssetTrackRepository {
     const categories = this.categoryRows(db);
     const byKey = new Map(categories.map((row) => [row.category_key, row]));
     const byName = new Map(categories.map((row) => [row.name, row]));
+    const issues = validateTransactions(input, month, categories);
     const normalized = input.map((row) => {
       const type = text(row.type);
       let definition = byKey.get(text(row.category_key)) ?? byName.get(text(row.category));
       if (["代付", "加仓", "提现"].includes(type)) definition = undefined;
+      let transactionDate: string;
+      try {
+        transactionDate = normalizeDate(row.transaction_date, month);
+      } catch {
+        transactionDate = `${month}-01`;
+      }
+      let amount: number;
+      try {
+        amount = finiteNumber(row.amount);
+      } catch {
+        amount = 0;
+      }
       return {
         ...row,
-        transaction_date: normalizeDate(row.transaction_date, month),
+        transaction_date: transactionDate,
         type,
         counterparty: text(row.counterparty),
         product: text(row.product),
-        amount: finiteNumber(row.amount),
+        amount,
         category_key: definition?.category_key ?? null,
         category: definition?.name ?? ""
       };
     });
     return {
       rows: normalized,
-      issues: validateTransactions(normalized, month, categories)
+      issues
     };
   }
 
@@ -645,7 +667,7 @@ export class AssetTrackRepository {
     input: Transaction[]
   ): Transaction[] {
     const normalized = this.normalizedTransactions(db, month, input);
-    if (normalized.issues.length) {
+    if (normalized.issues.some((issue) => issue.blocking)) {
       throw new RepositoryValidationError("流水质检未通过", normalized.issues);
     }
     const existing = new Set(rows(db.prepare(
@@ -1132,6 +1154,33 @@ export class AssetTrackRepository {
   rules(db = this.db()): { revision: number; rows: Row[] } {
     const raw = rows(db.prepare("SELECT * FROM auto_rules ORDER BY id").all());
     const revision = contentRevision(raw);
+    const definitions = raw.map((row) => ({
+      id: Number(row.id),
+      transaction_type: text(row.transaction_type),
+      counterparty: text(row.counterparty),
+      product: text(row.product),
+      category_key: text(row.category_key),
+      category: text(row.category)
+    } satisfies RuleRow & { id: number }));
+    const duplicateIds = new Map<number, number[]>();
+    const conflictIds = new Map<number, number[]>();
+    for (let leftIndex = 0; leftIndex < definitions.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < definitions.length; rightIndex += 1) {
+        const left = definitions[leftIndex];
+        const right = definitions[rightIndex];
+        if (rulesEquivalent(left, right)) {
+          duplicateIds.set(left.id, [...(duplicateIds.get(left.id) ?? []), right.id]);
+          duplicateIds.set(right.id, [...(duplicateIds.get(right.id) ?? []), left.id]);
+        }
+        if (
+          rulesOverlap(left, right)
+          && left.category_key !== right.category_key
+        ) {
+          conflictIds.set(left.id, [...(conflictIds.get(left.id) ?? []), right.id]);
+          conflictIds.set(right.id, [...(conflictIds.get(right.id) ?? []), left.id]);
+        }
+      }
+    }
     const transactions = rows(db.prepare(`
       SELECT month,type,counterparty,product FROM transactions
       WHERE type IN ('支出','收入')
@@ -1156,7 +1205,14 @@ export class AssetTrackRepository {
           ...row,
           occurrences: matched.length,
           months_count: months.size,
-          last_month: [...months].sort().at(-1) ?? ""
+          last_month: [...months].sort().at(-1) ?? "",
+          duplicate_rule_ids: duplicateIds.get(Number(row.id)) ?? [],
+          conflict_rule_ids: conflictIds.get(Number(row.id)) ?? [],
+          rule_status: (conflictIds.has(Number(row.id))
+            ? "冲突"
+            : duplicateIds.has(Number(row.id))
+              ? "重复"
+              : "正常")
         };
       })
     };
@@ -1262,6 +1318,133 @@ export class AssetTrackRepository {
     };
   }
 
+  ruleInsights(minOccurrences = 2): RuleInsights {
+    const db = this.db();
+    const requestedThreshold = Number(minOccurrences);
+    const threshold = Number.isFinite(requestedThreshold)
+      ? Math.max(1, Math.min(10_000, Math.trunc(requestedThreshold)))
+      : 2;
+    const ruleData = this.rules(db);
+    const history = rows(db.prepare(`
+      SELECT month,transaction_date,type,category,counterparty,product,amount
+      FROM transactions
+      WHERE type IN ('支出','收入')
+        AND (
+          TRIM(COALESCE(counterparty,''))<>''
+          OR TRIM(COALESCE(product,''))<>''
+        )
+      ORDER BY month,transaction_date,id
+    `).all());
+    const grouped = new Map<string, Row[]>();
+    history.forEach((row) => {
+      const key = [
+        text(row.type),
+        normalizeProductKey(row.counterparty),
+        normalizeProductKey(row.product)
+      ].join("\u0000");
+      const group = grouped.get(key) ?? [];
+      group.push(row);
+      grouped.set(key, group);
+    });
+    const matchesRule = (rule: Row, row: Row): boolean => {
+      const counterparty = normalizeProductKey(rule.counterparty);
+      const product = normalizeProductKey(rule.product);
+      return text(rule.transaction_type) === text(row.type)
+        && (!counterparty || counterparty === normalizeProductKey(row.counterparty))
+        && (!product || product === normalizeProductKey(row.product));
+    };
+    const historicalProducts: HistoricalProductStat[] = [];
+    const recommendations: RuleCandidate[] = [];
+    for (const group of grouped.values()) {
+      const representative = group[0];
+      const categoryCounts = this.frequency(
+        group.map((row) => text(row.category) || "未分类")
+      ).map(([category, occurrences]) => ({ category, occurrences }));
+      const recommended = categoryCounts[0]?.category === "未分类"
+        ? ""
+        : categoryCounts[0]?.category ?? "";
+      const categoryConfidence = recommended
+        ? (categoryCounts.find((row) => row.category === recommended)?.occurrences ?? 0)
+          / group.length
+        : 0;
+      const hasCategoryConflict = categoryCounts.length > 1;
+      const matchedRules = ruleData.rows.filter((rule) =>
+        matchesRule(rule, representative)
+      );
+      const matchedCategories = new Set(
+        matchedRules.map((rule) => text(rule.category_key) || text(rule.category))
+      );
+      const ruleStatus: HistoricalProductStat["rule_status"] =
+        hasCategoryConflict
+        || matchedRules.some((rule) => text(rule.rule_status) === "冲突")
+        || matchedCategories.size > 1
+          ? "冲突"
+          : matchedRules.some((rule) => text(rule.rule_status) === "重复")
+            ? "重复"
+            : matchedRules.length
+              ? "已覆盖"
+              : "未创建";
+      const dates = group.map((row) => text(row.transaction_date)).filter(Boolean);
+      const lastDate = dates.sort().at(-1) ?? "";
+      const variants = this.frequency(group.map((row) => text(row.product)))
+        .map(([value]) => value)
+        .filter(Boolean);
+      const counterparties = this.frequency(
+        group.map((row) => text(row.counterparty)).filter(Boolean)
+      );
+      const product = variants[0] ?? "";
+      const counterparty = counterparties[0]?.[0] ?? "";
+      const totalAmount = group.reduce(
+        (total, row) => total + Number(row.amount ?? 0),
+        0
+      );
+      const candidate: RuleCandidate = {
+        transaction_type: text(representative.type) as "支出" | "收入",
+        product,
+        counterparty,
+        variants,
+        category: recommended,
+        category_counts: categoryCounts,
+        category_confidence: roundHalfEven(categoryConfidence, 4),
+        has_category_conflict: hasCategoryConflict,
+        occurrences: group.length,
+        months_count: new Set(group.map((row) => text(row.month))).size,
+        last_month: group.map((row) => text(row.month)).sort().at(-1) ?? ""
+      };
+      if (group.length >= threshold && matchedRules.length === 0) {
+        recommendations.push(candidate);
+      }
+      historicalProducts.push({
+        ...candidate,
+        category_counts: categoryCounts,
+        recommended_category: recommended,
+        total_amount: roundHalfEven(totalAmount),
+        average_amount: roundHalfEven(totalAmount / group.length),
+        latest_amount: roundHalfEven(Number(group.at(-1)?.amount ?? 0)),
+        last_date: lastDate,
+        matching_rule_count: matchedRules.length,
+        matching_rule_ids: matchedRules.map((rule) => Number(rule.id)),
+        rule_status: ruleStatus
+      });
+    }
+    const compare = (left: RuleCandidate, right: RuleCandidate) =>
+      right.occurrences - left.occurrences
+      || left.transaction_type.localeCompare(right.transaction_type)
+      || left.product.localeCompare(right.product);
+    recommendations.sort(compare);
+    historicalProducts.sort((left, right) =>
+      right.occurrences - left.occurrences
+      || left.transaction_type.localeCompare(right.transaction_type)
+      || left.product.localeCompare(right.product)
+    );
+    return {
+      rules_revision: ruleData.revision,
+      min_occurrences: threshold,
+      recommendations,
+      historical_products: historicalProducts
+    };
+  }
+
   ruleCandidates(
     month: string,
     draftRows: Transaction[],
@@ -1273,7 +1456,10 @@ export class AssetTrackRepository {
     rows: RuleCandidate[];
   } {
     const db = this.db();
-    const threshold = Math.max(1, Math.min(10_000, Math.trunc(minOccurrences)));
+    const requestedThreshold = Number(minOccurrences);
+    const threshold = Number.isFinite(requestedThreshold)
+      ? Math.max(1, Math.min(10_000, Math.trunc(requestedThreshold)))
+      : 2;
     const ruleData = this.rules(db);
     const combined = [
       ...rows(db.prepare(`

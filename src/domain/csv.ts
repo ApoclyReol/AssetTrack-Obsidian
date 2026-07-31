@@ -147,6 +147,14 @@ export function inspectCsv(
   ) {
     suggested.date_column = "__month_start__";
   }
+  if (
+    suggested.product_column
+    && suggested.amount_column
+    && suggested.type_column
+    && !suggested.date_column
+  ) {
+    suggested.date_column = "__month_start__";
+  }
   return {
     month,
     filename,
@@ -154,6 +162,10 @@ export function inspectCsv(
     header_signature: signature,
     row_count: rows.length,
     sample_rows: rows.slice(0, 8),
+    empty_values: Object.fromEntries(headers.map((header) => [
+      header,
+      rows.some((row) => !(row[header] ?? "").trim())
+    ])),
     distinct_values: Object.fromEntries(headers.map((header) => {
       const values: string[] = [];
       for (const row of rows) {
@@ -207,6 +219,10 @@ export function previewCsv(
     invalid: [],
     ignored_type: []
   };
+  const defaulted: Record<string, number> = { date: 0 };
+  const defaultedExamples: Record<string, Array<Record<string, unknown>>> = {
+    date: []
+  };
   const filtered = Object.fromEntries(Object.keys(examples).map((key) => [key, 0]));
   const rows: Transaction[] = [];
   const includedStatuses = new Set(mapping.included_statuses ?? []);
@@ -230,16 +246,25 @@ export function previewCsv(
       if (examples.invalid.length < 3) examples.invalid.push({ row: rowNumber, reason: `收支值“${rawType}”尚未映射` });
       return;
     }
-    const rawDate = mapping.date_column === "__month_start__"
+    const sourceDate = mapping.date_column === "__month_start__"
       ? `${month}-01`
       : source[mapping.date_column] ?? "";
+    const rawDate = String(sourceDate);
+    const dateWasDefaulted = mapping.date_column === "__month_start__"
+      || !rawDate.trim();
     let date: string;
     try {
-      date = normalizeDate(rawDate);
+      date = normalizeDate(rawDate, month);
     } catch {
       filtered.invalid += 1;
       if (examples.invalid.length < 3) examples.invalid.push({ row: rowNumber, reason: `日期无法识别：${rawDate}` });
       return;
+    }
+    if (dateWasDefaulted) {
+      defaulted.date += 1;
+      if (defaultedExamples.date.length < 3) {
+        defaultedExamples.date.push({ row: rowNumber, value: rawDate.trim() || "(空)" });
+      }
     }
     if (date.slice(0, 7) !== month) {
       filtered.outside_month += 1;
@@ -247,13 +272,12 @@ export function previewCsv(
       return;
     }
     const product = source[mapping.product_column]?.trim() ?? "";
-    const amount = Number(
-      (source[mapping.amount_column] ?? "")
-        .replace(/[¥￥,元\s]/g, "")
-    );
-    if (!product || !Number.isFinite(amount) || amount === 0) {
+    const rawAmount = source[mapping.amount_column] ?? "";
+    const amountText = rawAmount.replace(/[¥￥,元\s]/g, "");
+    const amount = Number(amountText);
+    if (!amountText || !Number.isFinite(amount)) {
       filtered.invalid += 1;
-      if (examples.invalid.length < 3) examples.invalid.push({ row: rowNumber, reason: "商品为空或金额无法识别" });
+      if (examples.invalid.length < 3) examples.invalid.push({ row: rowNumber, reason: "金额为空或无法识别" });
       return;
     }
     const category = ["代付", "加仓", "提现"].includes(type)
@@ -287,6 +311,8 @@ export function previewCsv(
     import_stats: {
       source_rows: sourceRows.length,
       accepted_rows: rows.length,
+      defaulted,
+      defaulted_examples: defaultedExamples,
       filtered,
       examples
     }

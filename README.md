@@ -124,9 +124,9 @@ npm run build
 npm run release:check
 ```
 
-The production build is written as a complete installable plugin directory at
-`build/obsidian/asset-track/`. GitHub releases contain the same `main.js`,
-`manifest.json`, and `styles.css` files from that directory.
+The production build clears `build/` and writes only `main.js`, `manifest.json`,
+and `styles.css` directly into it. The project does not create `dist/`, `out/`,
+a ZIP, or a build subdirectory. GitHub releases contain the same three files.
 
 Project documentation:
 

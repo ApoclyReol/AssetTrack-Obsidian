@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   normalizeNewlines,
@@ -14,11 +14,11 @@ const versions = readJson("versions.json");
 const lock = readJson("package-lock.json");
 const failures = [];
 const manifestDescription = manifest.description.trim();
-const bundlePath = "build/obsidian/asset-track/main.js";
+const bundlePath = "build/main.js";
 const pluginAssetPaths = [
   bundlePath,
-  "build/obsidian/asset-track/manifest.json",
-  "build/obsidian/asset-track/styles.css"
+  "build/manifest.json",
+  "build/styles.css"
 ];
 
 if (pkg.version !== manifest.version) failures.push("package.json 与 manifest.json 版本不一致");
@@ -50,15 +50,25 @@ if (!lockedXlsx?.resolved?.startsWith("https://cdn.sheetjs.com/")) {
 }
 if (!lockedXlsx?.integrity) failures.push("SheetJS lockfile 条目缺少 integrity");
 
-const builtManifest = readJson("build/obsidian/asset-track/manifest.json");
+const builtEntries = readdirSync(resolve(root, "build"), { withFileTypes: true });
+if (
+  builtEntries.length !== 3
+  || builtEntries.some((entry) => !entry.isFile())
+  || builtEntries.map((entry) => entry.name).sort().join(",")
+    !== "main.js,manifest.json,styles.css"
+) {
+  failures.push("build/ 必须且只能包含 main.js、manifest.json 和 styles.css");
+}
+
+const builtManifest = readJson("build/manifest.json");
 if (JSON.stringify(builtManifest) !== JSON.stringify(manifest)) {
-  failures.push("build/obsidian/asset-track/manifest.json 与根目录 manifest.json 不一致");
+  failures.push("build/manifest.json 与根目录 manifest.json 不一致");
 }
 if (
-  readFileSync(resolve(root, "build/obsidian/asset-track/styles.css"), "utf8")
+  readFileSync(resolve(root, "build/styles.css"), "utf8")
   !== readFileSync(resolve(root, "styles.css"), "utf8")
 ) {
-  failures.push("build/obsidian/asset-track/styles.css 与根目录 styles.css 不一致");
+  failures.push("build/styles.css 与根目录 styles.css 不一致");
 }
 const bundle = readFileSync(resolve(root, bundlePath), "utf8");
 const forbiddenBundlePatterns = [

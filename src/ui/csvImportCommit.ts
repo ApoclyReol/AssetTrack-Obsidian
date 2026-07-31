@@ -6,7 +6,7 @@ import type {
 
 export const MAX_IMPORT_FILE_BYTES = 20 * 1024 * 1024;
 
-export interface CsvImportCommitOptions<TCandidates> {
+export interface CsvImportCommitOptions {
   currentTransactions: Transaction[];
   importedTransactions: Transaction[];
   mode: ImportMode;
@@ -16,27 +16,23 @@ export interface CsvImportCommitOptions<TCandidates> {
     signature: string,
     mapping: CsvColumnMapping
   ) => Promise<void>;
-  loadRuleCandidates: (rows: Transaction[]) => Promise<TCandidates>;
 }
 
-export interface PreparedCsvImport<TCandidates> {
+export interface PreparedCsvImport {
   transactions: Transaction[];
-  candidates: TCandidates;
 }
 
-export async function prepareCsvImportCommit<TCandidates>({
+export async function prepareCsvImportCommit({
   currentTransactions,
   importedTransactions,
   mode,
   headerSignature,
   mapping,
-  saveMapping,
-  loadRuleCandidates
-}: CsvImportCommitOptions<TCandidates>): Promise<PreparedCsvImport<TCandidates>> {
+  saveMapping
+}: CsvImportCommitOptions): Promise<PreparedCsvImport> {
   const transactions = mode === "append"
     ? [...currentTransactions, ...importedTransactions]
     : [...importedTransactions];
   await saveMapping(headerSignature, mapping);
-  const candidates = await loadRuleCandidates(transactions);
-  return { transactions, candidates };
+  return { transactions };
 }

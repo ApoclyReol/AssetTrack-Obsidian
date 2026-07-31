@@ -26,6 +26,12 @@ Asset Track 已通过 Community Plugins 审核并支持从社区目录直接安�
 
 ## 后续考虑
 
+- 将 `AssetTrackEditorApp.tsx` 按分析、月度编辑、流水、导入、规则和共享组件逐步
+  拆入 `features/`；拆分时保持 Service/Repository 接口和用户行为不变。
+- 将 CSV/XLSX/XLS 解析真正迁入 Worker；v1.2.0 只完成 `ArrayBuffer` 读取并移除
+  Data URL/Base64 中间副本。
+- 将现有中文错误文本和 `t("中文", "English")` 逐步迁移为稳定消息键与完整
+  `AssetTrackError { code, params, status, cause }`，测试只依赖错误代码。
 - 大数据量分析的分片、缓存和真实 Vault 性能采样；
 - 自动化 Electron/Obsidian 三平台 smoke；
 - 在不改变 SQLite 事实层前提下扩展支付平台导入模板；

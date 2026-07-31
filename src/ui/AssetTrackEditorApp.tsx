@@ -23,10 +23,12 @@ import type {
   CsvInspection,
   AssetTrackSettings,
   FixedAsset,
+  HistoricalProductStat,
   ImportMode,
   MonthCreationPolicy,
   MonthWorkspace,
   RuleCandidate,
+  RuleInsights,
   Transaction
 } from "../types";
 import {
@@ -104,6 +106,10 @@ function candidateKey(candidate: RuleCandidate): string {
   ].join("\u0000");
 }
 
+function issueIsBlocking(issue: Record<string, unknown>): boolean {
+  return issue.blocking === true || issue.severity === "错误";
+}
+
 function messageFor(error: unknown): string {
   if (error instanceof AssetTrackError && error.status === 409) {
     const detail = error.detail as { expected?: number; actual?: number };
@@ -118,6 +124,13 @@ function messageFor(error: unknown): string {
 function number(value: string): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function transactionAmount(value: string): number {
+  const trimmed = value.trim();
+  if (!trimmed) return "" as unknown as number;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : "" as unknown as number;
 }
 
 function clone<T>(data: T): T {
@@ -431,6 +444,19 @@ export function AssetTrackEditorApp({
           api={api}
           onDirty={setDirty}
           onSaved={() => setDataVersion((value) => value + 1)}
+          onOpenMonth={async (target) => {
+            if (
+              dirty
+              && !await confirmAction(
+                t("放弃规则草稿？", "Discard rule changes?"),
+                t("当前规则页有未保存修改。打开历史月份并放弃这些修改？", "The rules page has unsaved changes. Open the historical month and discard them?"),
+                t("放弃并打开", "Discard and open")
+              )
+            ) return;
+            setDirty(false);
+            setMonth(target);
+            setMode("transactions");
+          }}
         />
       )}
     </div>
@@ -475,17 +501,6 @@ function MonthEditor({
     direction: "desc"
   });
   const [expandedGroup, setExpandedGroup] = useState("");
-  const [ruleCandidates, setRuleCandidates] = useState<{
-    rules_revision: number;
-    rows: RuleCandidate[];
-  }>({ rules_revision: 0, rows: [] });
-  const [candidateSort, setCandidateSort] = useState<SortState>({
-    key: "occurrences",
-    direction: "desc"
-  });
-  const [candidateCategories, setCandidateCategories] = useState<
-    Record<string, string>
-  >({});
   const csvInputRef = useRef<HTMLInputElement>(null);
   const [csvSource, setCsvSource] = useState<{
     filename: string;
@@ -497,24 +512,10 @@ function MonthEditor({
     setState({ kind: "pending", message: t("加载月份…", "Loading month…") });
     try {
       const [data, categoryData] = await Promise.all([api.month(month), api.categories()]);
+      const validation = await api.validateTransactions(month, data.transactions);
       dispatchDraft({ type: "reset", workspace: clone(data) });
       setCategories(categoryData.rows);
-      const candidateData = await api.ruleCandidates(month, data.transactions);
-      setRuleCandidates(candidateData);
-      setCandidateCategories(Object.fromEntries(
-        candidateData.rows.map((candidate) => {
-          const definition = categoryData.rows.find(
-            (category) =>
-              category.name === candidate.category
-              && category.transaction_type === candidate.transaction_type
-          );
-          return [
-            candidateKey(candidate),
-            definition?.category_key ?? ""
-          ];
-        })
-      ));
-      setIssues([]);
+      setIssues(validation.issues);
       onDirty(false);
       setState({ kind: "idle" });
     } catch (error) {
@@ -528,67 +529,6 @@ function MonthEditor({
     setIssues([]);
     onDirty(true);
   };
-  const refreshRuleCandidates = async (rows: Transaction[]) => {
-    const result = await api.ruleCandidates(month, rows);
-    setRuleCandidates(result);
-    setCandidateCategories((current) => ({
-      ...current,
-      ...Object.fromEntries(result.rows.map((candidate) => {
-        const key = candidateKey(candidate);
-        const definition = categories.find(
-          (category) =>
-            category.name === candidate.category
-            && category.transaction_type === candidate.transaction_type
-        );
-        return [key, current[key] || definition?.category_key || ""];
-      }))
-    }));
-  };
-  const createRule = async (candidate: RuleCandidate) => {
-    if (!draft) return;
-    const key = candidateKey(candidate);
-    const categoryKey = candidateCategories[key] ?? "";
-    const category = categories.find(
-      (item) => item.category_key === categoryKey
-    );
-    if (!category) {
-      setState({ kind: "error", message: t("请先为规则建议选择分类。", "Select a category for the rule suggestion first.") });
-      return;
-    }
-    setState({ kind: "pending", message: t("正在创建规则并应用到草稿…", "Creating the rule and applying it to the draft…") });
-    try {
-      const current = await api.rules();
-      if (current.revision !== ruleCandidates.rules_revision) {
-        await refreshRuleCandidates(draft.transactions);
-        throw new Error(t(
-          "规则已在其他位置变化，建议已刷新；流水草稿未丢失。",
-          "Rules changed elsewhere. Suggestions were refreshed and the transaction draft was preserved."
-        ));
-      }
-      await api.saveRules(current.revision, [
-        ...current.rows,
-        {
-          transaction_type: candidate.transaction_type,
-          counterparty: candidate.counterparty,
-          product: candidate.product,
-          category_key: category.category_key,
-          category: category.name
-        }
-      ]);
-      const applied = await api.applyRules(month, draft.transactions);
-      mark({ ...draft, transactions: applied.proposed_rows });
-      await refreshRuleCandidates(applied.proposed_rows);
-      setState({
-        kind: "success",
-        message: t(
-          `已创建“${candidate.product}”规则并应用到当前草稿。`,
-          `Created a rule for “${candidate.product}” and applied it to the current draft.`
-        )
-      });
-    } catch (error) {
-      setState({ kind: "error", message: messageFor(error) });
-    }
-  };
   if (!draft) return <Status state={state} />;
 
   const updateTransaction = (
@@ -600,7 +540,7 @@ function MonthEditor({
       if (rowIndex !== index) return row;
       const next = {
         ...row,
-        [field]: field === "amount" ? number(value) : value
+        [field]: field === "amount" ? transactionAmount(value) : value
       };
       if (field === "type" && ["代付", "加仓", "提现"].includes(value)) {
         next.category = "";
@@ -625,24 +565,19 @@ function MonthEditor({
     );
     mark({ ...draft, fixed_assets: rows });
   };
-  const candidateView = sortRows(
-    ruleCandidates.rows,
-    candidateSort,
-    (candidate, key) => candidate[key as keyof RuleCandidate]
-  );
-
   const save = async () => {
-    setState({ kind: "pending", message: t("执行严格质检…", "Running strict validation…") });
+    setState({ kind: "pending", message: t("检查流水…", "Checking transactions…") });
     try {
       const validation = await api.validateTransactions(month, draft.transactions);
       const found = validation.issues;
       setIssues(found);
-      if (found.length) {
+      const blocking = found.filter(issueIsBlocking);
+      if (blocking.length) {
         setState({
           kind: "error",
           message: t(
-            `有 ${found.length} 项必须先完整填写；未调用保存。`,
-            `${found.length} items must be completed before saving. Nothing was written.`
+            `有 ${blocking.length} 项错误必须先修正；未调用保存。`,
+            `${blocking.length} errors must be fixed before saving. Nothing was written.`
           )
         });
         return;
@@ -656,12 +591,22 @@ function MonthEditor({
         fixed_assets: draft.fixed_assets
       });
       dispatchDraft({ type: "reset", workspace: clone(saved) });
+      const persistedValidation = await api.validateTransactions(month, saved.transactions);
+      setIssues(persistedValidation.issues);
       onDirty(false);
       await onSaved();
-      setState({ kind: "success", message: t(
-        `已保存 revision ${saved.revision}。`,
-        `Saved revision ${saved.revision}.`
-      ) });
+      setState({
+        kind: "success",
+        message: persistedValidation.issues.length
+          ? t(
+              `已保存 revision ${saved.revision}，保留 ${persistedValidation.issues.length} 项警告。`,
+              `Saved revision ${saved.revision} with ${persistedValidation.issues.length} warnings.`
+            )
+          : t(
+              `已保存 revision ${saved.revision}。`,
+              `Saved revision ${saved.revision}.`
+            )
+      });
     } catch (error) {
       setState({ kind: "error", message: messageFor(error) });
     }
@@ -699,22 +644,8 @@ function MonthEditor({
         mode,
         headerSignature: csvSource.inspection.header_signature,
         mapping,
-        saveMapping: saveCsvMapping,
-        loadRuleCandidates: (rows) => api.ruleCandidates(month, rows)
+        saveMapping: saveCsvMapping
       });
-      setRuleCandidates(prepared.candidates);
-      setCandidateCategories((current) => ({
-        ...current,
-        ...Object.fromEntries(prepared.candidates.rows.map((candidate) => {
-          const key = candidateKey(candidate);
-          const definition = categories.find(
-            (category) =>
-              category.name === candidate.category
-              && category.transaction_type === candidate.transaction_type
-          );
-          return [key, current[key] || definition?.category_key || ""];
-        }))
-      }));
       mark({
         ...draft,
         transactions: prepared.transactions
@@ -975,82 +906,6 @@ function MonthEditor({
           onExpanded={setExpandedGroup}
           onUpdate={updateTransaction}
         />
-      )}
-      {ruleCandidates.rows.length > 0 && (
-        <Section title={t("潜在交易规则", "Potential transaction rules")}>
-          <p>
-            {t(
-              "按历史记录和当前草稿统计；增量导入不去重，重复账单也会计入出现次数。",
-              "Counts include history and the current draft. Incremental imports are not deduplicated, so repeated statements also increase occurrences."
-            )}
-          </p>
-          <div className="asset-track-table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>{t("收支", "Type")}</th>
-                  <th>{t("交易对方", "Counterparty")}</th>
-                  <th><SortButton label={t("商品", "Item")} field="product" sort={candidateSort} onSort={setCandidateSort} /></th>
-                  <th><SortButton label={t("出现次数", "Occurrences")} field="occurrences" sort={candidateSort} onSort={setCandidateSort} /></th>
-                  <th><SortButton label={t("月份", "Months")} field="months_count" sort={candidateSort} onSort={setCandidateSort} /></th>
-                  <th><SortButton label={t("最近月份", "Latest month")} field="last_month" sort={candidateSort} onSort={setCandidateSort} /></th>
-                  <th>{t("建议分类", "Suggested category")}</th>
-                  <th>{t("置信度", "Confidence")}</th><th />
-                </tr>
-              </thead>
-              <tbody>
-                {candidateView.map(({ row: candidate }) => {
-                  const key = candidateKey(candidate);
-                  return (
-                    <tr key={key}>
-                      <td>{businessLabel(candidate.transaction_type)}</td>
-                      <td>{candidate.counterparty || "—"}</td>
-                      <td title={candidate.variants.join("、")}>{candidate.product}</td>
-                      <td>{candidate.occurrences}</td>
-                      <td>{candidate.months_count}</td>
-                      <td>{candidate.last_month}</td>
-                      <td>
-                        <select
-                          value={candidateCategories[key] ?? ""}
-                          onChange={(event) => setCandidateCategories((current) => ({
-                            ...current,
-                            [key]: event.target.value
-                          }))}
-                        >
-                          <option value="">{t("请选择", "Select")}</option>
-                          {categories.filter(
-                            (category) =>
-                              category.is_active
-                              && category.transaction_type === candidate.transaction_type
-                          ).map((category) => (
-                            <option
-                              key={category.category_key}
-                              value={category.category_key}
-                            >
-                              {category.name}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        {(candidate.category_confidence * 100).toFixed(0)}%
-                        {candidate.has_category_conflict ? t(" · 有冲突", " · Conflict") : ""}
-                      </td>
-                      <td>
-                        <button
-                          disabled={state.kind === "pending"}
-                          onClick={() => void createRule(candidate)}
-                        >
-                          {t("创建规则并应用", "Create and apply rule")}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </Section>
       )}
       <FixedAssetTable
         rows={draft.fixed_assets}
@@ -1616,23 +1471,53 @@ function CollectionEditor({
 function RulesEditor({
   api,
   onDirty,
-  onSaved
+  onSaved,
+  onOpenMonth
 }: {
   api: AssetTrackService;
   onDirty: (dirty: boolean) => void;
   onSaved: () => void;
+  onOpenMonth: (month: string) => Promise<void>;
 }) {
   const [categories, setCategories] = useState<{ revision: number; rows: CategoryDefinition[] } | null>(null);
   const [rules, setRules] = useState<{ revision: number; rows: Array<Record<string, unknown>> } | null>(null);
+  const [insights, setInsights] = useState<RuleInsights | null>(null);
   const [categorySort, setCategorySort] = useState<SortState>(null);
   const [ruleSort, setRuleSort] = useState<SortState>(null);
+  const [recommendationSort, setRecommendationSort] = useState<SortState>({
+    key: "occurrences",
+    direction: "desc"
+  });
+  const [historySort, setHistorySort] = useState<SortState>({
+    key: "occurrences",
+    direction: "desc"
+  });
+  const [recommendationCategories, setRecommendationCategories] = useState<Record<string, string>>({});
+  const [localDirty, setLocalDirty] = useState(false);
   const [state, setState] = useState<OperationState>({ kind: "idle" });
   const load = useCallback(async () => {
-    setState({ kind: "pending", message: t("加载分类与规则…", "Loading categories and rules…") });
+    setState({ kind: "pending", message: t("加载规则中心…", "Loading the rules center…") });
     try {
-      const [categoryData, ruleData] = await Promise.all([api.categories(), api.rules()]);
+      const [categoryData, ruleData, insightData] = await Promise.all([
+        api.categories(),
+        api.rules(),
+        api.ruleInsights()
+      ]);
       setCategories(categoryData);
       setRules(ruleData);
+      setInsights(insightData);
+      setRecommendationCategories(Object.fromEntries(
+        insightData.recommendations.map((candidate) => {
+          const category = categoryData.rows.find(
+            (row) =>
+              row.is_active
+              && row.transaction_type === candidate.transaction_type
+              && row.name === candidate.category
+          );
+          return [candidateKey(candidate), category?.category_key ?? ""];
+        })
+      ));
+      setLocalDirty(false);
       onDirty(false);
       setState({ kind: "idle" });
     } catch (error) {
@@ -1642,15 +1527,101 @@ function RulesEditor({
   useEffect(() => void load(), [load]);
   if (!categories || !rules) return <Status state={state} />;
 
+  const markDirty = () => {
+    setLocalDirty(true);
+    onDirty(true);
+  };
+  const categorySummary = (
+    counts: Array<{ category: string; occurrences: number }> | undefined
+  ) => (counts ?? []).map(({ category, occurrences }) =>
+    `${category === "未分类" ? t("未分类", "Uncategorized") : category} (${occurrences})`
+  ).join("、") || t("无历史分类", "No historical category");
+  const ruleStatusLabel = (value: unknown) => ({
+    正常: t("正常", "Normal"),
+    重复: t("重复", "Duplicate"),
+    冲突: t("冲突", "Conflict"),
+    未创建: t("未创建", "Not created"),
+    已覆盖: t("已覆盖", "Covered")
+  }[scalarText(value)] ?? scalarText(value));
+
   const saveAll = async () => {
     setState({ kind: "pending", message: t("保存分类与规则…", "Saving categories and rules…") });
     try {
       const categoryResult = await api.saveCategories(categories.revision, categories.rows);
-      await api.saveRules(rules.revision, rules.rows);
+      const latestRules = await api.rules();
+      const categoryNames = new Map(
+        categoryResult.rows.map((row) => [row.category_key, row.name])
+      );
+      const syncedRules = rules.rows.map((row) => ({
+        ...row,
+        category: categoryNames.get(scalarText(row.category_key)) ?? scalarText(row.category)
+      }));
+      await api.saveRules(latestRules.revision, syncedRules);
       setCategories(categoryResult);
       await load();
       onSaved();
       setState({ kind: "success", message: t("分类和交易匹配规则已保存。", "Categories and transaction matching rules saved.") });
+    } catch (error) {
+      setState({ kind: "error", message: messageFor(error) });
+    }
+  };
+  const createRecommendation = async (candidate: RuleCandidate) => {
+    if (localDirty) {
+      setState({
+        kind: "error",
+        message: t("请先整体保存当前规则修改，再创建推荐规则。", "Save the current rule changes before creating a recommended rule.")
+      });
+      return;
+    }
+    const key = candidateKey(candidate);
+    const categoryKey = recommendationCategories[key] ?? "";
+    const category = categories.rows.find(
+      (row) => row.category_key === categoryKey && row.is_active
+    );
+    if (!category) {
+      setState({
+        kind: "error",
+        message: t("请先为推荐交易选择有效分类。", "Choose a valid category for the recommended transaction first.")
+      });
+      return;
+    }
+    setState({ kind: "pending", message: t("创建推荐规则…", "Creating recommended rule…") });
+    try {
+      const current = await api.rules();
+      if (!insights || current.revision !== insights.rules_revision) {
+        await load();
+        setState({
+          kind: "error",
+          message: t("规则 revision 已变化，已重新加载推荐列表，请再确认一次。", "The rule revision changed. Recommendations were reloaded; review and try again.")
+        });
+        return;
+      }
+      const duplicate = current.rows.some((row) =>
+        scalarText(row.transaction_type) === candidate.transaction_type
+        && normalizeProduct(scalarText(row.counterparty)) === normalizeProduct(candidate.counterparty)
+        && normalizeProduct(scalarText(row.product)) === normalizeProduct(candidate.product)
+      );
+      if (duplicate) {
+        await load();
+        setState({
+          kind: "error",
+          message: t("该交易组合已有匹配规则，已重新加载规则中心。", "This transaction combination already has a matching rule. The rules center was reloaded.")
+        });
+        return;
+      }
+      await api.saveRules(current.revision, [
+        ...current.rows,
+        {
+          transaction_type: candidate.transaction_type,
+          counterparty: candidate.counterparty,
+          product: candidate.product,
+          category_key: category.category_key,
+          category: category.name
+        }
+      ]);
+      await load();
+      onSaved();
+      setState({ kind: "success", message: t("推荐规则已创建；历史账单未被回写。", "The recommended rule was created. Historical statements were not rewritten.") });
     } catch (error) {
       setState({ kind: "error", message: messageFor(error) });
     }
@@ -1665,12 +1636,28 @@ function RulesEditor({
     (row, key) => row[key as keyof CategoryDefinition]
   );
   const ruleView = sortRows(rules.rows, ruleSort, (row, key) => row[key]);
+  const recommendationView = insights
+    ? sortRows(
+      insights.recommendations,
+      recommendationSort,
+      (row, key) => key === "category_counts"
+        ? categorySummary(row.category_counts)
+        : row[key as keyof RuleCandidate]
+    )
+    : [];
+  const historyView = insights
+    ? sortRows(insights.historical_products, historySort, (row, key) =>
+      key === "category_counts"
+        ? categorySummary(row.category_counts)
+        : row[key as keyof HistoricalProductStat]
+    )
+    : [];
   return (
     <main className="asset-track-editor">
       <section className="asset-track-month-header">
         <div>
           <h2>{t("规则", "Rules")}</h2>
-          <span>{t("分类定义与交易对方／商品匹配", "Category definitions and counterparty/item matching")}</span>
+          <span>{t("分类、匹配、推荐与历史商品统计", "Categories, matching, recommendations, and historical item statistics")}</span>
         </div>
         <button className="mod-cta" onClick={() => void saveAll()}>
           {t("整体保存", "Save all")}
@@ -1678,7 +1665,7 @@ function RulesEditor({
       </section>
       <Status state={state} />
       <Section title={t("分类定义", "Category definitions")}>
-        <div className="asset-track-table-scroll">
+        {categoryView.length === 0 ? <EmptyState text={t("尚无分类定义。", "No category definitions yet.")} /> : <div className="asset-track-table-scroll">
           <table>
             <thead>
               <tr>
@@ -1698,45 +1685,45 @@ function RulesEditor({
                   <td><input value={row.name} onChange={(event) => {
                     const rows = clone(categories.rows);
                     rows[index].name = event.target.value;
-                    setCategories({ ...categories, rows }); onDirty(true);
+                    setCategories({ ...categories, rows }); markDirty();
                   }} /></td>
                   <td><select value={row.transaction_type} onChange={(event) => {
                     const rows = clone(categories.rows);
                     rows[index].transaction_type = event.target.value as "支出" | "收入";
-                    setCategories({ ...categories, rows }); onDirty(true);
+                    setCategories({ ...categories, rows }); markDirty();
                   }}><option value="支出">{businessLabel("支出")}</option><option value="收入">{businessLabel("收入")}</option></select></td>
                   <td><select value={row.necessity} onChange={(event) => {
                     const rows = clone(categories.rows);
                     rows[index].necessity = event.target.value as CategoryDefinition["necessity"];
-                    setCategories({ ...categories, rows }); onDirty(true);
+                    setCategories({ ...categories, rows }); markDirty();
                   }}>{["必要", "可控", "不适用"].map((value) => <option key={value} value={value}>{businessLabel(value)}</option>)}</select></td>
                   <td><select value={row.pattern} onChange={(event) => {
                     const rows = clone(categories.rows);
                     rows[index].pattern = event.target.value as CategoryDefinition["pattern"];
-                    setCategories({ ...categories, rows }); onDirty(true);
+                    setCategories({ ...categories, rows }); markDirty();
                   }}>{["周期", "日常", "偶尔", "不适用"].map((value) => <option key={value} value={value}>{businessLabel(value)}</option>)}</select></td>
                   <td><input type="checkbox" checked={row.is_big_ticket} onChange={(event) => {
                     const rows = clone(categories.rows); rows[index].is_big_ticket = event.target.checked;
-                    setCategories({ ...categories, rows }); onDirty(true);
+                    setCategories({ ...categories, rows }); markDirty();
                   }} /></td>
                   <td><input type="color" value={row.color} onChange={(event) => {
                     const rows = clone(categories.rows); rows[index].color = event.target.value;
-                    setCategories({ ...categories, rows }); onDirty(true);
+                    setCategories({ ...categories, rows }); markDirty();
                   }} /></td>
                   <td><input type="checkbox" checked={row.is_active} onChange={(event) => {
                     const rows = clone(categories.rows); rows[index].is_active = event.target.checked;
-                    setCategories({ ...categories, rows }); onDirty(true);
+                    setCategories({ ...categories, rows }); markDirty();
                   }} /></td>
                   <td>{row.transaction_count ?? 0} {t("行", "rows")} / {row.impact_months?.length ?? 0} {t("月", "months")}</td>
                   <td><button onClick={() => {
                     const rows = categories.rows.filter((_, item) => item !== index);
-                    setCategories({ ...categories, rows }); onDirty(true);
+                    setCategories({ ...categories, rows }); markDirty();
                   }}>{(row.transaction_count ?? 0) + (row.rule_count ?? 0) > 0 ? t("停用", "Deactivate") : t("删除", "Delete")}</button></td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
+        </div>}
         <button onClick={() => {
           setCategories({
             ...categories,
@@ -1751,16 +1738,17 @@ function RulesEditor({
               is_active: true,
               sort_order: categories.rows.length
             }]
-          }); onDirty(true);
+          }); markDirty();
         }}>{t("新增分类", "Add category")}</button>
       </Section>
       <Section title={t("交易匹配规则", "Transaction matching rules")}>
-        <div className="asset-track-table-scroll">
+        {ruleView.length === 0 ? <EmptyState text={t("尚无已保存匹配规则。", "No saved matching rules yet.")} /> : <div className="asset-track-table-scroll">
           <table>
             <thead><tr>{[
               ["transaction_type", t("收支", "Type")],
               ["counterparty", t("交易对方", "Counterparty")], ["product", t("商品", "Item")],
-              ["category", t("分类", "Category")], ["occurrences", t("历史次数", "Historical occurrences")],
+              ["category", t("分类", "Category")], ["rule_status", t("规则状态", "Rule status")],
+              ["occurrences", t("历史次数", "Historical occurrences")], ["months_count", t("月份数", "Months")],
               ["last_month", t("最近月份", "Latest month")]
             ].map(([field, label]) => <th key={field}>
               <SortButton field={field} label={label} sort={ruleSort} onSort={setRuleSort} />
@@ -1770,40 +1758,132 @@ function RulesEditor({
                 <td><select value={scalarText(row.transaction_type) || "支出"} onChange={(event) => {
                   const next = clone(rules.rows); next[index].transaction_type = event.target.value;
                   next[index].category_key = ""; next[index].category = "";
-                  setRules({ ...rules, rows: next }); onDirty(true);
+                  setRules({ ...rules, rows: next }); markDirty();
                 }}><option value="支出">{businessLabel("支出")}</option><option value="收入">{businessLabel("收入")}</option></select></td>
                 <td><input value={scalarText(row.counterparty)} onChange={(event) => {
                   const next = clone(rules.rows); next[index].counterparty = event.target.value;
-                  setRules({ ...rules, rows: next }); onDirty(true);
+                  setRules({ ...rules, rows: next }); markDirty();
                 }} /></td>
                 <td><input value={scalarText(row.product)} onChange={(event) => {
                   const next = clone(rules.rows); next[index].product = event.target.value;
-                  setRules({ ...rules, rows: next }); onDirty(true);
+                  setRules({ ...rules, rows: next }); markDirty();
                 }} /></td>
                 <td><select value={scalarText(row.category_key)} onChange={(event) => {
                   const next = clone(rules.rows);
                   const definition = categories.rows.find((item) => item.category_key === event.target.value);
                   next[index].category_key = event.target.value;
                   next[index].category = definition?.name ?? "";
-                  setRules({ ...rules, rows: next }); onDirty(true);
+                  setRules({ ...rules, rows: next }); markDirty();
                 }}><option value="">{t("请选择", "Select")}</option>{activeForType(row.transaction_type).map((category) => (
                   <option key={category.category_key} value={category.category_key}>{category.name}</option>
                 ))}</select></td>
-                <td>{scalarText(row.occurrences)}</td><td>{scalarText(row.last_month)}</td>
+                <td>{ruleStatusLabel(row.rule_status)}{Array.isArray(row.conflict_rule_ids) && row.conflict_rule_ids.length > 0
+                  ? ` · ${row.conflict_rule_ids.length} ${t("冲突规则", "conflicts")}`
+                  : ""}</td>
+                <td>{scalarText(row.occurrences)}</td><td>{scalarText(row.months_count)}</td><td>{scalarText(row.last_month)}</td>
                 <td><button onClick={() => {
-                  setRules({ ...rules, rows: rules.rows.filter((_, item) => item !== index) }); onDirty(true);
+                  setRules({ ...rules, rows: rules.rows.filter((_, item) => item !== index) }); markDirty();
                 }}>{t("删除", "Delete")}</button></td>
               </tr>
             ))}</tbody>
           </table>
-        </div>
+        </div>}
         <button onClick={() => {
           const definition = categories.rows.find((row) => row.is_active && row.transaction_type === "支出");
           setRules({ ...rules, rows: [...rules.rows, {
             transaction_type: "支出", counterparty: "", product: "",
             category_key: definition?.category_key ?? "", category: definition?.name ?? ""
-          }] }); onDirty(true);
+          }] }); markDirty();
         }}>{t("新增规则", "Add rule")}</button>
+      </Section>
+      <Section title={t("推荐分类规则", "Recommended category rules")}>
+        <p>{t("推荐只读取已保存月份；创建规则不会回写历史账单。存在历史分类冲突时，请先选择确认后的分类。", "Recommendations use saved months only. Creating a rule does not rewrite historical statements. Choose a category explicitly when history conflicts.")}</p>
+        {recommendationView.length === 0 ? <EmptyState text={t("暂无达到次数阈值且未覆盖的推荐规则。", "No uncovered recommendations meet the occurrence threshold.")} /> : <div className="asset-track-table-scroll">
+          <table>
+            <thead><tr>{[
+              ["transaction_type", t("收支", "Type")],
+              ["counterparty", t("交易对方", "Counterparty")],
+              ["product", t("代表商品", "Representative item")],
+              ["category_counts", t("历史分类", "Historical categories")],
+              ["occurrences", t("次数", "Occurrences")],
+              ["months_count", t("月份数", "Months")],
+              ["category_confidence", t("置信度", "Confidence")],
+              ["last_month", t("最近月份", "Latest month")]
+            ].map(([field, label]) => <th key={field}>
+              <SortButton field={field} label={label} sort={recommendationSort} onSort={setRecommendationSort} />
+            </th>)}<th>{t("操作", "Actions")}</th></tr></thead>
+            <tbody>{recommendationView.map(({ row: candidate }) => {
+              const key = candidateKey(candidate);
+              const selectedCategory = recommendationCategories[key] ?? "";
+              const options = categories.rows.filter(
+                (category) => category.is_active && category.transaction_type === candidate.transaction_type
+              );
+              return <tr key={key}>
+                <td>{businessLabel(candidate.transaction_type)}</td>
+                <td>{candidate.counterparty || t("（空）", "(empty)")}</td>
+                <td title={candidate.variants.join("、")}>{candidate.product || t("（空）", "(empty)")}</td>
+                <td>{categorySummary(candidate.category_counts)}</td>
+                <td>{candidate.occurrences}</td>
+                <td>{candidate.months_count}</td>
+                <td>{Math.round(candidate.category_confidence * 100)}%</td>
+                <td>{candidate.has_category_conflict ? t("有冲突", "Conflict") : candidate.last_month}</td>
+                <td>
+                  <select
+                    aria-label={t(`${candidate.product || candidate.counterparty}推荐分类`, `Recommended category for ${candidate.product || candidate.counterparty}`)}
+                    value={selectedCategory}
+                    onChange={(event) => setRecommendationCategories((current) => ({ ...current, [key]: event.target.value }))}
+                  >
+                    <option value="">{t("请选择分类", "Choose category")}</option>
+                    {options.map((category) => <option key={category.category_key} value={category.category_key}>{category.name}</option>)}
+                  </select>
+                  <button disabled={!selectedCategory || localDirty} onClick={() => void createRecommendation(candidate)}>
+                    {t("创建规则", "Create rule")}
+                  </button>
+                </td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>}
+      </Section>
+      <Section title={t("历史商品统计", "Historical item statistics")}>
+        <p>{t("统计覆盖全部已保存月份；规则状态用于识别未创建、已覆盖、重复和冲突。", "Statistics cover all saved months. Rule status identifies uncovered, covered, duplicate, and conflicting rules.")}</p>
+        {historyView.length === 0 ? <EmptyState text={t("尚无可统计的历史商品或交易对方。", "No historical items or counterparties to summarize yet.")} /> : <div className="asset-track-table-scroll">
+          <table>
+            <thead><tr>{[
+              ["transaction_type", t("收支", "Type")],
+              ["counterparty", t("交易对方", "Counterparty")],
+              ["product", t("商品", "Item")],
+              ["category_counts", t("历史分类", "Historical categories")],
+              ["occurrences", t("次数", "Occurrences")],
+              ["months_count", t("月份数", "Months")],
+              ["total_amount", t("总金额", "Total amount")],
+              ["average_amount", t("平均金额", "Average amount")],
+              ["latest_amount", t("最近金额", "Latest amount")],
+              ["last_date", t("最近日期", "Latest date")],
+              ["rule_status", t("规则状态", "Rule status")]
+            ].map(([field, label]) => <th key={field}>
+              <SortButton field={field} label={label} sort={historySort} onSort={setHistorySort} />
+            </th>)}<th /></tr></thead>
+            <tbody>{historyView.map(({ row }) => <tr key={`${row.transaction_type}\u0000${row.counterparty}\u0000${row.product}`}>
+              <td>{businessLabel(row.transaction_type)}</td>
+              <td>{row.counterparty || t("（空）", "(empty)")}</td>
+              <td title={row.variants.join("、")}>{row.product || t("（空）", "(empty)")}</td>
+              <td>{categorySummary(row.category_counts)}</td>
+              <td>{row.occurrences}</td>
+              <td>{row.months_count}</td>
+              <td>{money(row.total_amount, row.transaction_type)}</td>
+              <td>{money(row.average_amount, row.transaction_type)}</td>
+              <td>{money(row.latest_amount, row.transaction_type)}</td>
+              <td>{row.last_date}</td>
+              <td>{ruleStatusLabel(row.rule_status)}</td>
+              <td><button onClick={() => void onOpenMonth(row.last_month).catch((error) => {
+                setState({ kind: "error", message: messageFor(error) });
+              })}>
+                {t("打开最近月份", "Open latest month")}
+              </button></td>
+            </tr>)}</tbody>
+          </table>
+        </div>}
       </Section>
     </main>
   );
@@ -1816,9 +1896,12 @@ function IssueList({
   issues: Array<Record<string, unknown>>;
   rows: Transaction[];
 }) {
+  const blocking = issues.filter(issueIsBlocking).length;
   return (
     <div className="asset-track-issues" role="alert">
-      <strong>{t("必须先修正以下问题：", "Fix the following issues first:")}</strong>
+      <strong>{blocking > 0
+        ? t(`以下问题中有 ${blocking} 项会阻止保存：`, `${blocking} of the following issues block saving:`)
+        : t("以下为保存后的提醒：", "The following items are saved warnings:")}</strong>
       <ul>
         {issues.map((issue, index) => {
           const globalIndex = Number(issue.row_index ?? 0);
@@ -1826,12 +1909,16 @@ function IssueList({
             issue.type ?? rows[globalIndex]?.type ?? t("流水", "Transaction")
           );
           const blockRow = transactionBlockNumber(rows, globalIndex);
+          const severity = issueIsBlocking(issue)
+            ? t("错误", "Error")
+            : t("警告", "Warning");
           return (
             <li key={index}>
               {t(
-                `${businessLabel(type)}第 ${Math.max(1, blockRow)} 行／${scalarText(issue.field) || "字段"}／${scalarText(issue.issue) || "无效"}`,
-                `${businessLabel(type)} row ${Math.max(1, blockRow)} / ${businessLabel(scalarText(issue.field) || "字段")} / ${displayError(scalarText(issue.issue) || "无效")}`
+                `［${severity}］${businessLabel(type)}第 ${Math.max(1, blockRow)} 行／${scalarText(issue.field) || "字段"}／${scalarText(issue.issue) || "无效"}`,
+                `[${severity}] ${businessLabel(type)} row ${Math.max(1, blockRow)} / ${businessLabel(scalarText(issue.field) || "字段")} / ${displayError(scalarText(issue.issue) || "无效")}`
               )}
+              {scalarText(issue.suggestion) && <small> · {displayError(scalarText(issue.suggestion))}</small>}
             </li>
           );
         })}

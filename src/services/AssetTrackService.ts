@@ -10,6 +10,7 @@ import type {
   MonthCreationPolicy,
   MonthWorkspace,
   RuleCandidate,
+  RuleInsights,
   Transaction
 } from "../types";
 
@@ -90,6 +91,7 @@ export interface AssetTrackService {
     min_occurrences: number;
     rows: RuleCandidate[];
   }>;
+  ruleInsights(minOccurrences?: number): Promise<RuleInsights>;
   debts(): Promise<{ revision: number; rows: Array<Record<string, unknown>> }>;
   saveDebts(
     revision: number,

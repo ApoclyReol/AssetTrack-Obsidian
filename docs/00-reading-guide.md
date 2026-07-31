@@ -18,6 +18,7 @@
 | 08 | [故障排查](08-troubleshooting.md) | 处理启动、恢复、revision 和重复流水 |
 | 09 | [路线图](09-roadmap.md) | 查看当前验证和后续方向 |
 | 10 | [发布后质量与功能路线](10-community-release-plan.md) | 跟踪发布后质量与功能演进 |
+| 11 | [规则中心与容错导入架构补充](11-rule-center-architecture.md) | 核对导入、质检和规则洞察接口 |
 
 ## 更新日志
 

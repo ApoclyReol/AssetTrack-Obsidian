@@ -31,7 +31,6 @@ Thumbs.db
 
 # Obsidian plugin dependencies, build output, caches, and coverage
 node_modules/
-dist/
 .vite/
 .cache/
 coverage/

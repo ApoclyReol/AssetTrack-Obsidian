@@ -56,6 +56,16 @@ v1.2.0 起，`data.json` 还保存基础货币、金额格式、平账容差和�
 动作标记 dirty，保存后以 canonical workspace 和新 revision 重置。账单文件以
 `ArrayBuffer` 读取，不再构造 Data URL/Base64 中间副本。
 
+当前仍保留的技术债：
+
+- `AssetTrackEditorApp.tsx` 尚未完成按 feature 的全面拆分；
+- 账单解析仍在主线程执行，尚未迁入 Worker；
+- 国际化仍以双参数 `t()` 为主，部分历史错误仍依赖中文文本映射，尚未全面切换
+  到消息键和结构化错误码。
+
+后续重构必须保持 schema、Service/Repository 接口、月度事务和导入预览契约稳定，
+不得把结构整理与财务事实迁移混在同一变更中。
+
 ## 实例与写入边界
 
 - 插件实例共享 DatabaseManager、Repository、Service、写入队列和数据变更事件。

@@ -28,3 +28,14 @@
   可重复执行，避免已存在 Release 时重复创建失败。
 - Windows checkout 可能把 Markdown 转为 CRLF；发行声明校验会先规范化换行符，
   避免内容相同但行尾格式不同造成假失败。
+
+## 后续工作
+
+以下内容不属于 v1.2.0 已完成范围：
+
+- 将大型 React 编辑器全面拆分为 `features/`，同时保持月度 reducer 为唯一草稿
+  所有者；
+- 将 CSV/XLSX/XLS 解析迁入 Worker；当前只完成 `ArrayBuffer` 读取和 Base64
+  副本移除；
+- 把剩余双参数 `t()` 和中文错误文本映射迁移为稳定消息键及结构化错误代码；
+- 继续进行真实 Vault 大数据性能采样、Linux smoke 和自动化 Electron 测试。

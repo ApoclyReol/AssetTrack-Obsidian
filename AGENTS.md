@@ -10,8 +10,10 @@ SQLite。项目不再包含 Python、HTTP API、sidecar 或平台原生扩展。
 
 - 开始任务先检查实时 Git、目录、schema、数据路径和相关测试。
 - 根目录插件清单与构建配置、`src/`、`tests/`、`scripts/`、`docs/` 是唯一长期源码边界。
-- `build/`、`.var/`、`.venv/`、`node_modules/` 和 `dist/` 都是忽略内容。
-- 可安装产物只能是完整 `build/obsidian/asset-track/`。
+- `build/`、`.var/`、`.venv/` 和 `node_modules/` 都是忽略内容。
+- 项目只使用 `build/` 作为构建产物目录，不创建 `dist/` 或 `out/`。
+- 每次构建先清空 `build/`，再将 `main.js`、`manifest.json` 和 `styles.css`
+  直接放在该目录下；`build/` 不得包含子目录、ZIP 或其他文件。
 - 正式数据只能位于用户明确选择的 Vault 内 Asset-track 数据目录。
 - 数据库路径固定为 `<数据目录>/accounting_system.db`，保护备份位于
   `<数据目录>/backups/`。

@@ -43,17 +43,17 @@ npm run notices:update
 npm run release:check
 ```
 
-`npm run build` 生成完整可安装目录：
+`npm run build` 会先清空 `build/`，再直接生成三个可安装文件：
 
 ```text
-build/obsidian/asset-track/
+build/
 ├── main.js
 ├── manifest.json
 └── styles.css
 ```
 
 `notices:update` 从 lockfile、当前插件版本和
-`build/obsidian/asset-track/main.js` 生成第三方依赖声明。
+`build/main.js` 生成第三方依赖声明。
 `release:check` 会重新计算并验证依赖版本、许可证、插件版本与 bundle 实际大小，
 防止声明漂移。
 
@@ -62,7 +62,7 @@ build/obsidian/asset-track/
 - `typecheck` 无错误退出；
 - `lint` 零 error、零 warning；
 - `test` 中的 `tests/plugin/` 测试全部通过；
-- `build` 只在上述可安装目录生成标准三文件；
+- 项目不使用 `dist/` 或 `out/`，`build/` 根目录只保留标准三文件；
 - `release:check` 验证版本、许可证、标准三文件和生产 bundle。
 
 测试覆盖 schema 9、中文路径、WAL、整体事务、revision、冻结 golden、

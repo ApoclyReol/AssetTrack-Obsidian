@@ -137,6 +137,72 @@ describe("node:sqlite schema 9 repository", () => {
     expect(month.cash_accounts[0].balance).toBe(0);
   });
 
+  it("persists warning-only transactions and restores their warnings", async () => {
+    const { repository } = fixture();
+    const saved = await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 100 }],
+      [{
+        account_key: "investment-default",
+        principal: 0,
+        market_value: 0,
+        cash_balance: 0
+      }],
+      [{
+        transaction_date: "",
+        type: "支出",
+        category: "",
+        product: "",
+        amount: 0
+      }],
+      []
+    );
+    expect(saved.transactions[0]).toMatchObject({
+      transaction_date: "2026-01-01",
+      category: "",
+      product: "",
+      amount: 0
+    });
+    const issues = repository.validateTransactionRows("2026-01", saved.transactions);
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "商品", severity: "警告", blocking: false }),
+      expect.objectContaining({ field: "金额", severity: "警告", blocking: false }),
+      expect.objectContaining({ field: "分类", severity: "警告", blocking: false })
+    ]));
+    expect((await repository.getMonth("2026-01")).transactions[0]).toMatchObject({
+      transaction_date: "2026-01-01",
+      amount: 0
+    });
+  });
+
+  it("rejects malformed date or amount before writing any month rows", async () => {
+    const { repository } = fixture();
+    await expect(repository.saveMonth(
+      "2026-02",
+      0,
+      [{ account_key: "cash-default", balance: 999 }],
+      [{
+        account_key: "investment-default",
+        principal: 0,
+        market_value: 0,
+        cash_balance: 0
+      }],
+      [{
+        transaction_date: "not-a-date",
+        type: "支出",
+        category: "",
+        product: "错误日期",
+        amount: "not-a-number" as unknown as number
+      }],
+      []
+    )).rejects.toMatchObject({ status: 422 });
+    const month = await repository.getMonth("2026-02");
+    expect(month.revision).toBe(0);
+    expect(month.cash_accounts[0].balance).toBe(0);
+    expect(month.transactions).toHaveLength(0);
+  });
+
   it("serializes concurrent saves and accepts only one stale revision", async () => {
     const { repository } = fixture();
     const investment = [{
@@ -543,6 +609,112 @@ describe("node:sqlite schema 9 repository", () => {
       product: "午餐",
       amount: 20
     }]).proposed_rows[0].category).toBe("餐饮基础");
+  });
+
+  it("aggregates saved history, detects conflicts and exposes recommendations", async () => {
+    const { repository } = fixture();
+    const food = categoryKey("餐饮基础");
+    const quality = categoryKey("餐饮改善");
+    const investment = [{
+      account_key: "investment-default",
+      principal: 0,
+      market_value: 0,
+      cash_balance: 0
+    }];
+    const save = (month: string, transactions: Parameters<typeof repository.saveMonth>[4]) =>
+      repository.saveMonth(
+        month,
+        0,
+        [{ account_key: "cash-default", balance: 100 }],
+        investment,
+        transactions,
+        []
+      );
+    await save("2026-01", [
+      {
+        transaction_date: "2026-01-01", type: "支出",
+        category_key: food, category: "餐饮基础",
+        counterparty: "商户甲", product: "咖啡", amount: 10
+      },
+      {
+        transaction_date: "2026-01-02", type: "支出",
+        category_key: food, category: "餐饮基础",
+        counterparty: "商户甲", product: "咖啡", amount: 20
+      },
+      {
+        transaction_date: "2026-01-03", type: "支出",
+        category_key: food, category: "餐饮基础",
+        counterparty: "超市", product: "水果", amount: 15
+      }
+    ]);
+    await save("2026-02", [
+      {
+        transaction_date: "2026-02-01", type: "支出",
+        category_key: quality, category: "餐饮改善",
+        counterparty: "商户甲", product: "咖啡", amount: 30
+      },
+      {
+        transaction_date: "2026-02-02", type: "支出",
+        category_key: food, category: "餐饮基础",
+        counterparty: "超市", product: "水果", amount: 25
+      }
+    ]);
+    const currentRules = repository.rules();
+    await repository.saveRules(currentRules.revision, [
+      {
+        transaction_type: "支出",
+        counterparty: "商户甲",
+        product: "咖啡",
+        category_key: food,
+        category: "餐饮基础"
+      },
+      {
+        transaction_type: "支出",
+        counterparty: "商户甲",
+        product: "",
+        category_key: quality,
+        category: "餐饮改善"
+      }
+    ]);
+
+    const insights = repository.ruleInsights(2);
+    const coffee = insights.historical_products.find(
+      (row) => row.counterparty === "商户甲" && row.product === "咖啡"
+    );
+    const fruit = insights.historical_products.find(
+      (row) => row.counterparty === "超市" && row.product === "水果"
+    );
+    expect(insights.rules_revision).toBe(repository.rules().revision);
+    expect(coffee).toMatchObject({
+      occurrences: 3,
+      months_count: 2,
+      total_amount: 60,
+      average_amount: 20,
+      latest_amount: 30,
+      last_date: "2026-02-01",
+      has_category_conflict: true,
+      rule_status: "冲突",
+      matching_rule_count: 2
+    });
+    expect(fruit).toMatchObject({
+      occurrences: 2,
+      months_count: 2,
+      total_amount: 40,
+      rule_status: "未创建"
+    });
+    expect(insights.recommendations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        counterparty: "超市",
+        product: "水果",
+        occurrences: 2,
+        category: "餐饮基础",
+        category_confidence: 1,
+        has_category_conflict: false
+      })
+    ]));
+    expect(repository.rules().rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ rule_status: "冲突" })
+    ]));
   });
 
   it("filters big-ticket comparisons and applies the anomaly threshold", async () => {

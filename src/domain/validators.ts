@@ -1,8 +1,11 @@
 import type { CategoryDefinition, Transaction } from "../types";
 import { normalizeDate } from "./dates";
 
+export type ValidationSeverity = "警告" | "错误";
+
 export interface ValidationIssue extends Record<string, unknown> {
-  severity: "警告";
+  severity: ValidationSeverity;
+  blocking: boolean;
   type: string;
   product: string;
   field: string;
@@ -16,10 +19,12 @@ function issue(
   rowIndex: number,
   field: string,
   message: string,
-  suggestion: string
+  suggestion: string,
+  severity: ValidationSeverity = "警告"
 ): ValidationIssue {
   return {
-    severity: "警告",
+    severity,
+    blocking: severity === "错误",
     row_index: rowIndex,
     type: String(row.type ?? "").trim() || "-",
     product: String(row.product ?? "").trim() || "(空商品)",
@@ -41,9 +46,7 @@ export function validateTransactions(
 
   rows.forEach((row, index) => {
     const rawDate = String(row.transaction_date ?? "").trim();
-    if (!rawDate) {
-      issues.push(issue(row, index, "日期", "日期为空", "填写当前月份内的消费日期"));
-    } else {
+    if (rawDate) {
       try {
         const date = normalizeDate(rawDate);
         if (date.slice(0, 7) !== month) {
@@ -52,7 +55,8 @@ export function validateTransactions(
             index,
             "日期",
             `日期不属于当前月份 ${month}`,
-            "修改日期后再保存；系统不会自动移动跨月流水"
+            "修改日期后再保存；系统不会自动移动跨月流水",
+            "错误"
           ));
         }
       } catch {
@@ -61,7 +65,8 @@ export function validateTransactions(
           index,
           "日期",
           `无法识别日期：${rawDate}`,
-          "使用 YYYY-MM-DD、YYYY/MM/DD 或中文年月日"
+          "使用 YYYY-MM-DD、YYYY/MM/DD 或中文年月日",
+          "错误"
         ));
       }
     }
@@ -74,11 +79,17 @@ export function validateTransactions(
         "补充商品说明，方便后续分类和排查"
       ));
     }
-    const amount = Number(row.amount);
-    if (!Number.isFinite(amount)) {
-      issues.push(issue(row, index, "金额", "金额无法识别", "改为纯数字金额"));
-    } else if (amount <= 0) {
-      issues.push(issue(row, index, "金额", "金额必须大于 0", "删除无效行或填写真实金额"));
+    const rawAmount: unknown = row.amount;
+    const amountMissing = rawAmount === null
+      || rawAmount === undefined
+      || (typeof rawAmount === "string" && !rawAmount.trim());
+    const amount = Number(rawAmount);
+    if (amountMissing || !Number.isFinite(amount)) {
+      issues.push(issue(row, index, "金额", "金额无法识别", "改为纯数字金额", "错误"));
+    } else if (amount < 0) {
+      issues.push(issue(row, index, "金额", "金额不能为负数", "填写正数金额；系统会按流水类型表达收支方向", "错误"));
+    } else if (amount === 0) {
+      issues.push(issue(row, index, "金额", "金额为 0", "确认这是否是需要保留的占位流水", "警告"));
     }
 
     const type = String(row.type ?? "").trim();
@@ -88,7 +99,8 @@ export function validateTransactions(
         index,
         "收支",
         `无效收支类型：${type || "空"}`,
-        "请选择支出、收入、代付、加仓或提现"
+        "请选择支出、收入、代付、加仓或提现",
+        "错误"
       ));
       return;
     }

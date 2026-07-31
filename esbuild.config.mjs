@@ -4,7 +4,7 @@ import { builtinModules } from "node:module";
 import { copyFileSync, mkdirSync, rmSync } from "node:fs";
 
 const production = process.argv[2] === "production";
-const outputDirectory = "build/obsidian/asset-track";
+const outputDirectory = "build";
 rmSync(outputDirectory, { recursive: true, force: true });
 const context = await esbuild.context({
   entryPoints: ["src/main.ts"],

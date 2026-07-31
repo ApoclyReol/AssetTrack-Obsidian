@@ -26,7 +26,7 @@ styles.css
 - v1.2.0 的显示设置保存在插件 `data.json`，不改变数据库或备份格式。
 - 生产 `main.js` 打包 React、Recharts 和 SheetJS。根目录
   `THIRD_PARTY_NOTICES.md` 由 lockfile、当前插件版本和
-  `build/obsidian/asset-track/main.js` 自动生成，并由 `release:check` 验证。
+  `build/main.js` 自动生成，并由 `release:check` 验证。
 
 ## 发布后质量路线
 
@@ -44,6 +44,12 @@ styles.css
 
 ## 功能路线
 
+- **前端边界整理：** 将当前大型编辑器按 feature 拆分，根组件只保留导航、月份、
+  数据订阅和未保存保护；月度 reducer 继续是草稿唯一所有者。
+- **导入性能：** 在保持单文件 20 MiB 门禁、映射和预览契约不变的前提下，把
+  CSV/XLSX/XLS 解析移入 Worker。当前版本只消除了 Base64 副本。
+- **错误与国际化：** 用稳定消息键和结构化错误码替代中文全文/正则翻译，业务层
+  日志与用户文案分离，为第三种语言保留扩展边界。
 - 大数据量分析的分片、缓存和真实 Vault 性能采样；
 - 自动化 Electron/Obsidian 三平台 smoke；
 - 在不改变 SQLite 事实层前提下扩展支付平台导入模板；
@@ -53,8 +59,12 @@ styles.css
 ## 持续发布检查
 
 - tag、`package.json`、`manifest.json` 和 `versions.json` 版本同步；
-- `THIRD_PARTY_NOTICES.md` 的依赖版本、许可证、插件版本和 `main.js` 实际大小
-  与生产构建一致；
+- `THIRD_PARTY_NOTICES.md` 的依赖版本、许可证和插件版本与 lockfile 一致；
+  校验前规范化 CRLF/LF，不把平台相关 bundle 字节数写入受版本控制的声明；
+- 标签发布优先交给 Release workflow；工作流必须支持已有 Release 时覆盖上传，
+  避免手动 Release 与标签自动发布竞争；
+- 项目只使用 `build/` 作为产物目录；构建时清空该目录，根部只保留标准三文件，
+  不生成 `dist/`、`out/`、ZIP 或子目录；
 - GitHub Release 只包含 `main.js`、`manifest.json` 和 `styles.css`；
 - README、长期文档、CHANGELOG、SECURITY 和 release 日志与当前安装方式一致；
 - Git 不包含数据库、备份、真实账单、Vault、日志、密钥、依赖或构建缓存。

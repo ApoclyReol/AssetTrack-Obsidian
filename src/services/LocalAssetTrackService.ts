@@ -15,6 +15,7 @@ import type {
   FixedAsset,
   MonthCreationPolicy,
   MonthWorkspace,
+  RuleInsights,
   Transaction
 } from "../types";
 import { BackupService } from "./BackupService";
@@ -171,6 +172,11 @@ export class LocalAssetTrackService implements AssetTrackService {
   }> {
     this.ready();
     return this.repository.ruleCandidates(month, rows, minOccurrences);
+  }
+
+  async ruleInsights(minOccurrences = 2): Promise<RuleInsights> {
+    this.ready();
+    return this.repository.ruleInsights(minOccurrences);
   }
 
   async debts(): Promise<{
