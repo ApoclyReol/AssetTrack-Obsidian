@@ -13,6 +13,7 @@ import type {
   MonthOverview,
   MonthWorkspace,
   RuleCandidate,
+  RecurringExpenseSummary,
   Transaction
 } from "../types";
 import {
@@ -141,7 +142,13 @@ function fixedAssetFromRow(row: Row): FixedAsset {
 }
 
 export class AssetTrackRepository {
-  constructor(private readonly manager: DatabaseManager) {}
+  constructor(
+    private readonly manager: DatabaseManager,
+    private readonly options: {
+      reconciliationTolerance: number;
+      largeExpenseThreshold: number;
+    } = { reconciliationTolerance: 100, largeExpenseThreshold: 1000 }
+  ) {}
 
   initialize(): void {
     this.manager.open();
@@ -781,7 +788,7 @@ export class AssetTrackRepository {
     }
     return new Map([...grouped].map(([month, values]) => [
       month,
-      calculateMonthly(values, categories)
+      calculateMonthly(values, categories, this.options.largeExpenseThreshold)
     ]));
   }
 
@@ -815,7 +822,8 @@ export class AssetTrackRepository {
         principal: Number(investment?.principal ?? 0),
         market_value: Number(investment?.market_value ?? 0),
         investment_cash: Number(investment?.cash_balance ?? 0),
-        monthly: monthly.get(month) ?? calculateMonthly([], categories)
+        monthly: monthly.get(month)
+          ?? calculateMonthly([], categories, this.options.largeExpenseThreshold)
       };
     }));
   }
@@ -917,7 +925,9 @@ export class AssetTrackRepository {
     });
     const newBig = [...products]
       .filter(([product, value]) =>
-        product && value.amount >= 1000 && !historyProducts.has(product)
+        product
+        && value.amount >= this.options.largeExpenseThreshold
+        && !historyProducts.has(product)
       )
       .map(([product, value]) => ({
         "商品": product,
@@ -943,7 +953,11 @@ export class AssetTrackRepository {
     const rowIndex = allRows.findIndex((row) => row.month === month);
     if (rowIndex < 0) return { available: false };
     const row = allRows[rowIndex];
-    const monthly = calculateMonthly(transactions, categories);
+    const monthly = calculateMonthly(
+      transactions,
+      categories,
+      this.options.largeExpenseThreshold
+    );
     const cashAccounts = this.cashAccounts(db, month);
     const cashTotal = sum(cashAccounts.map((account) => account.balance));
     const investments = this.investmentAccounts(db, month);
@@ -958,7 +972,11 @@ export class AssetTrackRepository {
         "SELECT * FROM transactions WHERE month=? ORDER BY id"
       ).all(previousValue)).map(transactionFromRow)
       : [];
-    const previousMonthly = calculateMonthly(previousTransactions, categories);
+    const previousMonthly = calculateMonthly(
+      previousTransactions,
+      categories,
+      this.options.largeExpenseThreshold
+    );
     const previousInvestment = previousValue
       ? db.prepare(`
           SELECT COUNT(*) AS count,
@@ -998,6 +1016,8 @@ export class AssetTrackRepository {
         surplus: roundHalfEven(surplus),
         savings_rate: row.total_income > 0
           ? roundHalfEven(surplus / row.total_income * 100) : null,
+        cost_assets: row.cost_assets,
+        market_net_assets: row.market_net_assets,
         total_assets: row.total_assets
       },
       cash_accounts: cashAccounts.map((account) => ({
@@ -1045,7 +1065,10 @@ export class AssetTrackRepository {
           net_expense: row.theoretical_expense
         },
         discrepancy: row.discrepancy,
-        explanation: explainReconciliation(row.discrepancy)
+        explanation: explainReconciliation(
+          row.discrepancy,
+          this.options.reconciliationTolerance
+        )
       },
       anomalies: this.anomalyRows(db, month, transactions, categories),
       structure: {
@@ -1097,7 +1120,11 @@ export class AssetTrackRepository {
       fixed_assets: rows(db.prepare(
         "SELECT * FROM fixed_assets WHERE month=? ORDER BY id"
       ).all(month)).map(fixedAssetFromRow),
-      computed: calculateMonthly(transactions, categories) as unknown as Record<string, unknown>,
+      computed: calculateMonthly(
+        transactions,
+        categories,
+        this.options.largeExpenseThreshold
+      ) as unknown as Record<string, unknown>,
       overview: this.monthOverview(db, month, transactions, categories)
     };
   }
@@ -1499,7 +1526,8 @@ export class AssetTrackRepository {
         }),
       big_tickets: expenses.filter((row) => {
         const category = text(row.category);
-        return metadata.get(category)?.is_big_ticket || Number(row.amount ?? 0) >= 1000;
+        return metadata.get(category)?.is_big_ticket
+          || Number(row.amount ?? 0) >= this.options.largeExpenseThreshold;
       }).map((row) => ({
         month: text(row.month),
         product: text(row.product),
@@ -1529,6 +1557,7 @@ export class AssetTrackRepository {
         },
         latest: null,
         rolling_rows: [],
+        recurring_expenses: [],
         all_trend_rows: [],
         cost_audit: {
           months_count: 1,
@@ -1565,6 +1594,7 @@ export class AssetTrackRepository {
       rolling_rows: full.filter(
         (row) => row.month >= rollingStart && row.month <= latest.month
       ),
+      recurring_expenses: this.recurringExpenses(db, latest.month),
       all_trend_rows: full,
       cost_audit: this.annualCostAudit(db, year, annual, this.categoryRows(db))
     };
@@ -1573,7 +1603,15 @@ export class AssetTrackRepository {
   currentAsset(): CurrentAsset {
     const db = this.db();
     const latest = this.getMonths(db).at(-1);
-    if (!latest) return { month: null, total_assets: 0, fixed_assets: [] };
+    if (!latest) {
+      return {
+        month: null,
+        cost_assets: 0,
+        market_net_assets: 0,
+        total_assets: 0,
+        fixed_assets: []
+      };
+    }
     const cash = Number((db.prepare(`
       SELECT COALESCE(SUM(balance),0) AS total
       FROM cash_account_balances WHERE month=?
@@ -1582,18 +1620,85 @@ export class AssetTrackRepository {
       SELECT COALESCE(SUM(principal),0) AS total
       FROM investment_account_balances WHERE month=?
     `).get(latest) as Row).total ?? 0);
+    const investment = db.prepare(`
+      SELECT COALESCE(SUM(market_value),0) AS market_value,
+             COALESCE(SUM(cash_balance),0) AS cash_balance
+      FROM investment_account_balances WHERE month=?
+    `).get(latest) as Row;
+    const marketValue = Number(investment.market_value ?? 0);
+    const investmentCash = Number(investment.cash_balance ?? 0);
     const debt = this.activeDebt(db, latest);
+    const costAssets = roundHalfEven(cash - debt + principal);
+    const marketNetAssets = roundHalfEven(cash - debt + marketValue + investmentCash);
     return {
       month: latest,
       cash: roundHalfEven(cash),
       debt,
       principal: roundHalfEven(principal),
-      total_assets: roundHalfEven(cash - debt + principal),
+      market_value: roundHalfEven(marketValue),
+      investment_cash: roundHalfEven(investmentCash),
+      cost_assets: costAssets,
+      market_net_assets: marketNetAssets,
+      total_assets: costAssets,
       fixed_assets: rows(db.prepare(`
         SELECT * FROM fixed_assets
         WHERE month=? AND status IN ('在用','闲置') ORDER BY id
       `).all(latest)).map(fixedAssetFromRow),
       fixed_assets_note: "固定资产记录不计入总资产"
     };
+  }
+
+  private recurringExpenses(
+    db: DatabaseSync,
+    latestMonth: string
+  ): RecurringExpenseSummary[] {
+    const selectedMonths = new Set(
+      this.getMonths(db).filter((month) => month <= latestMonth).slice(-12)
+    );
+    const result = new Map<string, {
+      category: string;
+      months: Set<string>;
+      count: number;
+      total: number;
+      latestAmount: number;
+      lastDate: string;
+    }>();
+    rows(db.prepare(`
+      SELECT t.month,t.transaction_date,t.category,t.product,t.amount
+      FROM transactions t
+      JOIN category_definitions c ON c.category_key=t.category_key
+      WHERE t.type='支出' AND c.pattern='周期'
+      ORDER BY t.transaction_date,t.id
+    `).all()).filter((row) => selectedMonths.has(text(row.month))).forEach((row) => {
+      const product = text(row.product);
+      const current = result.get(product) ?? {
+        category: text(row.category),
+        months: new Set<string>(),
+        count: 0,
+        total: 0,
+        latestAmount: 0,
+        lastDate: ""
+      };
+      current.months.add(text(row.month));
+      current.count += 1;
+      current.total += Number(row.amount ?? 0);
+      const date = text(row.transaction_date) || `${text(row.month)}-01`;
+      if (date >= current.lastDate) {
+        current.lastDate = date;
+        current.latestAmount = Number(row.amount ?? 0);
+        current.category = text(row.category);
+      }
+      result.set(product, current);
+    });
+    return [...result].map(([product, row]) => ({
+      product,
+      category: row.category,
+      months_count: row.months.size,
+      transaction_count: row.count,
+      total: roundHalfEven(row.total),
+      average_amount: roundHalfEven(row.total / row.count),
+      latest_amount: roundHalfEven(row.latestAmount),
+      last_date: row.lastDate
+    })).sort((left, right) => right.total - left.total);
   }
 }

@@ -1,6 +1,10 @@
 export interface AssetTrackSettings {
   dataDirectory: string;
   csvMappings: CsvMappingProfile[];
+  baseCurrency: string;
+  currencyFormat: "standard" | "accounting";
+  reconciliationTolerance: number;
+  largeExpenseThreshold: number;
 }
 
 export type ImportMode = "append" | "replace";
@@ -104,6 +108,10 @@ export interface CurrentAsset {
   cash?: number;
   debt?: number;
   principal?: number;
+  market_value?: number;
+  investment_cash?: number;
+  cost_assets: number;
+  market_net_assets: number;
   total_assets: number;
   fixed_assets: FixedAsset[];
   fixed_assets_note?: string;
@@ -125,6 +133,8 @@ export interface MonthOverview {
     total_expense: number;
     surplus: number;
     savings_rate: number | null;
+    cost_assets: number;
+    market_net_assets: number;
     total_assets: number;
   };
   cash_accounts?: Array<{
@@ -198,6 +208,8 @@ export interface AnnualRow {
   debt: number;
   principal: number;
   inv_position: number;
+  cost_assets: number;
+  market_net_assets: number;
   total_assets: number;
   inv_profit: number;
   inv_roi: number;
@@ -215,6 +227,17 @@ export interface AnnualRow {
   daily: number;
   occasional: number;
   discrepancy: number | null;
+}
+
+export interface RecurringExpenseSummary {
+  product: string;
+  category: string;
+  months_count: number;
+  transaction_count: number;
+  total: number;
+  average_amount: number;
+  latest_amount: number;
+  last_date: string;
 }
 
 export interface AnnualCostAudit {
@@ -268,6 +291,7 @@ export interface AnnualOverview {
   };
   latest: AnnualRow | null;
   rolling_rows: AnnualRow[];
+  recurring_expenses: RecurringExpenseSummary[];
   all_trend_rows: AnnualRow[];
   cost_audit: AnnualCostAudit;
 }

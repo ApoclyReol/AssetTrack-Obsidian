@@ -4,6 +4,7 @@ import type {
   MonthOverview,
   Transaction
 } from "../types";
+import { money } from "../domain/moneyFormat";
 
 export const INFLOW_COLOR = "var(--asset-track-inflow)";
 export const OUTFLOW_COLOR = "var(--asset-track-outflow)";
@@ -72,10 +73,11 @@ export function savingsColor(value: number | null): string {
 }
 
 export function reconciliationStatus(
-  value: number | null
+  value: number | null,
+  tolerance = 100
 ): "多消费少支出" | "少消费多支出" | "平账" | "" {
   if (value === null || !Number.isFinite(value)) return "";
-  if (Math.abs(value) < 100) return "平账";
+  if (Math.abs(value) <= tolerance) return "平账";
   if (value > 0) return "多消费少支出";
   if (value < 0) return "少消费多支出";
   return "平账";
@@ -102,9 +104,7 @@ export interface AnomalyDisplayRow {
 function signedAmount(value: unknown): string {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return "—";
-  return `${parsed > 0 ? "+" : ""}${new Intl.NumberFormat("zh-CN", {
-    maximumFractionDigits: 1
-  }).format(parsed)}`;
+  return money(parsed);
 }
 
 export function buildAnomalyDisplayRows(

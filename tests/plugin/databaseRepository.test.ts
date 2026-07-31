@@ -274,8 +274,17 @@ describe("node:sqlite schema 9 repository", () => {
       total_income: 6000,
       total_expense: 1500,
       total_assets: 1700,
+      cost_assets: 1700,
+      market_net_assets: 1750,
       savings_rate: 75,
       discrepancy: -4100
+    });
+    expect(repository.currentAsset()).toMatchObject({
+      cost_assets: 1700,
+      market_net_assets: 1750,
+      total_assets: 1700,
+      market_value: 330,
+      investment_cash: 20
     });
     expect((await repository.getMonth("2026-01")).overview.investment)
       .toMatchObject({
@@ -286,6 +295,54 @@ describe("node:sqlite schema 9 repository", () => {
           percent_delta: 52.2
         }
       });
+  });
+
+  it("summarizes recurring expenses by product without changing schema", async () => {
+    const { repository, manager } = fixture();
+    const subscription = categoryKey("订阅服务");
+    await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 100 }],
+      [{
+        account_key: "investment-default",
+        principal: 0,
+        market_value: 0,
+        cash_balance: 0
+      }],
+      [
+        {
+          transaction_date: "2026-01-02",
+          type: "支出",
+          category_key: subscription,
+          category: "订阅服务",
+          counterparty: "平台甲",
+          product: "会员",
+          amount: 10
+        },
+        {
+          transaction_date: "2026-01-20",
+          type: "支出",
+          category_key: subscription,
+          category: "订阅服务",
+          counterparty: "平台乙",
+          product: "会员",
+          amount: 20
+        }
+      ],
+      []
+    );
+    expect(repository.annual("2026").recurring_expenses).toEqual([{
+      product: "会员",
+      category: "订阅服务",
+      months_count: 1,
+      transaction_count: 2,
+      total: 30,
+      average_amount: 15,
+      latest_amount: 20,
+      last_date: "2026-01-20"
+    }]);
+    expect(manager.validate(false).schema_version).toBe(9);
   });
 
   it("matches the frozen Python obsidian-v1 golden fixture", async () => {

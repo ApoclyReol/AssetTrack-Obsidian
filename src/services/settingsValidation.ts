@@ -4,6 +4,7 @@ import type {
   CsvMappingProfile
 } from "../types";
 import { normalizeDataDirectory } from "./workspacePath";
+import { isCurrencyCode } from "../domain/moneyFormat";
 
 export interface SettingsParseResult {
   settings: AssetTrackSettings;
@@ -99,9 +100,33 @@ export function parseAssetTrackSettings(value: unknown): SettingsParseResult {
   if (source.csvMappings !== undefined && !Array.isArray(source.csvMappings)) {
     issues.push("已忽略格式错误的账单映射列表");
   }
+  const baseCurrency = typeof source.baseCurrency === "string"
+    && isCurrencyCode(source.baseCurrency.toUpperCase())
+    ? source.baseCurrency.toUpperCase()
+    : "CNY";
+  if (source.baseCurrency !== undefined && baseCurrency === "CNY" && source.baseCurrency !== "CNY") {
+    issues.push("已忽略无效基础货币");
+  }
+  const currencyFormat = source.currencyFormat === "accounting"
+    ? "accounting" : "standard";
+  const reconciliationTolerance = typeof source.reconciliationTolerance === "number"
+    && Number.isFinite(source.reconciliationTolerance)
+    && source.reconciliationTolerance >= 0
+    ? source.reconciliationTolerance : 100;
+  const largeExpenseThreshold = typeof source.largeExpenseThreshold === "number"
+    && Number.isFinite(source.largeExpenseThreshold)
+    && source.largeExpenseThreshold > 0
+    ? source.largeExpenseThreshold : 1000;
 
   return {
-    settings: { dataDirectory, csvMappings },
+    settings: {
+      dataDirectory,
+      csvMappings,
+      baseCurrency,
+      currencyFormat,
+      reconciliationTolerance,
+      largeExpenseThreshold
+    },
     issues
   };
 }

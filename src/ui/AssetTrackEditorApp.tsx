@@ -2,10 +2,12 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
   Fragment,
   type ChangeEvent,
+  type Reducer,
   type ReactNode
 } from "react";
 import { Notice } from "obsidian";
@@ -19,6 +21,7 @@ import type {
   CsvColumnMapping,
   CsvImportPreview,
   CsvInspection,
+  AssetTrackSettings,
   FixedAsset,
   ImportMode,
   MonthCreationPolicy,
@@ -55,9 +58,11 @@ import {
   virtualSpacerBlocks
 } from "./virtualRows";
 import { businessLabel, displayError, getLocale, t } from "../i18n";
+import { configureMoneyFormat, money } from "../domain/moneyFormat";
 
 interface Props {
   api: AssetTrackService;
+  settings: AssetTrackSettings;
   hostWindow: Window;
   confirmAction: (
     title: string,
@@ -119,36 +124,26 @@ function clone<T>(data: T): T {
   return structuredClone(data);
 }
 
-function readFileBase64(file: File): Promise<string> {
+type DraftAction =
+  | { type: "reset"; workspace: MonthWorkspace }
+  | { type: "edit"; workspace: MonthWorkspace };
+
+function draftReducer(
+  _state: MonthWorkspace | null,
+  action: DraftAction
+): MonthWorkspace | null {
+  return action.workspace;
+}
+
+async function readImportFile(file: File): Promise<ArrayBuffer> {
   if (file.size > MAX_IMPORT_FILE_BYTES) {
-    return Promise.reject(
-      new Error(t(
-        "账单文件不能超过 20 MiB；请拆分后重新导入",
-        "Statement files cannot exceed 20 MiB. Split the file and import it again."
-      ))
-    );
+    throw new AssetTrackError({
+      code: "IMPORT_FILE_TOO_LARGE",
+      status: 422,
+      params: { limitMiB: 20 }
+    });
   }
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error ?? new Error(t(
-      "账单文件读取失败",
-      "Failed to read the statement file."
-    )));
-    reader.onload = () => {
-      if (typeof reader.result !== "string") {
-        reject(new Error(t("账单文件编码失败", "Failed to encode the statement file.")));
-        return;
-      }
-      const result = reader.result;
-      const separator = result.indexOf(",");
-      if (separator < 0) {
-        reject(new Error(t("账单文件编码失败", "Failed to encode the statement file.")));
-        return;
-      }
-      resolve(result.slice(separator + 1));
-    };
-    reader.readAsDataURL(file);
-  });
+  return file.arrayBuffer();
 }
 
 function compareValues(left: unknown, right: unknown): number {
@@ -218,6 +213,7 @@ function SortButton({
 
 export function AssetTrackEditorApp({
   api,
+  settings,
   hostWindow,
   confirmAction,
   initialMode,
@@ -229,6 +225,11 @@ export function AssetTrackEditorApp({
   getCsvMapping,
   saveCsvMapping
 }: Props) {
+  configureMoneyFormat({
+    locale: getLocale(),
+    currency: settings.baseCurrency,
+    currencyFormat: settings.currencyFormat
+  });
   const [mode, setMode] = useState<EditorMode>(initialMode);
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>(initialAnalysisMode);
   const [months, setMonths] = useState<string[]>([]);
@@ -375,6 +376,7 @@ export function AssetTrackEditorApp({
           initialMode={analysisMode}
           onModeChange={setAnalysisMode}
           dataVersion={dataVersion}
+          reconciliationTolerance={settings.reconciliationTolerance}
         />
       )}
       {mode === "transactions" && month && (
@@ -459,8 +461,9 @@ function MonthEditor({
     mapping: CsvColumnMapping
   ) => Promise<void>;
 }) {
-  const [base, setBase] = useState<MonthWorkspace | null>(null);
-  const [draft, setDraft] = useState<MonthWorkspace | null>(null);
+  const [draft, dispatchDraft] = useReducer<
+    Reducer<MonthWorkspace | null, DraftAction>
+  >(draftReducer, null);
   const [categories, setCategories] = useState<CategoryDefinition[]>([]);
   const [issues, setIssues] = useState<Array<Record<string, unknown>>>([]);
   const [deleteConfirm, setDeleteConfirm] = useState("");
@@ -486,7 +489,7 @@ function MonthEditor({
   const csvInputRef = useRef<HTMLInputElement>(null);
   const [csvSource, setCsvSource] = useState<{
     filename: string;
-    contentBase64: string;
+    content: ArrayBuffer;
     inspection: CsvInspection;
   } | null>(null);
 
@@ -494,8 +497,7 @@ function MonthEditor({
     setState({ kind: "pending", message: t("加载月份…", "Loading month…") });
     try {
       const [data, categoryData] = await Promise.all([api.month(month), api.categories()]);
-      setBase(clone(data));
-      setDraft(clone(data));
+      dispatchDraft({ type: "reset", workspace: clone(data) });
       setCategories(categoryData.rows);
       const candidateData = await api.ruleCandidates(month, data.transactions);
       setRuleCandidates(candidateData);
@@ -522,9 +524,9 @@ function MonthEditor({
   useEffect(() => void load(), [load]);
 
   const mark = (next: MonthWorkspace) => {
-    setDraft(next);
+    dispatchDraft({ type: "edit", workspace: next });
     setIssues([]);
-    onDirty(JSON.stringify(next) !== JSON.stringify(base));
+    onDirty(true);
   };
   const refreshRuleCandidates = async (rows: Transaction[]) => {
     const result = await api.ruleCandidates(month, rows);
@@ -653,8 +655,7 @@ function MonthEditor({
         transactions: draft.transactions,
         fixed_assets: draft.fixed_assets
       });
-      setBase(clone(saved));
-      setDraft(clone(saved));
+      dispatchDraft({ type: "reset", workspace: clone(saved) });
       onDirty(false);
       await onSaved();
       setState({ kind: "success", message: t(
@@ -672,13 +673,13 @@ function MonthEditor({
     if (!file) return;
     setState({ kind: "pending", message: t("解析账单…", "Parsing statement…") });
     try {
-      const contentBase64 = await readFileBase64(file);
+      const content = await readImportFile(file);
       const inspection = await api.inspectCsv(
         month,
         file.name,
-        contentBase64
+        content
       );
-      setCsvSource({ filename: file.name, contentBase64, inspection });
+      setCsvSource({ filename: file.name, content, inspection });
       setState({ kind: "idle" });
     } catch (error) {
       setState({ kind: "error", message: messageFor(error) });
@@ -793,7 +794,7 @@ function MonthEditor({
             api.previewMappedCsv(
               month,
               csvSource.filename,
-              csvSource.contentBase64,
+              csvSource.content,
               mapping
             )
           }
@@ -1286,7 +1287,10 @@ function TransactionSummaryTable({
                   <td>{businessLabel(group.type)}</td>
                   <td title={group.variants.join("、")}>{group.product}</td>
                   <td>{group.count}</td>
-                  <td>{group.amount.toFixed(1)}</td>
+                  <td>{money(
+                    group.amount,
+                    group.type as "收入" | "支出" | "代付" | "加仓" | "提现"
+                  )}</td>
                   <td>
                     {group.firstDate === group.lastDate
                       ? group.lastDate

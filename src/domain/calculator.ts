@@ -33,7 +33,8 @@ export const LEGACY_CATEGORY_ALIASES: Record<string, string> = {
 
 export function calculateMonthly(
   rows: Transaction[],
-  categories: CategoryDefinition[]
+  categories: CategoryDefinition[],
+  largeExpenseThreshold = 1000
 ): MonthlyCalculation {
   const metadata = new Map(categories.map((row) => [row.name, row]));
   const categorySummary: Record<string, number> = {};
@@ -51,7 +52,7 @@ export function calculateMonthly(
     categorySummary[category] = (categorySummary[category] ?? 0) + Number(row.amount || 0);
     const definition = metadata.get(category);
     const amount = Number(row.amount || 0);
-    if (definition?.is_big_ticket || amount >= 1000) {
+    if (definition?.is_big_ticket || amount >= largeExpenseThreshold) {
       bigTickets.push({ product: row.product, amount, category });
     }
     const necessity = definition?.necessity ?? "必要";
@@ -107,6 +108,7 @@ export function buildAnnualRows(inputs: AnnualInput[]): ExtendedAnnualRow[] {
       const position = input.market_value + input.investment_cash;
       const profit = position - input.principal;
       const totalAssets = input.cash - input.debt + input.principal;
+      const marketNetAssets = input.cash - input.debt + position;
       const previous = index > 0 ? all[index - 1] : null;
       const previousPosition = previous
         ? previous.market_value + previous.investment_cash : 0;
@@ -131,6 +133,8 @@ export function buildAnnualRows(inputs: AnnualInput[]): ExtendedAnnualRow[] {
         debt: roundHalfEven(input.debt),
         principal: roundHalfEven(input.principal),
         inv_position: roundHalfEven(position),
+        cost_assets: roundHalfEven(totalAssets),
+        market_net_assets: roundHalfEven(marketNetAssets),
         total_assets: roundHalfEven(totalAssets),
         inv_profit: roundHalfEven(profit),
         inv_roi: roundHalfEven(input.principal > 0 ? profit / input.principal * 100 : 0),
@@ -177,10 +181,6 @@ export function explainReconciliation(
       suggestions: ["补齐上月现金快照后再进行跨月对账。"]
     };
   }
-  const formatted = discrepancy.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  });
   if (Math.abs(discrepancy) < 0.01) {
     return {
       level: "success",
@@ -194,7 +194,7 @@ export function explainReconciliation(
     return {
       level: "success",
       title: "差额可忽略",
-      summary: `当前差额为 ¥${formatted}，在 ¥${tolerance.toLocaleString("en-US")} 以内。`,
+      summary: "当前差额在设置的平账容差以内。",
       causes: [],
       suggestions: []
     };
@@ -203,7 +203,7 @@ export function explainReconciliation(
   return {
     level: "error",
     title: "存在需要排查的对账差额",
-    summary: `当前差额为 ¥${formatted}，方向为${positive ? "实际流水偏高" : "资产推导偏高"}。`,
+    summary: `当前差额超出平账容差，方向为${positive ? "实际流水偏高" : "资产推导偏高"}。`,
     causes: positive
       ? [
         "流水记录的净支出高于资产变动推导值。",

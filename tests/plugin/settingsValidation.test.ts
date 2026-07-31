@@ -30,7 +30,11 @@ describe("settings validation", () => {
     });
     expect(result.settings).toEqual({
       dataDirectory: "",
-      csvMappings: []
+      csvMappings: [],
+      baseCurrency: "CNY",
+      currencyFormat: "standard",
+      reconciliationTolerance: 100,
+      largeExpenseThreshold: 1000
     });
     expect(result.issues).toHaveLength(3);
   });

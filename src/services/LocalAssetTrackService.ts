@@ -30,9 +30,13 @@ export class LocalAssetTrackService implements AssetTrackService {
   constructor(
     private readonly manager: DatabaseManager,
     private readonly workspaceRoot: string,
-    private readonly pluginVersion: string
+    private readonly pluginVersion: string,
+    options: {
+      reconciliationTolerance: number;
+      largeExpenseThreshold: number;
+    } = { reconciliationTolerance: 100, largeExpenseThreshold: 1000 }
   ) {
-    this.repository = new AssetTrackRepository(manager);
+    this.repository = new AssetTrackRepository(manager, options);
     this.backups = new BackupService(manager, pluginVersion);
   }
 
@@ -124,22 +128,22 @@ export class LocalAssetTrackService implements AssetTrackService {
   async inspectCsv(
     month: string,
     filename: string,
-    contentBase64: string
+    content: ArrayBuffer
   ): Promise<CsvInspection> {
-    return inspectCsv(month, filename, Buffer.from(contentBase64, "base64"));
+    return inspectCsv(month, filename, Buffer.from(content));
   }
 
   async previewMappedCsv(
     month: string,
     filename: string,
-    contentBase64: string,
+    content: ArrayBuffer,
     mapping: CsvColumnMapping
   ): Promise<CsvImportPreview> {
     this.ready();
     const preview = previewCsv(
       month,
       filename,
-      Buffer.from(contentBase64, "base64"),
+      Buffer.from(content),
       mapping
     );
     const categories = this.repository.categories().rows;

@@ -42,8 +42,8 @@ docs/                                   当前架构、用户、开发与发行�
 ## 当前 handoff
 
 - Asset Track 已在 Community Plugins 上线，社区目录是推荐安装与更新方式；
-  v1.1.0 是当前版本，保持 schema 9 和财务口径并提供跟随 Obsidian 语言的中英文
-  界面。当前仓库只进行常规维护，没有待发布的新功能版本。
+  v1.2.0 是当前版本，保持 schema 9 和核心对账口径，新增金额与阈值设置、资金
+  投入资产/市场净资产双口径和只读周期消费面板。
 - 确认操作使用 Obsidian 原生 Modal，CSV 映射窗口支持焦点陷阱、Escape 和状态
   播报；流水逐项表按可视行渲染，分块编号为线性预计算。
 - schema 8 私有数据已在 2026-07-28 使用一次性离线流程迁移并核验；迁移工具及
@@ -55,7 +55,7 @@ docs/                                   当前架构、用户、开发与发行�
 - 插件实例共享 `DatabaseManager`、Repository、Service、写入队列和数据变更事件；
   每个 ItemView 仍独立保存草稿与 dirty 状态。
 - 继续维护前先读 `docs/00-reading-guide.md`；本次实现、兼容边界、测试和后续
-  注意事项详见 `docs/logs/release-v1.1.0.md`。
+  注意事项详见 `docs/logs/release-v1.2.0.md`。
 - 后续每次正式更新都在 `docs/logs/` 新增 `release-vN.N.N.md`，并同步修改受影响
   的编号长期文档，不把当前事实只留在 release 日志中。
 

@@ -13,6 +13,7 @@ import type AssetTrackPlugin from "../main";
 import type { CsvColumnMapping } from "../types";
 import { confirmAction } from "../ui/ConfirmModal";
 import { displayError, t } from "../i18n";
+import { AssetTrackErrorBoundary } from "../ui/AssetTrackErrorBoundary";
 
 export interface AssetTrackViewState extends Record<string, unknown> {
   mode?: EditorMode;
@@ -171,21 +172,26 @@ export class AssetTrackEditorView extends ItemView {
       this.root = createRoot(this.contentEl);
     }
     this.root?.render(
-      createElement(AssetTrackEditorApp, {
-        api: this.plugin.api,
-        initialMode: this.state.mode ?? "analysis",
-        initialAnalysisMode: this.state.analysisMode ?? "home",
-        initialMonth: this.state.month,
-        hostWindow: this.contentEl.ownerDocument.defaultView
-          ?? this.containerEl.ownerDocument.defaultView
-          ?? activeWindow,
-        confirmAction: this.confirmAction,
-        onDirtyChange: this.onDirtyChange,
-        onStateChange: this.onStateChange,
-        subscribeDataChanges: this.subscribeDataChanges,
-        getCsvMapping: this.getCsvMapping,
-        saveCsvMapping: this.saveCsvMapping
-      })
+      createElement(
+        AssetTrackErrorBoundary,
+        { onReload: () => this.refresh() },
+        createElement(AssetTrackEditorApp, {
+          api: this.plugin.api,
+          settings: this.plugin.settings,
+          initialMode: this.state.mode ?? "analysis",
+          initialAnalysisMode: this.state.analysisMode ?? "home",
+          initialMonth: this.state.month,
+          hostWindow: this.contentEl.ownerDocument.defaultView
+            ?? this.containerEl.ownerDocument.defaultView
+            ?? activeWindow,
+          confirmAction: this.confirmAction,
+          onDirtyChange: this.onDirtyChange,
+          onStateChange: this.onStateChange,
+          subscribeDataChanges: this.subscribeDataChanges,
+          getCsvMapping: this.getCsvMapping,
+          saveCsvMapping: this.saveCsvMapping
+        })
+      )
     );
   }
 

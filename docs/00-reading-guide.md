@@ -23,7 +23,7 @@
 
 每个发行版本新增一份 `docs/logs/release-vN.N.N.md`，记录用户可见变化、数据兼容
 边界、验证结果和后续 handoff。当前版本详见
-[Release v1.1.0](logs/release-v1.1.0.md)，历史索引见
+[Release v1.2.0](logs/release-v1.2.0.md)，历史索引见
 [logs/README](logs/README.md)。
 
 ## 事实优先级

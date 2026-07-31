@@ -1,6 +1,10 @@
 # 07 构建与发行
 
-当前发布文案见 [Release v1.1.0](logs/release-v1.1.0.md)。
+v1.2.0 标签必须为 `1.2.0`，并与 `package.json`、`manifest.json` 和
+`versions.json` 完全一致。发布前除标准命令外，应在中英文界面检查金额设置、
+双资产趋势、周期消费表以及 CSV/XLSX/XLS 导入。
+
+当前发布文案见 [Release v1.2.0](logs/release-v1.2.0.md)。
 
 ## 安装产物
 

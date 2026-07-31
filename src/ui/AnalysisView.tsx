@@ -31,6 +31,7 @@ import {
   savingsColor
 } from "./analysisModel";
 import { businessLabel, displayError, getLocale, t } from "../i18n";
+import { money } from "../domain/moneyFormat";
 
 const INFLOW = INFLOW_COLOR;
 const OUTFLOW = OUTFLOW_COLOR;
@@ -54,17 +55,6 @@ type LoadState<T> =
   | { kind: "loading" }
   | { kind: "error"; message: string }
   | { kind: "ready"; data: T };
-
-function money(value: unknown): string {
-  const parsed = Number(value);
-  return Number.isFinite(parsed)
-    ? new Intl.NumberFormat(getLocale(), {
-        style: "currency",
-        currency: "CNY",
-        maximumFractionDigits: 1
-      }).format(parsed)
-    : "—";
-}
 
 function percent(value: unknown): string {
   const parsed = Number(value);
@@ -207,7 +197,8 @@ export function AnalysisView({
   onMonthChange,
   initialMode,
   onModeChange,
-  dataVersion
+  dataVersion,
+  reconciliationTolerance
 }: {
   api: AssetTrackService;
   months: string[];
@@ -216,6 +207,7 @@ export function AnalysisView({
   initialMode: AnalysisMode;
   onModeChange: (mode: AnalysisMode) => void;
   dataVersion: number;
+  reconciliationTolerance: number;
 }) {
   const [mode, setMode] = useState<AnalysisMode>(initialMode);
   useEffect(() => setMode(initialMode), [initialMode]);
@@ -263,7 +255,12 @@ export function AnalysisView({
         <AnnualAnalysis api={api} year={year} dataVersion={dataVersion} />
       )}
       {mode === "monthly" && month && (
-        <MonthlyAnalysis api={api} month={month} dataVersion={dataVersion} />
+        <MonthlyAnalysis
+          api={api}
+          month={month}
+          dataVersion={dataVersion}
+          reconciliationTolerance={reconciliationTolerance}
+        />
       )}
       {mode === "monthly" && !month && <Empty text={t("尚无可分析月份。", "No months are available for analysis.")} />}
     </main>
@@ -307,9 +304,15 @@ function HomeAnalysis({
       <Cards items={[
         { label: t("现金", "Cash"), value: money(current.cash) },
         { label: t("理财本金", "Investment principal"), value: money(current.principal) },
-        { label: t("借款", "Debt"), value: money(current.debt) },
-        { label: t("总资产", "Total assets"), value: money(current.total_assets) }
+        { label: t("资金投入资产", "Cost assets"), value: money(current.cost_assets) },
+        { label: t("市场净资产", "Market net assets"), value: money(current.market_net_assets) }
       ]} />
+      <p className="asset-track-analysis-note">
+        {t(
+          "资金投入资产用于稳定对账；市场净资产使用理财市值与理财账户现金反映当前财富。",
+          "Cost assets keep reconciliation stable; market net assets use investment market value and account cash to reflect current wealth."
+        )}
+      </p>
       {metrics && (
         <Cards items={[
           { label: t("最近月收入", "Latest monthly income"), value: money(metrics.total_income), tone: "inflow" },
@@ -365,6 +368,9 @@ function AnnualAnalysis({
   dataVersion: number;
 }) {
   const [state, setState] = useState<LoadState<AnnualOverview>>({ kind: "loading" });
+  const [recurringSort, setRecurringSort] = useState<
+    "product" | "total" | "last_date"
+  >("total");
   useEffect(() => {
     let active = true;
     setState({ kind: "loading" });
@@ -385,6 +391,11 @@ function AnnualAnalysis({
     (row) => row.savings_rate !== null
   );
   const history = sampleAnnualRows(data.all_trend_rows);
+  const recurring = [...data.recurring_expenses].sort((left, right) => {
+    if (recurringSort === "product") return left.product.localeCompare(right.product, getLocale());
+    if (recurringSort === "last_date") return right.last_date.localeCompare(left.last_date);
+    return right.total - left.total;
+  });
   return (
     <>
       <div className="asset-track-analysis-heading">
@@ -409,7 +420,8 @@ function AnnualAnalysis({
         { label: t("年末现金", "Year-end cash"), value: money(latest?.cash) },
         { label: t("年末理财本金", "Year-end investment principal"), value: money(latest?.principal) },
         { label: t("年末借款", "Year-end debt"), value: money(latest?.debt) },
-        { label: t("年末总资产", "Year-end total assets"), value: money(latest?.total_assets) }
+        { label: t("年末资金投入资产", "Year-end cost assets"), value: money(latest?.cost_assets) },
+        { label: t("年末市场净资产", "Year-end market net assets"), value: money(latest?.market_net_assets) }
       ]} />
       <ChartPanel title={t("近 12 个月综合趋势", "Combined 12-month trend")} className="is-wide">
         <ResponsiveContainer width="100%" height={340}>
@@ -424,9 +436,38 @@ function AnnualAnalysis({
             <Bar yAxisId="flow" dataKey="total_expense" name={t("支出", "Expense")} fill={OUTFLOW} />
             <Line yAxisId="asset" type="monotone" dataKey="cash" name={t("现金", "Cash")} stroke={GOLD} strokeWidth={2} dot={false} />
             <Line yAxisId="asset" type="monotone" dataKey="principal" name={t("理财本金", "Investment principal")} stroke={BLUE} strokeWidth={2} dot={false} />
-            <Line yAxisId="asset" type="monotone" dataKey="total_assets" name={t("总资产", "Total assets")} stroke={PURPLE} strokeWidth={3} dot={false} />
+            <Line yAxisId="asset" type="monotone" dataKey="market_net_assets" name={t("市场净资产", "Market net assets")} stroke={PURPLE} strokeWidth={3} dot={false} />
+            <Line yAxisId="asset" type="monotone" dataKey="cost_assets" name={t("资金投入资产", "Cost assets")} stroke={BLUE} strokeWidth={2} dot={false} />
           </ComposedChart>
         </ResponsiveContainer>
+      </ChartPanel>
+      <ChartPanel title={t("周期消费（最近 12 个有数据月份）", "Recurring expenses (latest 12 data months)")} className="is-wide">
+        <div className="asset-track-analysis-toolbar">
+          <button onClick={() => setRecurringSort("product")}>{t("按商品", "Sort by item")}</button>
+          <button onClick={() => setRecurringSort("total")}>{t("按累计金额", "Sort by total")}</button>
+          <button onClick={() => setRecurringSort("last_date")}>{t("按最近日期", "Sort by latest date")}</button>
+        </div>
+        {recurring.length ? (
+          <div className="asset-track-table-scroll">
+            <table>
+              <thead><tr>
+                <th>{t("商品", "Item")}</th><th>{t("分类", "Category")}</th>
+                <th>{t("出现月份", "Months")}</th><th>{t("次数", "Transactions")}</th>
+                <th>{t("累计金额", "Total")}</th><th>{t("平均单次", "Average")}</th>
+                <th>{t("最近金额", "Latest amount")}</th><th>{t("最后发生日期", "Last date")}</th>
+              </tr></thead>
+              <tbody>{recurring.map((row) => (
+                <tr key={row.product || "__empty__"}>
+                  <td>{row.product || t("未填写商品", "Item not specified")}</td>
+                  <td>{row.category}</td><td>{row.months_count}</td>
+                  <td>{row.transaction_count}</td><td>{money(row.total)}</td>
+                  <td>{money(row.average_amount)}</td><td>{money(row.latest_amount)}</td>
+                  <td>{row.last_date}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        ) : <Empty text={t("最近 12 个有数据月份没有周期消费。", "No recurring expenses were found in the latest 12 data months.")} />}
       </ChartPanel>
       <ChartPanel title={t("近 12 月逐月储蓄率", "Monthly savings rate over 12 months")} className="is-wide">
         {monthlySavings.length ? (
@@ -497,7 +538,8 @@ function AnnualAnalysis({
             <Bar yAxisId="flow" dataKey="total_expense" name={t("支出", "Expense")} fill={OUTFLOW} />
             <Line yAxisId="asset" type="monotone" dataKey="cash" name={t("现金", "Cash")} stroke={GOLD} dot={false} />
             <Line yAxisId="asset" type="monotone" dataKey="principal" name={t("理财本金", "Investment principal")} stroke={BLUE} dot={false} />
-            <Line yAxisId="asset" type="monotone" dataKey="total_assets" name={t("总资产", "Total assets")} stroke={PURPLE} strokeWidth={2.5} dot={false} />
+            <Line yAxisId="asset" type="monotone" dataKey="market_net_assets" name={t("市场净资产", "Market net assets")} stroke={PURPLE} strokeWidth={2.5} dot={false} />
+            <Line yAxisId="asset" type="monotone" dataKey="cost_assets" name={t("资金投入资产", "Cost assets")} stroke={BLUE} strokeWidth={2} dot={false} />
           </ComposedChart>
         </ResponsiveContainer>
       </ChartPanel>
@@ -508,11 +550,13 @@ function AnnualAnalysis({
 function MonthlyAnalysis({
   api,
   month,
-  dataVersion
+  dataVersion,
+  reconciliationTolerance
 }: {
   api: AssetTrackService;
   month: string;
   dataVersion: number;
+  reconciliationTolerance: number;
 }) {
   const [state, setState] = useState<LoadState<MonthWorkspace>>({ kind: "loading" });
   useEffect(() => {
@@ -560,7 +604,8 @@ function MonthlyAnalysis({
           value: money(overview.metrics.surplus),
           tone: overview.metrics.surplus >= 0 ? "inflow" : "outflow"
         },
-        { label: t("总资产", "Total assets"), value: money(overview.metrics.total_assets) },
+        { label: t("资金投入资产", "Cost assets"), value: money(overview.metrics.cost_assets) },
+        { label: t("市场净资产", "Market net assets"), value: money(overview.metrics.market_net_assets) },
         {
           label: t("资产环比", "Asset change"),
           value: overview.metrics.asset_delta === null
@@ -577,7 +622,10 @@ function MonthlyAnalysis({
             ? changeTone(overview.reconciliation.discrepancy)
             : undefined,
           suffix: overview.reconciliation?.available
-            ? businessLabel(reconciliationStatus(overview.reconciliation.discrepancy))
+            ? businessLabel(reconciliationStatus(
+              overview.reconciliation.discrepancy,
+              reconciliationTolerance
+            ))
             : undefined
         }
       ]} />

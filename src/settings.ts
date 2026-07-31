@@ -27,7 +27,11 @@ import { displayError, t } from "./i18n";
 
 export const DEFAULT_SETTINGS: AssetTrackSettings = {
   dataDirectory: "",
-  csvMappings: []
+  csvMappings: [],
+  baseCurrency: "CNY",
+  currencyFormat: "standard",
+  reconciliationTolerance: 100,
+  largeExpenseThreshold: 1000
 };
 
 function message(error: unknown): string {
@@ -208,6 +212,56 @@ export class AssetTrackSettingTab extends PluginSettingTab {
       });
       return;
     }
+
+    new Setting(containerEl).setName(t("显示与分析", "Display and analysis")).setHeading();
+    new Setting(containerEl)
+      .setName(t("基础货币", "Base currency"))
+      .setDesc(t("使用 ISO 4217 三字母货币代码。", "Use a three-letter ISO 4217 currency code."))
+      .addText((text) => text
+        .setPlaceholder("CNY")
+        .setValue(this.plugin.settings.baseCurrency)
+        .onChange(async (value) => {
+          this.plugin.settings.baseCurrency = value.trim().toUpperCase();
+          await this.plugin.saveSettings();
+          await this.plugin.refreshViews();
+        }));
+    new Setting(containerEl)
+      .setName(t("金额格式", "Amount format"))
+      .addDropdown((dropdown) => dropdown
+        .addOption("standard", t("标准货币格式", "Standard currency format"))
+        .addOption("accounting", t("会计格式", "Accounting format"))
+        .setValue(this.plugin.settings.currencyFormat)
+        .onChange(async (value) => {
+          this.plugin.settings.currencyFormat = value as "standard" | "accounting";
+          await this.plugin.saveSettings();
+          await this.plugin.refreshViews();
+        }));
+    const addThreshold = (
+      name: string,
+      description: string,
+      key: "reconciliationTolerance" | "largeExpenseThreshold"
+    ) => new Setting(containerEl)
+      .setName(name)
+      .setDesc(description)
+      .addText((text) => text
+        .setValue(String(this.plugin.settings[key]))
+        .onChange(async (value) => {
+          const parsed = Number(value);
+          if (!Number.isFinite(parsed) || parsed < 0 || (key === "largeExpenseThreshold" && parsed === 0)) return;
+          this.plugin.settings[key] = parsed;
+          await this.plugin.saveSettings();
+          await this.plugin.refreshViews();
+        }));
+    addThreshold(
+      t("平账容差", "Reconciliation tolerance"),
+      t("差额绝对值不超过该金额时视为平账。", "Differences up to this amount are treated as reconciled."),
+      "reconciliationTolerance"
+    );
+    addThreshold(
+      t("大额支出阈值", "Large expense threshold"),
+      t("单笔或同商品汇总达到该金额时视为大额。", "A transaction or item total at this amount is treated as large."),
+      "largeExpenseThreshold"
+    );
 
     const backupStatus = containerEl.createEl("p", {
       text: t("尚未执行操作。", "No operation has been run."),

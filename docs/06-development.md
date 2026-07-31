@@ -1,5 +1,13 @@
 # 06 开发说明
 
+## v1.2.0 维护边界
+
+- 金额展示统一调用 `src/domain/moneyFormat.ts`。
+- 分析阈值来自 `AssetTrackSettings`，Repository 不复制界面常量。
+- `cost_assets` 是对账稳定口径，`market_net_assets` 是财富趋势口径，
+  `total_assets` 仅作为兼容别名。
+- 导入契约使用 `ArrayBuffer`，不得重新引入 Data URL/Base64 中间副本。
+
 ## 源码边界
 
 ```text

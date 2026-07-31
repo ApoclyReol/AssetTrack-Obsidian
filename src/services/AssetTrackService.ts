@@ -14,13 +14,32 @@ import type {
 } from "../types";
 
 export class AssetTrackError extends Error {
+  readonly status: number;
+  readonly detail: unknown;
+  readonly code: string;
+  readonly params: Record<string, string | number | boolean | null>;
+  override readonly cause?: unknown;
+
   constructor(
-    message: string,
-    public readonly status = 500,
-    public readonly detail: unknown = message,
-    public readonly code = "asset_track_error"
+    payload: string | {
+      code: string;
+      message?: string;
+      params?: Record<string, string | number | boolean | null>;
+      status?: number;
+      cause?: unknown;
+    },
+    legacyStatus = 500,
+    legacyDetail: unknown = payload,
+    legacyCode = "asset_track_error"
   ) {
-    super(message);
+    const structured = typeof payload === "string" ? null : payload;
+    super(structured?.message ?? (typeof payload === "string" ? payload : payload.code));
+    this.name = "AssetTrackError";
+    this.status = structured?.status ?? legacyStatus;
+    this.detail = structured?.params ?? legacyDetail;
+    this.code = structured?.code ?? legacyCode;
+    this.params = structured?.params ?? {};
+    this.cause = structured?.cause;
   }
 }
 
@@ -53,12 +72,12 @@ export interface AssetTrackService {
   inspectCsv(
     month: string,
     filename: string,
-    contentBase64: string
+    content: ArrayBuffer
   ): Promise<CsvInspection>;
   previewMappedCsv(
     month: string,
     filename: string,
-    contentBase64: string,
+    content: ArrayBuffer,
     mapping: CsvColumnMapping
   ): Promise<CsvImportPreview>;
   ruleCandidates(

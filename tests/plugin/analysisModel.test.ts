@@ -23,6 +23,8 @@ function annualRow(index: number): AnnualRow {
     debt: 0,
     principal: 0,
     inv_position: 0,
+    cost_assets: index,
+    market_net_assets: index,
     total_assets: index,
     inv_profit: 0,
     inv_roi: 0,
@@ -109,8 +111,9 @@ describe("real-time analysis model", () => {
     expect(OUTFLOW_COLOR).toContain("outflow");
     expect(reconciliationStatus(0.6)).toBe("平账");
     expect(reconciliationStatus(-99.99)).toBe("平账");
-    expect(reconciliationStatus(100)).toBe("多消费少支出");
-    expect(reconciliationStatus(-100)).toBe("少消费多支出");
+    expect(reconciliationStatus(100)).toBe("平账");
+    expect(reconciliationStatus(-100)).toBe("平账");
+    expect(reconciliationStatus(100.01)).toBe("多消费少支出");
     expect(reconciliationStatus(0)).toBe("平账");
     expect(reconciliationStatus(null)).toBe("");
   });
@@ -162,7 +165,7 @@ describe("real-time analysis model", () => {
       {
         category: "餐饮基础",
         amount: 1300,
-        situation: "+300（上月30.0%，三月20.0%）"
+        situation: "¥300.0（上月30.0%，三月20.0%）"
       },
       {
         category: "固定订阅",

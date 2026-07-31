@@ -50,7 +50,7 @@ interface ServiceContext {
 }
 
 export default class AssetTrackPlugin extends Plugin {
-  settings: AssetTrackSettings = { ...DEFAULT_SETTINGS };
+  settings: AssetTrackSettings = { ...DEFAULT_SETTINGS, csvMappings: [] };
   api!: AssetTrackService;
   databaseState: DatabaseState = "unconfigured";
   databaseError: string | null = null;
@@ -272,7 +272,8 @@ export default class AssetTrackPlugin extends Plugin {
       api: new LocalAssetTrackService(
         manager,
         workspaceRoot,
-        this.manifest.version
+        this.manifest.version,
+        this.settings
       )
     };
   }

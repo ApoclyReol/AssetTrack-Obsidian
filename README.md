@@ -89,9 +89,19 @@ snapshots, or manual backups.
 
 See [SECURITY.md](SECURITY.md) for the complete security and disclosure boundary.
 
+## Financial views and preferences
+
+Settings provide an ISO 4217 base currency, standard or accounting currency
+format, reconciliation tolerance, and large-expense threshold. All displayed
+amounts use `Intl.NumberFormat`.
+
+Asset analysis distinguishes cost assets (`cash - debt + principal`) from market
+net assets (`cash - debt + market value + investment cash`). Annual analysis also
+includes a read-only recurring-expense table for the latest 12 data months.
+
 ## Compatibility
 
-- Current version: 1.1.0; SQLite schema: 9.
+- Current version: 1.2.0; SQLite schema: 9.
 - Desktop only: macOS, Windows, and Linux; mobile is not supported.
 - Minimum app version: 1.9.10.
 - The desktop runtime must provide Node.js 22.16 or later, `DatabaseSync`, and

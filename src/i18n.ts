@@ -61,6 +61,19 @@ export function businessLabel(value: string): string {
 }
 
 export function displayError(error: unknown): string {
+  const structured = typeof error === "object" && error !== null
+    ? error as {
+        code?: string;
+        params?: Record<string, string | number | boolean | null>;
+      }
+    : null;
+  if (structured?.code === "IMPORT_FILE_TOO_LARGE") {
+    const limit = structured.params?.limitMiB ?? 20;
+    return t(
+      `账单文件不能超过 ${limit} MiB；请拆分后重新导入。`,
+      `Statement files cannot exceed ${limit} MiB. Split the file and import it again.`
+    );
+  }
   const raw = error instanceof Error ? error.message : String(error);
   if (isChinese()) return raw;
   const exact: Readonly<Record<string, string>> = {
@@ -130,19 +143,5 @@ export function displayError(error: unknown): string {
     "金额必须大于 0": "Amount must be greater than zero."
   };
   if (exact[raw]) return exact[raw];
-  return raw
-    .replace(/^非法月份：/, "Invalid month: ")
-    .replace(/^第 (\d+) 行的资产名称不能为空$/, "Fixed asset name is required on row $1.")
-    .replace(/^最多只能预建到 /, "Months can only be created through ")
-    .replace(/^只能按自然顺序创建下一个月份 /, "The next month must be created in calendar order: ")
-    .replace(/^当前最多只能创建到 /, "Months can currently only be created through ")
-    .replace(/^最多只能有一个草稿月份；请先保存或删除 /, "Only one draft month is allowed. Save or delete ")
-    .replace(/ 不存在，无需删除$/, " does not exist and does not need to be deleted.")
-    .replace(/^数据库未载入，原文件未修改：/, "Database not loaded; original files were not changed: ")
-    .replace(/^备份失败：/, "Backup failed: ")
-    .replace(/^校验失败：/, "Validation failed: ")
-    .replace(/^恢复失败：/, "Restore failed: ")
-    .replace(/^保存失败：/, "Save failed: ")
-    .replace(/^加载失败：/, "Load failed: ")
-    .replace(/^导入失败：/, "Import failed: ");
+  return raw;
 }

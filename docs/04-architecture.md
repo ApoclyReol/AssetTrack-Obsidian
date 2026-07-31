@@ -51,6 +51,11 @@ flowchart LR
 schema 9 在流水和自动规则中分别保存 `counterparty`；插件运行时不包含旧 schema
 自动迁移逻辑。
 
+v1.2.0 起，`data.json` 还保存基础货币、金额格式、平账容差和大额支出阈值。
+这些字段只影响展示与分析，不改变 schema 9 或备份格式。月度草稿使用 reducer
+动作标记 dirty，保存后以 canonical workspace 和新 revision 重置。账单文件以
+`ArrayBuffer` 读取，不再构造 Data URL/Base64 中间副本。
+
 ## 实例与写入边界
 
 - 插件实例共享 DatabaseManager、Repository、Service、写入队列和数据变更事件。
