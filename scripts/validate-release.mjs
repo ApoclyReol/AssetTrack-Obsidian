@@ -1,6 +1,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import {
+  normalizeNewlines,
   renderThirdPartyNotices,
   thirdPartyNoticesPath
 } from "./third-party-notices.mjs";
@@ -79,10 +80,12 @@ for (const heading of ["## Installation", "## Getting started"]) {
 
 try {
   const expectedNotices = renderThirdPartyNotices();
-  const actualNotices = readFileSync(thirdPartyNoticesPath(), "utf8");
+  const actualNotices = normalizeNewlines(
+    readFileSync(thirdPartyNoticesPath(), "utf8")
+  );
   if (actualNotices !== expectedNotices) {
     failures.push(
-      "THIRD_PARTY_NOTICES.md 与 lockfile、插件版本或生产 bundle 不一致；运行 npm run notices:update"
+      "THIRD_PARTY_NOTICES.md 与 lockfile、插件版本或依赖声明不一致；运行 npm run notices:update"
     );
   }
 } catch (error) {

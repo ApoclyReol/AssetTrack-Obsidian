@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(import.meta.dirname, "..");
 const readJson = (path) => JSON.parse(readFileSync(resolve(root, path), "utf8"));
+export const normalizeNewlines = (value) => value.replaceAll("\r\n", "\n");
 
 const dependencyGroups = [
   {
@@ -89,9 +90,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const output = renderThirdPartyNotices();
   const path = thirdPartyNoticesPath();
   if (process.argv.includes("--check")) {
-    if (readFileSync(path, "utf8") !== output) {
-      console.error("THIRD_PARTY_NOTICES.md 与 lockfile、插件版本或生产 bundle 不一致");
-      console.error("请先运行 npm run build && npm run notices:update");
+    if (normalizeNewlines(readFileSync(path, "utf8")) !== output) {
+      console.error("THIRD_PARTY_NOTICES.md 与 lockfile、插件版本或依赖声明不一致");
+      console.error("请先运行 npm run notices:update");
       process.exit(1);
     }
     console.log("第三方依赖声明与当前生产构建一致");
