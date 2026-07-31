@@ -24,3 +24,5 @@
   `git diff --check` 全部通过。
 - 用户已确认工程测试版通过全部测试。
 - 正式标签为 `1.2.0`，Release 只包含 `main.js`、`manifest.json`、`styles.css`。
+- 发布后修正第三方声明中的平台相关 bundle 字节数校验，并将 Release 工作流改为
+  可重复执行，避免已存在 Release 时重复创建失败。
