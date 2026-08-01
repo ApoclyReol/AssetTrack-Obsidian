@@ -6,16 +6,34 @@ import type {
   AnnualOverview,
   CashAccountBalance,
   CategoryDefinition,
+  CategoryBackfillPreview,
+  CategoryBackfillRequest,
+  CategoryBackfillResult,
   CurrentAsset,
   FixedAsset,
+  HistoricalCategoryCount,
   HistoricalProductStat,
   InvestmentAccountBalance,
   MonthCreationPolicy,
   MonthOverview,
   MonthWorkspace,
+  ProductRenamePreview,
+  ProductRenameRequest,
+  ProductRenameResult,
+  ProductHistoryIndexResult,
+  ProductHistoryQuery,
+  ProductHistoryResult,
   RuleCandidate,
+  RuleConflictGroup,
+  RuleHealthSummary,
   RuleInsights,
+  RuleMatchLevel,
+  RuleWorkspaceAnalytics,
+  RuleWorkspaceShell,
+  RuleWorkspace,
   RecurringExpenseSummary,
+  SaveRuleWorkspaceRequest,
+  SavedRule,
   Transaction
 } from "../types";
 import {
@@ -38,8 +56,10 @@ import {
 } from "../domain/dates";
 import { finiteNumber, roundHalfEven, sum } from "../domain/money";
 import {
-  applyRules,
+  applyRulesWithIssues,
   normalizeProductKey,
+  resolveRule,
+  ruleMatchLevel,
   rulesEquivalent,
   rulesOverlap,
   RULE_TYPES,
@@ -334,6 +354,89 @@ export class AssetTrackRepository {
     return { revision: contentRevision(result as unknown as Row[]), rows: result };
   }
 
+  private writeCategories(
+    db: DatabaseSync,
+    input: CategoryDefinition[],
+    allowRuleTypeChanges = false
+  ): void {
+    const existing = new Map(rows(db.prepare(
+      "SELECT * FROM category_definitions"
+    ).all()).map((row) => [text(row.category_key), row]));
+    const submitted = new Set<string>();
+    const names = new Set<string>();
+    input.forEach((row, index) => {
+      const key = text(row.category_key);
+      const name = text(row.name);
+      if (!key || !name || submitted.has(key) || names.has(name)) {
+        throw new RepositoryValidationError("分类 key 和名称不能为空或重复");
+      }
+      if (!["支出", "收入"].includes(row.transaction_type)) {
+        throw new RepositoryValidationError("分类收支类型只能是收入或支出");
+      }
+      if (!["必要", "可控", "不适用"].includes(row.necessity)) {
+        throw new RepositoryValidationError("分类必要性无效");
+      }
+      if (!["周期", "日常", "偶尔", "不适用"].includes(row.pattern)) {
+        throw new RepositoryValidationError("分类消费频率无效");
+      }
+      const old = existing.get(key);
+      if (old && text(old.transaction_type) !== row.transaction_type) {
+        const conflictingTransaction = db.prepare(`
+          SELECT 1 FROM transactions
+          WHERE category_key=? AND type IN ('支出','收入') AND type<>?
+          LIMIT 1
+        `).get(key, row.transaction_type);
+        const conflictingRule = !allowRuleTypeChanges && db.prepare(`
+          SELECT 1 FROM auto_rules
+          WHERE category_key=? AND transaction_type<>?
+          LIMIT 1
+        `).get(key, row.transaction_type);
+        if (conflictingTransaction || conflictingRule) {
+          throw new RepositoryValidationError(
+            `分类“${text(old.name)}”已有不匹配的历史引用，不能改变收支类型`
+          );
+        }
+      }
+      submitted.add(key);
+      names.add(name);
+      db.prepare(`
+        INSERT INTO category_definitions
+          (category_key,name,transaction_type,necessity,pattern,
+           is_big_ticket,color,is_active,sort_order)
+        VALUES (?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(category_key) DO UPDATE SET
+          name=excluded.name,transaction_type=excluded.transaction_type,
+          necessity=excluded.necessity,pattern=excluded.pattern,
+          is_big_ticket=excluded.is_big_ticket,color=excluded.color,
+          is_active=excluded.is_active,sort_order=excluded.sort_order
+      `).run(
+        key, name, row.transaction_type, row.necessity, row.pattern,
+        row.is_big_ticket ? 1 : 0, text(row.color) || categoryColor(index),
+        row.is_active ? 1 : 0, Number(row.sort_order ?? index)
+      );
+      if (old && text(old.name) !== name) {
+        db.prepare("UPDATE transactions SET category=? WHERE category_key=?").run(name, key);
+        db.prepare("UPDATE auto_rules SET category=? WHERE category_key=?").run(name, key);
+      }
+    });
+    for (const key of existing.keys()) {
+      if (submitted.has(key)) continue;
+      const usage = db.prepare(`
+        SELECT
+          (SELECT COUNT(*) FROM transactions WHERE category_key=?) AS transaction_count,
+          (SELECT COUNT(*) FROM auto_rules WHERE category_key=?) AS rule_count
+      `).get(key, key) as Row;
+      const transactionCount = Number(usage.transaction_count ?? 0);
+      const ruleCount = Number(usage.rule_count ?? 0);
+      if (transactionCount || ruleCount) {
+        throw new RepositoryValidationError(
+          `分类“${text(existing.get(key)?.name)}”仍有 ${transactionCount} 条历史流水和 ${ruleCount} 条规则引用，不能删除`
+        );
+      }
+      db.prepare("DELETE FROM category_definitions WHERE category_key=?").run(key);
+    }
+  }
+
   async saveCategories(
     expectedRevision: number,
     input: CategoryDefinition[]
@@ -343,78 +446,7 @@ export class AssetTrackRepository {
       if (current.revision !== expectedRevision) {
         throw new RevisionConflictError(expectedRevision, current.revision);
       }
-      const existing = new Map(rows(db.prepare(
-        "SELECT * FROM category_definitions"
-      ).all()).map((row) => [text(row.category_key), row]));
-      const submitted = new Set<string>();
-      const names = new Set<string>();
-      input.forEach((row, index) => {
-        const key = text(row.category_key);
-        const name = text(row.name);
-        if (!key || !name || submitted.has(key) || names.has(name)) {
-          throw new RepositoryValidationError("分类 key 和名称不能为空或重复");
-        }
-        if (!["支出", "收入"].includes(row.transaction_type)) {
-          throw new RepositoryValidationError("分类收支类型只能是收入或支出");
-        }
-        if (!["必要", "可控", "不适用"].includes(row.necessity)) {
-          throw new RepositoryValidationError("分类必要性无效");
-        }
-        if (!["周期", "日常", "偶尔", "不适用"].includes(row.pattern)) {
-          throw new RepositoryValidationError("分类消费频率无效");
-        }
-        const old = existing.get(key);
-        if (old && text(old.transaction_type) !== row.transaction_type) {
-          const conflicting = db.prepare(`
-            SELECT 1 FROM transactions
-            WHERE category_key=? AND type IN ('支出','收入') AND type<>?
-            UNION ALL
-            SELECT 1 FROM auto_rules WHERE category_key=? AND transaction_type<>?
-            LIMIT 1
-          `).get(key, row.transaction_type, key, row.transaction_type);
-          if (conflicting) {
-            throw new RepositoryValidationError(
-              `分类“${text(old.name)}”已有不匹配的历史引用，不能改变收支类型`
-            );
-          }
-        }
-        submitted.add(key);
-        names.add(name);
-        db.prepare(`
-          INSERT INTO category_definitions
-            (category_key,name,transaction_type,necessity,pattern,
-             is_big_ticket,color,is_active,sort_order)
-          VALUES (?,?,?,?,?,?,?,?,?)
-          ON CONFLICT(category_key) DO UPDATE SET
-            name=excluded.name,transaction_type=excluded.transaction_type,
-            necessity=excluded.necessity,pattern=excluded.pattern,
-            is_big_ticket=excluded.is_big_ticket,color=excluded.color,
-            is_active=excluded.is_active,sort_order=excluded.sort_order
-        `).run(
-          key, name, row.transaction_type, row.necessity, row.pattern,
-          row.is_big_ticket ? 1 : 0, text(row.color) || categoryColor(index),
-          row.is_active ? 1 : 0, Number(row.sort_order ?? index)
-        );
-        if (old && text(old.name) !== name) {
-          db.prepare("UPDATE transactions SET category=? WHERE category_key=?").run(name, key);
-          db.prepare("UPDATE auto_rules SET category=? WHERE category_key=?").run(name, key);
-        }
-      });
-      for (const key of existing.keys()) {
-        if (submitted.has(key)) continue;
-        const usage = Number((db.prepare(`
-          SELECT
-            (SELECT COUNT(*) FROM transactions WHERE category_key=?) +
-            (SELECT COUNT(*) FROM auto_rules WHERE category_key=?) AS count
-        `).get(key, key) as Row).count);
-        if (usage) {
-          db.prepare(
-            "UPDATE category_definitions SET is_active=0 WHERE category_key=?"
-          ).run(key);
-        } else {
-          db.prepare("DELETE FROM category_definitions WHERE category_key=?").run(key);
-        }
-      }
+      this.writeCategories(db, input);
     });
     return this.categories();
   }
@@ -1168,13 +1200,22 @@ export class AssetTrackRepository {
       for (let rightIndex = leftIndex + 1; rightIndex < definitions.length; rightIndex += 1) {
         const left = definitions[leftIndex];
         const right = definitions[rightIndex];
-        if (rulesEquivalent(left, right)) {
+        const leftCategory = normalizeProductKey(left.category_key) || normalizeProductKey(left.category);
+        const rightCategory = normalizeProductKey(right.category_key) || normalizeProductKey(right.category);
+        if (rulesEquivalent(left, right) && leftCategory === rightCategory) {
           duplicateIds.set(left.id, [...(duplicateIds.get(left.id) ?? []), right.id]);
           duplicateIds.set(right.id, [...(duplicateIds.get(right.id) ?? []), left.id]);
         }
+        const leftLevel = ruleMatchLevel(left);
+        const rightLevel = ruleMatchLevel(right);
+        const samePrecision = leftLevel !== null && leftLevel === rightLevel;
+        const exactOverBroad =
+          (leftLevel === "exact" && rightLevel !== null && rightLevel !== "exact")
+          || (rightLevel === "exact" && leftLevel !== null && leftLevel !== "exact");
         if (
           rulesOverlap(left, right)
-          && left.category_key !== right.category_key
+          && (samePrecision || exactOverBroad)
+          && leftCategory !== rightCategory
         ) {
           conflictIds.set(left.id, [...(conflictIds.get(left.id) ?? []), right.id]);
           conflictIds.set(right.id, [...(conflictIds.get(right.id) ?? []), left.id]);
@@ -1184,25 +1225,24 @@ export class AssetTrackRepository {
     const transactions = rows(db.prepare(`
       SELECT month,type,counterparty,product FROM transactions
       WHERE type IN ('支出','收入')
-        AND (TRIM(COALESCE(counterparty,''))<>'' OR TRIM(COALESCE(product,''))<>'')
     `).all());
+    const matchesRule = (rule: RuleRow, transaction: Row): boolean => {
+      const counterparty = normalizeProductKey(rule.counterparty);
+      const product = normalizeProductKey(rule.product);
+      return text(transaction.type) === rule.transaction_type
+        && (!counterparty || counterparty === normalizeProductKey(transaction.counterparty))
+        && (!product || product === normalizeProductKey(transaction.product));
+    };
     return {
       revision,
       rows: raw.map((row) => {
-        const counterparty = normalizeProductKey(row.counterparty);
-        const product = normalizeProductKey(row.product);
         const matched = transactions.filter(
-          (transaction) =>
-            text(transaction.type) === text(row.transaction_type)
-            && (
-              !counterparty
-              || normalizeProductKey(transaction.counterparty) === counterparty
-            )
-            && (!product || normalizeProductKey(transaction.product) === product)
+          (transaction) => matchesRule(row as unknown as RuleRow, transaction)
         );
         const months = new Set(matched.map((transaction) => text(transaction.month)));
         return {
           ...row,
+          match_level: ruleMatchLevel(row as unknown as RuleRow),
           occurrences: matched.length,
           months_count: months.size,
           last_month: [...months].sort().at(-1) ?? "",
@@ -1218,231 +1258,1102 @@ export class AssetTrackRepository {
     };
   }
 
+  private writeRules(db: DatabaseSync, input: Row[]): void {
+    const categories = this.categoryRows(db);
+    const byKey = new Map(categories.map((row) => [row.category_key, row]));
+    const byName = new Map(categories.map((row) => [row.name, row]));
+    const existing = new Set(rows(db.prepare(
+      "SELECT id FROM auto_rules"
+    ).all()).map((row) => Number(row.id)));
+    const submitted = new Set<number>();
+    const keys = new Set<string>();
+    const insert = db.prepare(`
+      INSERT INTO auto_rules
+        (transaction_type,counterparty,product,category_key,category)
+      VALUES (?,?,?,?,?)
+    `);
+    const update = db.prepare(`
+      UPDATE auto_rules SET
+        transaction_type=?,counterparty=?,product=?,category_key=?,category=?
+      WHERE id=?
+    `);
+    for (const source of input) {
+      const counterparty = text(source.counterparty);
+      const product = text(source.product);
+      const category = byKey.get(text(source.category_key))
+        ?? byName.get(text(source.category));
+      const type = text(source.transaction_type) || category?.transaction_type || "";
+      if ((!counterparty && !product) || !category) {
+        throw new RepositoryValidationError(
+          "自动规则必须填写交易对方或商品，并选择分类"
+        );
+      }
+      if (!category.is_active && (source.id === undefined || source.id === null)) {
+        throw new RepositoryValidationError("新自动规则不能使用停用分类");
+      }
+      if (!RULE_TYPES.has(type)) {
+        throw new RepositoryValidationError("自动规则的收支类型只能是支出或收入");
+      }
+      if (category.transaction_type !== type) {
+        throw new RepositoryValidationError(`${type}规则不能使用分类“${category.name}”`);
+      }
+      const key = [
+        type,
+        normalizeProductKey(counterparty),
+        normalizeProductKey(product)
+      ].join("\u0000");
+      if (keys.has(key)) {
+        throw new RepositoryValidationError(
+          "同一收支类型下不能存在重复或等价交易规则"
+        );
+      }
+      keys.add(key);
+      if (source.id === undefined || source.id === null) {
+        insert.run(
+          type,
+          counterparty,
+          product,
+          category.category_key,
+          category.name
+        );
+      } else {
+        const id = Number(source.id);
+        if (!existing.has(id) || submitted.has(id)) {
+          throw new RepositoryValidationError("自动规则 id 无效或重复");
+        }
+        submitted.add(id);
+        update.run(
+          type,
+          counterparty,
+          product,
+          category.category_key,
+          category.name,
+          id
+        );
+      }
+    }
+    for (const id of existing) if (!submitted.has(id)) {
+      db.prepare("DELETE FROM auto_rules WHERE id=?").run(id);
+    }
+  }
+
   async saveRules(expectedRevision: number, input: Row[]): Promise<{ revision: number; rows: Row[] }> {
     await this.manager.write((db) => {
       const current = this.rules(db);
       if (current.revision !== expectedRevision) {
         throw new RevisionConflictError(expectedRevision, current.revision);
       }
-      const categories = this.categoryRows(db).filter((row) => row.is_active);
-      const byKey = new Map(categories.map((row) => [row.category_key, row]));
-      const byName = new Map(categories.map((row) => [row.name, row]));
-      const existing = new Set(rows(db.prepare(
-        "SELECT id FROM auto_rules"
-      ).all()).map((row) => Number(row.id)));
-      const submitted = new Set<number>();
-      const keys = new Set<string>();
-      const insert = db.prepare(`
-        INSERT INTO auto_rules
-          (transaction_type,counterparty,product,category_key,category)
-        VALUES (?,?,?,?,?)
-      `);
-      const update = db.prepare(`
-        UPDATE auto_rules SET
-          transaction_type=?,counterparty=?,product=?,category_key=?,category=?
-        WHERE id=?
-      `);
-      for (const source of input) {
-        const counterparty = text(source.counterparty);
-        const product = text(source.product);
-        const category = byKey.get(text(source.category_key))
-          ?? byName.get(text(source.category));
-        const type = text(source.transaction_type) || category?.transaction_type || "";
-        if ((!counterparty && !product) || !category) {
-          throw new RepositoryValidationError(
-            "自动规则必须填写交易对方或商品，并选择分类"
-          );
-        }
-        if (!RULE_TYPES.has(type)) {
-          throw new RepositoryValidationError("自动规则的收支类型只能是支出或收入");
-        }
-        if (category.transaction_type !== type) {
-          throw new RepositoryValidationError(`${type}规则不能使用分类“${category.name}”`);
-        }
-        const key = [
-          type,
-          normalizeProductKey(counterparty),
-          normalizeProductKey(product)
-        ].join("\u0000");
-        if (keys.has(key)) {
-          throw new RepositoryValidationError(
-            "同一收支类型下不能存在重复或等价交易规则"
-          );
-        }
-        keys.add(key);
-        if (source.id === undefined || source.id === null) {
-          insert.run(
-            type,
-            counterparty,
-            product,
-            category.category_key,
-            category.name
-          );
-        } else {
-          const id = Number(source.id);
-          if (!existing.has(id) || submitted.has(id)) {
-            throw new RepositoryValidationError("自动规则 id 无效或重复");
-          }
-          submitted.add(id);
-          update.run(
-            type,
-            counterparty,
-            product,
-            category.category_key,
-            category.name,
-            id
-          );
-        }
-      }
-      for (const id of existing) if (!submitted.has(id)) {
-        db.prepare("DELETE FROM auto_rules WHERE id=?").run(id);
-      }
+      this.writeRules(db, input);
     });
     return this.rules();
   }
 
   rulesPreview(month: string, input: Transaction[]): {
     base_revision: number;
+    rules_revision: number;
     proposed_rows: Transaction[];
+    issues: Array<Record<string, unknown>>;
   } {
     const rules = this.rules();
+    const resolvedRules = rules.rows.map((row) => ({
+      id: Number(row.id),
+      transaction_type: text(row.transaction_type),
+      counterparty: text(row.counterparty),
+      product: text(row.product),
+      category_key: text(row.category_key),
+      category: text(row.category)
+    }));
+    const result = applyRulesWithIssues(input, resolvedRules);
     return {
       base_revision: this.getRevision(month),
-      proposed_rows: applyRules(input, rules.rows.map((row) => ({
-        transaction_type: text(row.transaction_type),
-        counterparty: text(row.counterparty),
-        product: text(row.product),
-        category_key: text(row.category_key),
-        category: text(row.category)
-      })))
+      rules_revision: rules.revision,
+      proposed_rows: result.proposed_rows,
+      issues: result.issues as unknown as Array<Record<string, unknown>>
+    };
+  }
+
+  private savedHistoryRows(
+    db: DatabaseSync,
+    query: ProductHistoryQuery = {}
+  ): Row[] {
+    const conditions = ["t.type IN ('支出','收入')"];
+    const parameters: string[] = [];
+    if (query.transaction_type) {
+      conditions.push("t.type=?");
+      parameters.push(query.transaction_type);
+    }
+    if (query.category_key !== undefined) {
+      if (query.category_key === null) {
+        conditions.push("COALESCE(t.category_key,'')=''");
+      } else {
+        conditions.push("t.category_key=?");
+        parameters.push(query.category_key);
+      }
+    }
+    if (query.from_month) {
+      conditions.push("t.month>=?");
+      parameters.push(query.from_month);
+    }
+    if (query.to_month) {
+      conditions.push("t.month<=?");
+      parameters.push(query.to_month);
+    }
+    const productSearch = scalarText(query.product_search).trim();
+    if (productSearch) {
+      conditions.push("LOWER(COALESCE(t.product,'')) LIKE LOWER(?)");
+      parameters.push(`%${productSearch}%`);
+    }
+    const history = rows(db.prepare(`
+      SELECT t.id,t.month,t.transaction_date,t.type,t.category_key,t.category,
+             t.counterparty,t.product,t.amount,d.is_active AS category_active
+      FROM transactions t
+      JOIN month_status m ON m.month=t.month AND m.status='saved'
+      LEFT JOIN category_definitions d ON d.category_key=t.category_key
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY t.type,t.product,t.month,t.transaction_date,t.id
+    `).all(...parameters));
+    const normalizedSearch = normalizeProductKey(productSearch);
+    return history.filter((row) => {
+      if (query.transaction_type && text(row.type) !== query.transaction_type) return false;
+      if (query.product_key !== undefined
+        && normalizeProductKey(row.product) !== normalizeProductKey(query.product_key)) return false;
+      if (query.category_key !== undefined) {
+        const key = text(row.category_key);
+        if (query.category_key === null ? key : key !== query.category_key) return false;
+      }
+      if (query.from_month && text(row.month) < query.from_month) return false;
+      if (query.to_month && text(row.month) > query.to_month) return false;
+      if (normalizedSearch && !normalizeProductKey(row.product).includes(normalizedSearch)) return false;
+      return true;
+    });
+  }
+
+  private historicalCategoryCounts(
+    group: Row[],
+    categories: CategoryDefinition[]
+  ): HistoricalCategoryCount[] {
+    const byKey = new Map(categories.map((category) => [category.category_key, category]));
+    const counts = new Map<string, HistoricalCategoryCount>();
+    for (const row of group) {
+      const categoryKey = text(row.category_key) || null;
+      const definition = categoryKey ? byKey.get(categoryKey) : undefined;
+      const key = categoryKey ?? "__uncategorized__";
+      const current = counts.get(key) ?? {
+        category_key: categoryKey,
+        category: definition?.name ?? (text(row.category) || "未分类"),
+        occurrences: 0,
+        is_active: categoryKey ? definition?.is_active ?? false : undefined
+      };
+      current.occurrences += 1;
+      counts.set(key, current);
+    }
+    return [...counts.values()].sort((left, right) =>
+      right.occurrences - left.occurrences
+      || left.category.localeCompare(right.category)
+    );
+  }
+
+  private productCategoryStatus(
+    counts: HistoricalCategoryCount[]
+  ): HistoricalProductStat["category_status"] {
+    const assigned = counts.filter((row) => row.category_key);
+    const hasUncategorized = counts.some((row) => !row.category_key);
+    const hasInactive = assigned.some((row) => row.is_active === false);
+    if (!assigned.length) return "未分类";
+    if (assigned.length > 1 || hasUncategorized) return "混合";
+    if (hasInactive) return "停用";
+    return "正常";
+  }
+
+  private productStat(
+    group: Row[],
+    ruleRows: RuleRow[],
+    ruleStatusById: Map<number, string>,
+    categories: CategoryDefinition[]
+  ): HistoricalProductStat {
+    const ordered = [...group].sort((left, right) =>
+      text(left.month).localeCompare(text(right.month))
+      || text(left.transaction_date).localeCompare(text(right.transaction_date))
+      || Number(left.id ?? 0) - Number(right.id ?? 0)
+    );
+    const representative = ordered[0];
+    const variants = this.frequency(group.map((row) => text(row.product)))
+      .map(([value]) => value)
+      .filter(Boolean);
+    const counterparties = this.frequency(
+      group.map((row) => text(row.counterparty)).filter(Boolean)
+    ).map(([value]) => value);
+    const categoryCounts = this.historicalCategoryCounts(group, categories);
+    const assigned = categoryCounts.filter((row) => row.category_key);
+    const recommended = assigned[0];
+    const resolutions = ordered.map((row) => resolveRule({
+      id: Number(row.id),
+      transaction_date: text(row.transaction_date),
+      type: text(row.type),
+      category_key: text(row.category_key) || null,
+      category: text(row.category),
+      counterparty: text(row.counterparty),
+      product: text(row.product),
+      amount: Number(row.amount ?? 0)
+    }, ruleRows));
+    const matchingRules = ruleRows
+      .filter((rule) => ordered.some((row) =>
+        rule.transaction_type === text(row.type)
+        && (!normalizeProductKey(rule.counterparty)
+          || normalizeProductKey(rule.counterparty) === normalizeProductKey(row.counterparty))
+        && (!normalizeProductKey(rule.product)
+          || normalizeProductKey(rule.product) === normalizeProductKey(row.product))
+      ));
+    const matchingRuleIds = matchingRules
+      .map((rule) => Number(rule.id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+    const matchingRuleLevels = [...new Set(
+      matchingRules
+        .map((rule) => ruleMatchLevel(rule))
+        .filter((level): level is RuleMatchLevel => level !== null)
+    )];
+    const ruleIds = [...new Set([
+      ...resolutions.flatMap((resolution) => resolution.rule_ids),
+      ...matchingRuleIds
+    ])];
+    const matchedOccurrences = resolutions.filter(
+      (resolution) => resolution.status === "matched"
+    ).length;
+    const unmatchedRows = ordered.filter(
+      (_row, index) => resolutions[index].status === "none"
+    );
+    const unmatchedOccurrences = unmatchedRows.length;
+    const conflictedOccurrences = resolutions.filter(
+      (resolution) => resolution.status === "conflict"
+    ).length;
+    const ruleCoverage: HistoricalProductStat["rule_coverage"] =
+      matchedOccurrences === ordered.length
+        ? "full"
+        : matchedOccurrences > 0
+          ? "partial"
+          : "none";
+    const hasRuleConflict = resolutions.some((resolution) => resolution.status === "conflict")
+      || ruleIds.some((id) => ruleStatusById.get(id) === "冲突");
+    const hasRuleDuplicate = ruleIds.some((id) => ruleStatusById.get(id) === "重复");
+    const historyRuleMismatch = ordered.some((row, index) => {
+      const resolution = resolutions[index];
+      return resolution.status === "matched"
+        && (resolution.category_key ?? "") !== text(row.category_key);
+    });
+    const ruleStatus: HistoricalProductStat["rule_status"] = hasRuleConflict
+      ? "冲突"
+      : hasRuleDuplicate
+        ? "重复"
+        : ruleIds.length
+          ? "已覆盖"
+          : "未创建";
+    const totalAmount = group.reduce((total, row) => total + Number(row.amount ?? 0), 0);
+    const last = ordered.at(-1) ?? representative;
+    const unmatchedCategoryCounts = this.historicalCategoryCounts(
+      unmatchedRows,
+      categories
+    );
+    const unmatchedAssigned = unmatchedCategoryCounts.filter(
+      (row) => row.category_key
+    );
+    const unmatchedRecommended = unmatchedAssigned[0];
+    const stableUnmatchedCategory = unmatchedAssigned.length === 1
+      && unmatchedAssigned[0].occurrences === unmatchedRows.length
+      && Boolean(unmatchedRecommended?.category_key);
+    const unmatchedCounterparties = this.frequency(
+      unmatchedRows.map((row) => text(row.counterparty)).filter(Boolean)
+    ).map(([value]) => value);
+    const suggestedCounterparty = unmatchedCounterparties.length === 1
+      ? unmatchedCounterparties[0]
+      : "";
+    const unmatchedVariants = this.frequency(
+      unmatchedRows.map((row) => text(row.product))
+    ).map(([value]) => value).filter(Boolean);
+    const suggestedProduct = unmatchedVariants[0] ?? "";
+    const ruleSuggestion = !hasRuleConflict
+      && unmatchedOccurrences > 0
+      && stableUnmatchedCategory
+      && (suggestedCounterparty || suggestedProduct)
+      ? {
+          transaction_type: text(representative.type) as "支出" | "收入",
+          counterparty: suggestedCounterparty,
+          product: suggestedProduct,
+          category_key: unmatchedRecommended?.category_key ?? "",
+          category: unmatchedRecommended?.category ?? "",
+          variants: unmatchedVariants,
+          category_counts: unmatchedCategoryCounts,
+          category_confidence: roundHalfEven(
+            (unmatchedRecommended?.occurrences ?? 0) / unmatchedRows.length,
+            4
+          ),
+          occurrences: unmatchedOccurrences,
+          months_count: new Set(
+            unmatchedRows.map((row) => text(row.month))
+          ).size,
+          last_month: text(unmatchedRows.at(-1)?.month)
+        }
+      : undefined;
+    return {
+      transaction_type: text(representative.type) as "支出" | "收入",
+      product_key: normalizeProductKey(representative.product),
+      product: variants[0] ?? "",
+      counterparty: counterparties[0] ?? "",
+      variants,
+      counterparties,
+      counterparty_count: counterparties.length,
+      category_counts: categoryCounts,
+      recommended_category: recommended?.category ?? "",
+      recommended_category_key: recommended?.category_key ?? null,
+      category_confidence: recommended
+        ? roundHalfEven(recommended.occurrences / group.length, 4)
+        : 0,
+      has_category_conflict: assigned.length > 1,
+      category_status: this.productCategoryStatus(categoryCounts),
+      occurrences: group.length,
+      months_count: new Set(group.map((row) => text(row.month))).size,
+      total_amount: roundHalfEven(totalAmount),
+      average_amount: roundHalfEven(totalAmount / group.length),
+      latest_amount: roundHalfEven(Number(last.amount ?? 0)),
+      last_date: text(last.transaction_date),
+      first_month: text(ordered[0]?.month),
+      last_month: text(last.month),
+      matching_rule_count: ruleIds.length,
+      matching_rule_ids: ruleIds,
+      matching_rule_levels: matchingRuleLevels,
+      rule_coverage: ruleCoverage,
+      matched_occurrences: matchedOccurrences,
+      unmatched_occurrences: unmatchedOccurrences,
+      conflicted_occurrences: conflictedOccurrences,
+      rule_suggestion: ruleSuggestion,
+      rule_status: ruleStatus,
+      history_rule_mismatch: historyRuleMismatch
+    };
+  }
+
+  private normalizedRuleRows(db: DatabaseSync): {
+    data: ReturnType<AssetTrackRepository["rules"]>;
+    rows: RuleRow[];
+    statusById: Map<number, string>;
+  } {
+    const data = this.rules(db);
+    const rows = data.rows.map((row) => ({
+      id: Number(row.id),
+      transaction_type: text(row.transaction_type),
+      counterparty: text(row.counterparty),
+      product: text(row.product),
+      category_key: text(row.category_key),
+      category: text(row.category)
+    } satisfies RuleRow));
+    return {
+      data,
+      rows,
+      statusById: new Map(data.rows.map((row) => [Number(row.id), text(row.rule_status)]))
+    };
+  }
+
+  private buildRuleConflictGroups(
+    ruleData: ReturnType<AssetTrackRepository["normalizedRuleRows"]>,
+    history: Row[]
+  ): RuleConflictGroup[] {
+    type Edge = { kind: RuleConflictGroup["kind"]; left: number; right: number };
+    const edges: Edge[] = [];
+    for (let leftIndex = 0; leftIndex < ruleData.rows.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < ruleData.rows.length; rightIndex += 1) {
+        const left = ruleData.rows[leftIndex];
+        const right = ruleData.rows[rightIndex];
+        const leftCategory = normalizeProductKey(left.category_key) || normalizeProductKey(left.category);
+        const rightCategory = normalizeProductKey(right.category_key) || normalizeProductKey(right.category);
+        if (rulesEquivalent(left, right)) {
+          edges.push({
+            kind: leftCategory === rightCategory ? "duplicate" : "same-condition",
+            left: Number(left.id),
+            right: Number(right.id)
+          });
+          continue;
+        }
+        const leftLevel = ruleMatchLevel(left);
+        const rightLevel = ruleMatchLevel(right);
+        const samePrecision = leftLevel !== null && leftLevel === rightLevel;
+        const exactOverBroad =
+          (leftLevel === "exact" && rightLevel !== null && rightLevel !== "exact")
+          || (rightLevel === "exact" && leftLevel !== null && leftLevel !== "exact");
+        if (
+          rulesOverlap(left, right)
+          && (samePrecision || exactOverBroad)
+          && leftCategory !== rightCategory
+        ) {
+          edges.push({ kind: "overlap", left: Number(left.id), right: Number(right.id) });
+        }
+      }
+    }
+    const savedRules = ruleData.data.rows as unknown as SavedRule[];
+    const savedById = new Map(savedRules.map((rule) => [Number(rule.id), rule]));
+    const groups: RuleConflictGroup[] = [];
+    for (const kind of ["duplicate", "same-condition", "overlap"] as const) {
+      const kindEdges = edges.filter((edge) => edge.kind === kind);
+      const adjacency = new Map<number, Set<number>>();
+      for (const edge of kindEdges) {
+        const left = adjacency.get(edge.left) ?? new Set<number>();
+        const right = adjacency.get(edge.right) ?? new Set<number>();
+        left.add(edge.right);
+        right.add(edge.left);
+        adjacency.set(edge.left, left);
+        adjacency.set(edge.right, right);
+      }
+      const visited = new Set<number>();
+      for (const start of adjacency.keys()) {
+        if (visited.has(start)) continue;
+        const component: number[] = [];
+        const queue = [start];
+        visited.add(start);
+        while (queue.length) {
+          const current = queue.shift()!;
+          component.push(current);
+          for (const neighbor of adjacency.get(current) ?? []) {
+            if (visited.has(neighbor)) continue;
+            visited.add(neighbor);
+            queue.push(neighbor);
+          }
+        }
+        component.sort((left, right) => left - right);
+        const componentRules = component
+          .map((id) => savedById.get(id))
+          .filter((rule): rule is SavedRule => Boolean(rule));
+        const affected = history.filter((row) => componentRules.some((rule) =>
+          rule.transaction_type === text(row.type)
+          && (!normalizeProductKey(rule.counterparty)
+            || normalizeProductKey(rule.counterparty) === normalizeProductKey(row.counterparty))
+          && (!normalizeProductKey(rule.product)
+            || normalizeProductKey(rule.product) === normalizeProductKey(row.product))
+        ));
+        groups.push({
+          conflict_key: `${kind}:${component.join(",")}`,
+          kind,
+          rule_ids: component,
+          rules: componentRules,
+          affected_transaction_count: affected.length,
+          affected_months: [...new Set(affected.map((row) => text(row.month)))].sort(),
+          description: kind === "duplicate"
+            ? "规则条件和分类完全相同"
+            : kind === "same-condition"
+              ? "规则条件相同但分类不同"
+              : "规则条件重叠且分类不同"
+        });
+      }
+    }
+    return groups.sort((left, right) =>
+      left.kind.localeCompare(right.kind)
+      || right.affected_transaction_count - left.affected_transaction_count
+      || left.conflict_key.localeCompare(right.conflict_key)
+    );
+  }
+
+  private buildRuleInsights(
+    db: DatabaseSync,
+    minOccurrences: number
+  ): {
+    threshold: number;
+    rules: ReturnType<AssetTrackRepository["rules"]>;
+    categories: CategoryDefinition[];
+    historicalProducts: HistoricalProductStat[];
+    recommendations: RuleCandidate[];
+    ruleConflicts: RuleConflictGroup[];
+    summary: RuleHealthSummary;
+  } {
+    const requestedThreshold = Number(minOccurrences);
+    const threshold = Number.isFinite(requestedThreshold)
+      ? Math.max(1, Math.min(10_000, Math.trunc(requestedThreshold)))
+      : 2;
+    const ruleData = this.normalizedRuleRows(db);
+    const categories = this.categoryRows(db);
+    const history = this.savedHistoryRows(db);
+    const ruleConflicts = this.buildRuleConflictGroups(ruleData, history);
+    const productGroups = new Map<string, Row[]>();
+    const exactGroups = new Map<string, Row[]>();
+    for (const row of history) {
+      const productKey = normalizeProductKey(row.product);
+      const productGroupKey = [text(row.type), productKey].join("\u0000");
+      const exactGroupKey = [
+        text(row.type),
+        normalizeProductKey(row.counterparty),
+        productKey
+      ].join("\u0000");
+      const productGroup = productGroups.get(productGroupKey) ?? [];
+      productGroup.push(row);
+      productGroups.set(productGroupKey, productGroup);
+      const exactGroup = exactGroups.get(exactGroupKey) ?? [];
+      exactGroup.push(row);
+      exactGroups.set(exactGroupKey, exactGroup);
+    }
+    const historicalProducts = [...productGroups.values()]
+      .map((group) => this.productStat(
+        group,
+        ruleData.rows,
+        ruleData.statusById,
+        categories
+      ))
+      .sort((left, right) =>
+        right.occurrences - left.occurrences
+        || left.transaction_type.localeCompare(right.transaction_type)
+        || left.product.localeCompare(right.product)
+      );
+    const productRuleExists = (type: string, productKey: string): boolean =>
+      ruleData.rows.some((rule) =>
+        rule.transaction_type === type
+        && ruleMatchLevel(rule) === "product"
+        && normalizeProductKey(rule.product) === productKey
+      );
+    const exactRuleExists = (type: string, counterpartyKey: string, productKey: string): boolean =>
+      ruleData.rows.some((rule) =>
+        rule.transaction_type === type
+        && ruleMatchLevel(rule) === (productKey ? "exact" : "counterparty")
+        && normalizeProductKey(rule.counterparty) === counterpartyKey
+        && normalizeProductKey(rule.product) === productKey
+      );
+    const recommendations: RuleCandidate[] = [];
+    for (const group of exactGroups.values()) {
+      if (group.length < threshold) continue;
+      const representative = group[0];
+      const type = text(representative.type);
+      const productKey = normalizeProductKey(representative.product);
+      const counterpartyKey = normalizeProductKey(representative.counterparty);
+      const level = productKey ? (counterpartyKey ? "exact" : "product") : (counterpartyKey ? "counterparty" : null);
+      if (!level || exactRuleExists(type, counterpartyKey, productKey)) continue;
+      const stat = this.productStat(group, ruleData.rows, ruleData.statusById, categories);
+      if (
+        stat.has_category_conflict
+        || stat.rule_coverage !== "none"
+        || stat.conflicted_occurrences > 0
+        || stat.history_rule_mismatch
+      ) continue;
+      recommendations.push({
+        transaction_type: stat.transaction_type,
+        product: stat.product,
+        product_key: stat.product_key,
+        counterparty: stat.counterparty,
+        variants: stat.variants,
+        category: stat.recommended_category,
+        category_key: stat.recommended_category_key,
+        category_counts: stat.category_counts,
+        category_confidence: stat.category_confidence,
+        has_category_conflict: stat.has_category_conflict,
+        occurrences: stat.occurrences,
+        months_count: stat.months_count,
+        last_month: stat.last_month,
+        match_level: level
+      });
+    }
+    for (const stat of historicalProducts) {
+      const productKey = stat.product_key;
+      const suggestion = stat.rule_suggestion;
+      if (
+        !productKey
+        || !suggestion
+        || suggestion.counterparty
+        || suggestion.occurrences < threshold
+        || stat.conflicted_occurrences > 0
+        || productRuleExists(stat.transaction_type, productKey)
+      ) continue;
+      recommendations.push({
+        transaction_type: suggestion.transaction_type,
+        product: suggestion.product,
+        product_key: normalizeProductKey(suggestion.product),
+        counterparty: "",
+        variants: suggestion.variants,
+        category: suggestion.category,
+        category_key: suggestion.category_key,
+        category_counts: suggestion.category_counts,
+        category_confidence: suggestion.category_confidence,
+        has_category_conflict: false,
+        occurrences: suggestion.occurrences,
+        months_count: suggestion.months_count,
+        last_month: suggestion.last_month,
+        match_level: "product"
+      });
+    }
+    recommendations.sort((left, right) =>
+      right.occurrences - left.occurrences
+      || left.transaction_type.localeCompare(right.transaction_type)
+      || left.product.localeCompare(right.product)
+      || left.counterparty.localeCompare(right.counterparty)
+    );
+    const conflictProducts = new Map<string, number>();
+    for (const stat of historicalProducts) {
+      if (!stat.has_category_conflict) continue;
+      for (const category of stat.category_counts) {
+        if (category.category_key) {
+          conflictProducts.set(
+            category.category_key,
+            (conflictProducts.get(category.category_key) ?? 0) + 1
+          );
+        }
+      }
+    }
+    const historicalCategoryStats = new Map<string, { count: number; months: Set<string> }>();
+    for (const row of history) {
+      const key = text(row.category_key);
+      if (!key) continue;
+      const stat = historicalCategoryStats.get(key) ?? { count: 0, months: new Set<string>() };
+      stat.count += 1;
+      stat.months.add(text(row.month));
+      historicalCategoryStats.set(key, stat);
+    }
+    const ruleCounts = new Map<string, number>();
+    for (const row of ruleData.data.rows) {
+      const key = text(row.category_key);
+      if (key) ruleCounts.set(key, (ruleCounts.get(key) ?? 0) + 1);
+    }
+    const enrichedCategories = categories.map((category) => {
+      const historical = historicalCategoryStats.get(category.category_key);
+      return {
+        ...category,
+        transaction_count: historical?.count ?? 0,
+        impact_months: historical ? [...historical.months].sort() : [],
+        rule_count: ruleCounts.get(category.category_key) ?? 0,
+        conflict_product_count: conflictProducts.get(category.category_key) ?? 0
+      };
+    });
+    const summary: RuleHealthSummary = {
+      product_conflicts: historicalProducts.filter((row) => row.has_category_conflict).length,
+      rule_conflicts: ruleData.data.rows.filter((row) => row.rule_status === "冲突").length,
+      duplicate_rules: ruleData.data.rows.filter((row) => row.rule_status === "重复").length,
+      rule_conflict_groups: ruleConflicts.filter((group) => group.kind !== "duplicate").length,
+      duplicate_rule_groups: ruleConflicts.filter((group) => group.kind === "duplicate").length,
+      inactive_category_transactions: history.filter((row) =>
+        Boolean(text(row.category_key)) && row.category_active !== 1 && row.category_active !== true
+      ).length,
+      uncategorized_transactions: history.filter((row) => !text(row.category_key)).length,
+      stable_products_without_rule: historicalProducts.filter((row) =>
+        Boolean(row.rule_suggestion)
+      ).length
+    };
+    return {
+      threshold,
+      rules: ruleData.data,
+      categories: enrichedCategories,
+      historicalProducts,
+      recommendations,
+      ruleConflicts,
+      summary
     };
   }
 
   ruleInsights(minOccurrences = 2): RuleInsights {
     const db = this.db();
-    const requestedThreshold = Number(minOccurrences);
-    const threshold = Number.isFinite(requestedThreshold)
-      ? Math.max(1, Math.min(10_000, Math.trunc(requestedThreshold)))
-      : 2;
-    const ruleData = this.rules(db);
-    const history = rows(db.prepare(`
-      SELECT month,transaction_date,type,category,counterparty,product,amount
-      FROM transactions
-      WHERE type IN ('支出','收入')
-        AND (
-          TRIM(COALESCE(counterparty,''))<>''
-          OR TRIM(COALESCE(product,''))<>''
-        )
-      ORDER BY month,transaction_date,id
-    `).all());
-    const grouped = new Map<string, Row[]>();
-    history.forEach((row) => {
-      const key = [
-        text(row.type),
-        normalizeProductKey(row.counterparty),
-        normalizeProductKey(row.product)
-      ].join("\u0000");
-      const group = grouped.get(key) ?? [];
-      group.push(row);
-      grouped.set(key, group);
-    });
-    const matchesRule = (rule: Row, row: Row): boolean => {
-      const counterparty = normalizeProductKey(rule.counterparty);
-      const product = normalizeProductKey(rule.product);
-      return text(rule.transaction_type) === text(row.type)
-        && (!counterparty || counterparty === normalizeProductKey(row.counterparty))
-        && (!product || product === normalizeProductKey(row.product));
-    };
-    const historicalProducts: HistoricalProductStat[] = [];
-    const recommendations: RuleCandidate[] = [];
-    for (const group of grouped.values()) {
-      const representative = group[0];
-      const categoryCounts = this.frequency(
-        group.map((row) => text(row.category) || "未分类")
-      ).map(([category, occurrences]) => ({ category, occurrences }));
-      const recommended = categoryCounts[0]?.category === "未分类"
-        ? ""
-        : categoryCounts[0]?.category ?? "";
-      const categoryConfidence = recommended
-        ? (categoryCounts.find((row) => row.category === recommended)?.occurrences ?? 0)
-          / group.length
-        : 0;
-      const hasCategoryConflict = categoryCounts.length > 1;
-      const matchedRules = ruleData.rows.filter((rule) =>
-        matchesRule(rule, representative)
-      );
-      const matchedCategories = new Set(
-        matchedRules.map((rule) => text(rule.category_key) || text(rule.category))
-      );
-      const ruleStatus: HistoricalProductStat["rule_status"] =
-        hasCategoryConflict
-        || matchedRules.some((rule) => text(rule.rule_status) === "冲突")
-        || matchedCategories.size > 1
-          ? "冲突"
-          : matchedRules.some((rule) => text(rule.rule_status) === "重复")
-            ? "重复"
-            : matchedRules.length
-              ? "已覆盖"
-              : "未创建";
-      const dates = group.map((row) => text(row.transaction_date)).filter(Boolean);
-      const lastDate = dates.sort().at(-1) ?? "";
-      const variants = this.frequency(group.map((row) => text(row.product)))
-        .map(([value]) => value)
-        .filter(Boolean);
-      const counterparties = this.frequency(
-        group.map((row) => text(row.counterparty)).filter(Boolean)
-      );
-      const product = variants[0] ?? "";
-      const counterparty = counterparties[0]?.[0] ?? "";
-      const totalAmount = group.reduce(
-        (total, row) => total + Number(row.amount ?? 0),
-        0
-      );
-      const candidate: RuleCandidate = {
-        transaction_type: text(representative.type) as "支出" | "收入",
-        product,
-        counterparty,
-        variants,
-        category: recommended,
-        category_counts: categoryCounts,
-        category_confidence: roundHalfEven(categoryConfidence, 4),
-        has_category_conflict: hasCategoryConflict,
-        occurrences: group.length,
-        months_count: new Set(group.map((row) => text(row.month))).size,
-        last_month: group.map((row) => text(row.month)).sort().at(-1) ?? ""
-      };
-      if (group.length >= threshold && matchedRules.length === 0) {
-        recommendations.push(candidate);
-      }
-      historicalProducts.push({
-        ...candidate,
-        category_counts: categoryCounts,
-        recommended_category: recommended,
-        total_amount: roundHalfEven(totalAmount),
-        average_amount: roundHalfEven(totalAmount / group.length),
-        latest_amount: roundHalfEven(Number(group.at(-1)?.amount ?? 0)),
-        last_date: lastDate,
-        matching_rule_count: matchedRules.length,
-        matching_rule_ids: matchedRules.map((rule) => Number(rule.id)),
-        rule_status: ruleStatus
-      });
-    }
-    const compare = (left: RuleCandidate, right: RuleCandidate) =>
-      right.occurrences - left.occurrences
-      || left.transaction_type.localeCompare(right.transaction_type)
-      || left.product.localeCompare(right.product);
-    recommendations.sort(compare);
-    historicalProducts.sort((left, right) =>
-      right.occurrences - left.occurrences
-      || left.transaction_type.localeCompare(right.transaction_type)
-      || left.product.localeCompare(right.product)
-    );
+    const data = this.buildRuleInsights(db, minOccurrences);
     return {
-      rules_revision: ruleData.revision,
-      min_occurrences: threshold,
-      recommendations,
-      historical_products: historicalProducts
+      rules_revision: data.rules.revision,
+      categories_revision: contentRevision(this.categoryRows(db) as unknown as Row[]),
+      min_occurrences: data.threshold,
+      recommendations: data.recommendations,
+      historical_products: data.historicalProducts,
+      rule_conflicts: data.ruleConflicts,
+      summary: data.summary
     };
+  }
+
+  ruleWorkspace(minOccurrences = 2): RuleWorkspace {
+    const db = this.db();
+    const data = this.buildRuleInsights(db, minOccurrences);
+    return {
+      categories_revision: contentRevision(this.categoryRows(db) as unknown as Row[]),
+      rules_revision: data.rules.revision,
+      categories: data.categories,
+      rules: data.rules.rows as unknown as SavedRule[],
+      recommendations: data.recommendations,
+      historical_products: data.historicalProducts,
+      rule_conflicts: data.ruleConflicts,
+      summary: data.summary
+    };
+  }
+
+  private rawRuleDefinitions(db: DatabaseSync): SavedRule[] {
+    return rows(db.prepare("SELECT * FROM auto_rules ORDER BY id").all()).map((row) => ({
+      id: Number(row.id),
+      transaction_type: text(row.transaction_type) as "支出" | "收入",
+      counterparty: text(row.counterparty),
+      product: text(row.product),
+      category_key: text(row.category_key),
+      category: text(row.category)
+    }));
+  }
+
+  ruleWorkspaceShell(): RuleWorkspaceShell {
+    const db = this.db();
+    const categoryData = this.categories(db);
+    const rawRules = rows(db.prepare("SELECT * FROM auto_rules ORDER BY id").all());
+    return {
+      categories_revision: categoryData.revision,
+      rules_revision: contentRevision(rawRules),
+      categories: categoryData.rows,
+      rules: this.rawRuleDefinitions(db)
+    };
+  }
+
+  ruleWorkspaceAnalytics(minOccurrences = 2): RuleWorkspaceAnalytics {
+    const db = this.db();
+    const data = this.buildRuleInsights(db, minOccurrences);
+    return {
+      categories_revision: contentRevision(this.categoryRows(db) as unknown as Row[]),
+      rules_revision: data.rules.revision,
+      categories: data.categories,
+      rules: data.rules.rows as unknown as SavedRule[],
+      recommendations: data.recommendations,
+      rule_conflicts: data.ruleConflicts,
+      summary: data.summary
+    };
+  }
+
+  private hasProductHistoryFilter(query: ProductHistoryQuery): boolean {
+    return Boolean(
+      query.transaction_type
+      || query.product_key !== undefined
+      || query.category_key !== undefined
+      || scalarText(query.product_search).trim()
+      || query.issue_filter
+      || query.from_month
+      || query.to_month
+      || query.min_occurrences !== undefined
+    );
+  }
+
+  private historyStatMatchesFilter(
+    stat: HistoricalProductStat,
+    filter: ProductHistoryQuery["issue_filter"]
+  ): boolean {
+    if (!filter) return true;
+    const hasInactive = stat.category_counts.some(
+      (category) => Boolean(category.category_key) && category.is_active === false
+    );
+    const hasUncategorized = stat.category_counts.some((category) => !category.category_key);
+    switch (filter) {
+      case "conflict": return stat.has_category_conflict;
+      case "rule-conflict": return stat.rule_status === "冲突";
+      case "duplicate": return stat.rule_status === "重复";
+      case "inactive": return hasInactive;
+      case "uncategorized": return hasUncategorized;
+      case "no-rule": return stat.unmatched_occurrences > 0;
+      case "mismatch": return stat.history_rule_mismatch;
+    }
+  }
+
+  private productHistoryGroups(
+    db: DatabaseSync,
+    query: ProductHistoryQuery
+  ): {
+    ruleData: ReturnType<AssetTrackRepository["normalizedRuleRows"]>;
+    categories: CategoryDefinition[];
+    history: Row[];
+    stats: HistoricalProductStat[];
+  } {
+    const ruleData = this.normalizedRuleRows(db);
+    const categories = this.categoryRows(db);
+    const history = this.savedHistoryRows(db, {
+      ...query,
+      product_key: query.product_key === undefined
+        ? undefined
+        : normalizeProductKey(query.product_key)
+    });
+    const groups = new Map<string, Row[]>();
+    for (const row of history) {
+      const key = [text(row.type), normalizeProductKey(row.product)].join("\u0000");
+      const group = groups.get(key) ?? [];
+      group.push(row);
+      groups.set(key, group);
+    }
+    const stats = [...groups.values()]
+      .map((group) => this.productStat(
+        group,
+        ruleData.rows,
+        ruleData.statusById,
+        categories
+      ))
+      .filter((stat) =>
+        (query.min_occurrences === undefined || stat.occurrences >= query.min_occurrences)
+        && this.historyStatMatchesFilter(stat, query.issue_filter)
+      );
+    return { ruleData, categories, history, stats };
+  }
+
+  productHistoryIndex(query: ProductHistoryQuery): ProductHistoryIndexResult {
+    if (!this.hasProductHistoryFilter(query)) {
+      throw new RepositoryValidationError("商品回溯至少选择一个筛选条件后再加载");
+    }
+    const db = this.db();
+    const data = this.productHistoryGroups(db, query);
+    return {
+      categories_revision: contentRevision(data.categories as unknown as Row[]),
+      rules_revision: data.ruleData.data.revision,
+      groups: data.stats
+    };
+  }
+
+  productHistory(query: ProductHistoryQuery): ProductHistoryResult {
+    if (!this.hasProductHistoryFilter(query)) {
+      throw new RepositoryValidationError("商品回溯至少选择一个筛选条件后再加载");
+    }
+    const db = this.db();
+    const data = this.productHistoryGroups(db, query);
+    const { ruleData, history, stats } = data;
+    const allowedGroups = new Set(stats.map((stat) =>
+      `${stat.transaction_type}\u0000${stat.product_key}`
+    ));
+    const rows = history
+      .filter((row) => allowedGroups.has(`${text(row.type)}\u0000${normalizeProductKey(row.product)}`))
+      .map((row) => {
+      const transaction: Transaction = {
+        id: Number(row.id),
+        transaction_date: text(row.transaction_date),
+        type: text(row.type),
+        category_key: text(row.category_key) || null,
+        category: text(row.category),
+        counterparty: text(row.counterparty),
+        product: text(row.product),
+        amount: Number(row.amount ?? 0)
+      };
+      const ruleMatch = resolveRule(transaction, ruleData.rows);
+      const categoryActive = row.category_active === null || row.category_active === undefined
+        ? null
+        : boolean(row.category_active);
+      return {
+        id: transaction.id ?? 0,
+        month: text(row.month),
+        transaction_date: transaction.transaction_date,
+        type: transaction.type as "支出" | "收入",
+        category_key: transaction.category_key ?? null,
+        category: transaction.category,
+        category_active: categoryActive,
+        counterparty: transaction.counterparty ?? "",
+        product: transaction.product,
+        amount: transaction.amount,
+        rule_match: ruleMatch
+      };
+      });
+    return { groups: stats, rows };
+  }
+
+  private backfillRows(db: DatabaseSync, transactionIds: number[]): Row[] {
+    const ids = transactionIds.map((id) => Number(id));
+    if (!ids.length || ids.some((id) => !Number.isInteger(id) || id <= 0)) {
+      throw new RepositoryValidationError("请选择至少一条有效历史流水");
+    }
+    const uniqueIds = [...new Set(ids)];
+    if (uniqueIds.length !== ids.length) {
+      throw new RepositoryValidationError("回溯流水不能重复选择");
+    }
+    const placeholders = uniqueIds.map(() => "?").join(",");
+    const selected = rows(db.prepare(`
+      SELECT t.id,t.month,t.transaction_date,t.type,t.category_key,t.category,
+             t.counterparty,t.product,t.amount
+      FROM transactions t
+      JOIN month_status m ON m.month=t.month AND m.status='saved'
+      WHERE t.id IN (${placeholders})
+      ORDER BY t.month,t.transaction_date,t.id
+    `).all(...uniqueIds));
+    if (selected.length !== uniqueIds.length) {
+      throw new RepositoryValidationError("部分流水不属于已保存月份，回溯未执行");
+    }
+    return selected;
+  }
+
+  private backfillPreview(
+    db: DatabaseSync,
+    selected: Row[],
+    targetCategoryKey: string
+  ): CategoryBackfillPreview {
+    const target = this.categoryRows(db).find(
+      (category) => category.category_key === text(targetCategoryKey)
+    );
+    if (!target || !target.is_active) {
+      throw new RepositoryValidationError("目标分类不存在或已停用");
+    }
+    const types = new Set(selected.map((row) => text(row.type)));
+    if (types.size !== 1 || !types.has(target.transaction_type)) {
+      throw new RepositoryValidationError("目标分类的收支类型与选中流水不一致");
+    }
+    const ruleData = this.normalizedRuleRows(db);
+    const conflicts = selected
+      .map((row) => resolveRule(transactionFromRow(row), ruleData.rows))
+      .filter((resolution) => resolution.status === "conflict");
+    if (conflicts.length) {
+      const ruleIds = [...new Set(conflicts.flatMap((resolution) => resolution.rule_ids))];
+      throw new RepositoryValidationError(
+        ruleIds.length
+          ? `选中流水存在未解决的规则冲突（规则 ${ruleIds.join("、")}），请先处理规则`
+          : "选中流水存在未解决的规则冲突，请先处理规则"
+      );
+    }
+    const monthCounts = new Map<string, number>();
+    for (const row of selected) {
+      const month = text(row.month);
+      monthCounts.set(month, (monthCounts.get(month) ?? 0) + 1);
+    }
+    const months = [...monthCounts].sort(([left], [right]) => left.localeCompare(right))
+      .map(([month, count]) => ({
+        month,
+        revision: this.getRevision(month, db),
+        count
+      }));
+    return {
+      transaction_ids: selected.map((row) => Number(row.id)),
+      target_category_key: target.category_key,
+      target_category: target.name,
+      target_transaction_type: target.transaction_type,
+      transaction_count: selected.length,
+      month_count: months.length,
+      months,
+      old_categories: this.historicalCategoryCounts(selected, this.categoryRows(db))
+    };
+  }
+
+  previewCategoryBackfill(
+    request: Omit<CategoryBackfillRequest, "expected_month_revisions">
+  ): CategoryBackfillPreview {
+    const db = this.db();
+    const selected = this.backfillRows(db, request.transaction_ids);
+    return this.backfillPreview(db, selected, request.target_category_key);
+  }
+
+  async applyCategoryBackfill(
+    request: CategoryBackfillRequest
+  ): Promise<CategoryBackfillResult> {
+    const result = await this.manager.write((db) => {
+      const selected = this.backfillRows(db, request.transaction_ids);
+      const preview = this.backfillPreview(db, selected, request.target_category_key);
+      const revisions: Record<string, number> = {};
+      for (const month of preview.months) {
+        const expected = Number(request.expected_month_revisions[month.month]);
+        if (!Number.isFinite(expected)) {
+          throw new RepositoryValidationError(`缺少 ${month.month} 的 revision`);
+        }
+        const actual = this.getRevision(month.month, db);
+        if (actual !== expected) {
+          throw new RevisionConflictError(expected, actual);
+        }
+      }
+      const update = db.prepare(
+        "UPDATE transactions SET category_key=?,category=? WHERE id=?"
+      );
+      let updated = 0;
+      for (const row of selected) {
+        updated += Number(update.run(
+          preview.target_category_key,
+          preview.target_category,
+          Number(row.id)
+        ).changes);
+      }
+      if (updated !== selected.length) {
+        throw new RepositoryValidationError("回溯更新行数与预览不一致，已回滚");
+      }
+      for (const month of preview.months) {
+        revisions[month.month] = this.touchMonth(db, month.month, month.revision);
+      }
+      return {
+        ...preview,
+        updated_count: updated,
+        revisions
+      };
+    });
+    return result;
+  }
+
+  private productRenamePreview(
+    db: DatabaseSync,
+    selected: Row[],
+    targetProduct: string
+  ): ProductRenamePreview {
+    const target = text(targetProduct);
+    if (!target) throw new RepositoryValidationError("目标商品名称不能为空");
+    const monthCounts = new Map<string, number>();
+    const variantCounts = new Map<string, { occurrences: number; months: Set<string> }>();
+    for (const row of selected) {
+      const month = text(row.month);
+      monthCounts.set(month, (monthCounts.get(month) ?? 0) + 1);
+      const product = text(row.product);
+      const variant = variantCounts.get(product) ?? { occurrences: 0, months: new Set<string>() };
+      variant.occurrences += 1;
+      variant.months.add(month);
+      variantCounts.set(product, variant);
+    }
+    const months = [...monthCounts].sort(([left], [right]) => left.localeCompare(right))
+      .map(([month, count]) => ({
+        month,
+        revision: this.getRevision(month, db),
+        count
+      }));
+    return {
+      transaction_ids: selected.map((row) => Number(row.id)),
+      target_product: target,
+      transaction_count: selected.length,
+      month_count: months.length,
+      months,
+      variants: [...variantCounts].map(([product, value]) => ({
+        product,
+        occurrences: value.occurrences,
+        months_count: value.months.size
+      })).sort((left, right) =>
+        right.occurrences - left.occurrences || left.product.localeCompare(right.product)
+      )
+    };
+  }
+
+  previewProductRename(
+    request: Omit<ProductRenameRequest, "expected_month_revisions">
+  ): ProductRenamePreview {
+    const db = this.db();
+    const selected = this.backfillRows(db, request.transaction_ids);
+    return this.productRenamePreview(db, selected, request.target_product);
+  }
+
+  async applyProductRename(request: ProductRenameRequest): Promise<ProductRenameResult> {
+    return this.manager.write((db) => {
+      const selected = this.backfillRows(db, request.transaction_ids);
+      const preview = this.productRenamePreview(db, selected, request.target_product);
+      const revisions: Record<string, number> = {};
+      for (const month of preview.months) {
+        const expected = Number(request.expected_month_revisions[month.month]);
+        if (!Number.isFinite(expected)) {
+          throw new RepositoryValidationError(`缺少 ${month.month} 的 revision`);
+        }
+        const actual = this.getRevision(month.month, db);
+        if (actual !== expected) throw new RevisionConflictError(expected, actual);
+      }
+      const update = db.prepare("UPDATE transactions SET product=? WHERE id=?");
+      let updated = 0;
+      for (const row of selected) {
+        updated += Number(update.run(
+          preview.target_product,
+          Number(row.id)
+        ).changes);
+      }
+      if (updated !== selected.length) {
+        throw new RepositoryValidationError("商品名称更新行数与预览不一致，已回滚");
+      }
+      for (const month of preview.months) {
+        revisions[month.month] = this.touchMonth(db, month.month, month.revision);
+      }
+      return {
+        ...preview,
+        updated_count: updated,
+        revisions
+      };
+    });
+  }
+
+  async saveRuleWorkspace(request: SaveRuleWorkspaceRequest): Promise<RuleWorkspace> {
+    await this.manager.write((db) => {
+      const currentCategories = this.categories(db);
+      const currentRules = this.rules(db);
+      if (currentCategories.revision !== request.categories_revision) {
+        throw new RevisionConflictError(request.categories_revision, currentCategories.revision);
+      }
+      if (currentRules.revision !== request.rules_revision) {
+        throw new RevisionConflictError(request.rules_revision, currentRules.revision);
+      }
+      this.writeCategories(db, request.categories, true);
+      this.writeRules(db, request.rules as unknown as Row[]);
+    });
+    return this.ruleWorkspace();
   }
 
   ruleCandidates(

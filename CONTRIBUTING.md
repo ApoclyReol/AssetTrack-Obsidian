@@ -20,10 +20,9 @@ npm run typecheck
 npm run lint
 npm test
 npm run build
+npm run notices:update
 npm run release:check
 git diff --check
-npm run build
-npm run release:check
 ```
 
 用户可见功能同步 README、用户指南和 CHANGELOG；公式同步财务口径；路径、

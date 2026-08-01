@@ -57,15 +57,62 @@ export interface CsvImportPreview {
   import_stats: CsvImportStats;
 }
 
+export type RuleMatchLevel = "exact" | "product" | "counterparty";
+
+export type ProductCategoryStatus = "正常" | "停用" | "未分类" | "混合";
+
+export interface HistoricalCategoryCount {
+  category_key?: string | null;
+  category: string;
+  occurrences: number;
+  is_active?: boolean;
+}
+
+export interface RuleMatchExplanation {
+  status: "none" | "matched" | "conflict";
+  level?: RuleMatchLevel;
+  rule_ids: number[];
+  category_key?: string | null;
+  category?: string;
+  reason: string;
+}
+
+export interface RuleApplicationIssue {
+  row_index: number;
+  row_id?: number;
+  rule_ids: number[];
+  reason: string;
+  level?: RuleMatchLevel;
+}
+
 export interface RuleCandidate {
   transaction_type: "支出" | "收入";
   product: string;
+  product_key?: string;
   counterparty: string;
   variants: string[];
   category: string;
-  category_counts?: Array<{ category: string; occurrences: number }>;
+  category_key?: string | null;
+  category_counts?: HistoricalCategoryCount[];
   category_confidence: number;
   has_category_conflict: boolean;
+  occurrences: number;
+  months_count: number;
+  last_month: string;
+  match_level?: RuleMatchLevel;
+}
+
+export type RuleCoverage = "none" | "partial" | "full";
+
+export interface HistoricalRuleSuggestion {
+  transaction_type: "支出" | "收入";
+  counterparty: string;
+  product: string;
+  category_key: string;
+  category: string;
+  variants: string[];
+  category_counts: HistoricalCategoryCount[];
+  category_confidence: number;
   occurrences: number;
   months_count: number;
   last_month: string;
@@ -73,30 +120,207 @@ export interface RuleCandidate {
 
 export interface HistoricalProductStat {
   transaction_type: "支出" | "收入";
+  product_key: string;
   product: string;
   counterparty: string;
   variants: string[];
-  category_counts: Array<{ category: string; occurrences: number }>;
+  counterparties: string[];
+  counterparty_count: number;
+  category_counts: HistoricalCategoryCount[];
   recommended_category: string;
+  recommended_category_key: string | null;
   category_confidence: number;
   has_category_conflict: boolean;
+  category_status: ProductCategoryStatus;
   occurrences: number;
   months_count: number;
   total_amount: number;
   average_amount: number;
   latest_amount: number;
   last_date: string;
+  first_month: string;
   last_month: string;
   matching_rule_count: number;
   matching_rule_ids: number[];
+  matching_rule_levels: RuleMatchLevel[];
+  rule_coverage: RuleCoverage;
+  matched_occurrences: number;
+  unmatched_occurrences: number;
+  conflicted_occurrences: number;
+  rule_suggestion?: HistoricalRuleSuggestion;
   rule_status: "未创建" | "已覆盖" | "重复" | "冲突";
+  history_rule_mismatch: boolean;
+}
+
+export interface RuleHealthSummary {
+  product_conflicts: number;
+  rule_conflicts: number;
+  duplicate_rules: number;
+  rule_conflict_groups?: number;
+  duplicate_rule_groups?: number;
+  inactive_category_transactions: number;
+  uncategorized_transactions: number;
+  stable_products_without_rule: number;
+}
+
+export interface SavedRule {
+  id?: number;
+  transaction_type: "支出" | "收入";
+  counterparty: string;
+  product: string;
+  category_key: string;
+  category: string;
+  rule_status?: "正常" | "重复" | "冲突";
+  duplicate_rule_ids?: number[];
+  conflict_rule_ids?: number[];
+  occurrences?: number;
+  months_count?: number;
+  last_month?: string;
+  match_level?: RuleMatchLevel;
+}
+
+export type RuleConflictKind = "duplicate" | "same-condition" | "overlap";
+
+export interface RuleConflictGroup {
+  conflict_key: string;
+  kind: RuleConflictKind;
+  rule_ids: number[];
+  rules: SavedRule[];
+  affected_transaction_count: number;
+  affected_months: string[];
+  description: string;
+}
+
+export interface RuleWorkspace {
+  categories_revision: number;
+  rules_revision: number;
+  categories: CategoryDefinition[];
+  rules: SavedRule[];
+  recommendations: RuleCandidate[];
+  historical_products: HistoricalProductStat[];
+  rule_conflicts: RuleConflictGroup[];
+  summary: RuleHealthSummary;
+}
+
+export interface RuleWorkspaceShell {
+  categories_revision: number;
+  rules_revision: number;
+  categories: CategoryDefinition[];
+  rules: SavedRule[];
+}
+
+export interface RuleWorkspaceAnalytics {
+  categories_revision: number;
+  rules_revision: number;
+  categories: CategoryDefinition[];
+  rules: SavedRule[];
+  recommendations: RuleCandidate[];
+  rule_conflicts: RuleConflictGroup[];
+  summary: RuleHealthSummary;
+}
+
+export type ProductHistoryIssueFilter =
+  | "conflict"
+  | "rule-conflict"
+  | "duplicate"
+  | "inactive"
+  | "uncategorized"
+  | "no-rule"
+  | "mismatch";
+
+export interface ProductHistoryQuery {
+  transaction_type?: "支出" | "收入";
+  product_key?: string;
+  category_key?: string | null;
+  product_search?: string;
+  issue_filter?: ProductHistoryIssueFilter;
+  from_month?: string;
+  to_month?: string;
+  min_occurrences?: number;
+}
+
+export interface ProductHistoryIndexResult {
+  categories_revision: number;
+  rules_revision: number;
+  groups: HistoricalProductStat[];
+}
+
+export interface ProductHistoryTransaction {
+  id: number;
+  month: string;
+  transaction_date: string;
+  type: "支出" | "收入";
+  category_key: string | null;
+  category: string;
+  category_active: boolean | null;
+  counterparty: string;
+  product: string;
+  amount: number;
+  rule_match: RuleMatchExplanation;
+}
+
+export interface ProductHistoryResult {
+  groups: HistoricalProductStat[];
+  rows: ProductHistoryTransaction[];
+}
+
+export interface CategoryBackfillRequest {
+  transaction_ids: number[];
+  target_category_key: string;
+  expected_month_revisions: Record<string, number>;
+}
+
+export interface CategoryBackfillPreview {
+  transaction_ids: number[];
+  target_category_key: string;
+  target_category: string;
+  target_transaction_type: "支出" | "收入";
+  transaction_count: number;
+  month_count: number;
+  months: Array<{ month: string; revision: number; count: number }>;
+  old_categories: HistoricalCategoryCount[];
+}
+
+export interface CategoryBackfillResult extends CategoryBackfillPreview {
+  updated_count: number;
+  revisions: Record<string, number>;
+}
+
+export interface ProductRenameRequest {
+  transaction_ids: number[];
+  target_product: string;
+  expected_month_revisions: Record<string, number>;
+}
+
+export interface ProductRenamePreview {
+  transaction_ids: number[];
+  target_product: string;
+  transaction_count: number;
+  month_count: number;
+  months: Array<{ month: string; revision: number; count: number }>;
+  variants: Array<{ product: string; occurrences: number; months_count: number }>;
+}
+
+export interface ProductRenameResult extends ProductRenamePreview {
+  updated_count: number;
+  revisions: Record<string, number>;
+}
+
+export interface SaveRuleWorkspaceRequest {
+  categories_revision: number;
+  rules_revision: number;
+  categories: CategoryDefinition[];
+  rules: SavedRule[];
 }
 
 export interface RuleInsights {
   rules_revision: number;
+  categories_revision: number;
   min_occurrences: number;
   recommendations: RuleCandidate[];
   historical_products: HistoricalProductStat[];
+  rule_conflicts: RuleConflictGroup[];
+  summary: RuleHealthSummary;
 }
 
 export interface Transaction {
@@ -368,6 +592,7 @@ export interface CategoryDefinition {
   sort_order: number;
   transaction_count?: number;
   rule_count?: number;
+  conflict_product_count?: number;
   impact_months?: string[];
 }
 

@@ -75,11 +75,11 @@ export function savingsColor(value: number | null): string {
 export function reconciliationStatus(
   value: number | null,
   tolerance = 100
-): "多消费少支出" | "少消费多支出" | "平账" | "" {
+): "多消费少收入" | "少收入多支出" | "平账" | "" {
   if (value === null || !Number.isFinite(value)) return "";
   if (Math.abs(value) <= tolerance) return "平账";
-  if (value > 0) return "多消费少支出";
-  if (value < 0) return "少消费多支出";
+  if (value > 0) return "多消费少收入";
+  if (value < 0) return "少收入多支出";
   return "平账";
 }
 

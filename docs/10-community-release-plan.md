@@ -12,9 +12,9 @@ manifest.json
 styles.css
 ```
 
-插件不依赖 Python、sidecar、平台原生扩展或 CPU 架构包。macOS 和 Windows
-真实 Obsidian smoke 已完成；Linux 验证属于发布后持续质量工作，不再是社区发布
-门槛。
+插件不依赖 Python、sidecar、平台原生扩展或 CPU 架构包。历史稳定版本的 macOS
+和 Windows 真实 Obsidian smoke 不替代 v1.3.0 候选验证；本版本推送标签前仍需按
+发布日志重新完成两个平台门禁。Linux 验证属于发布后持续质量工作。
 
 ## 稳定兼容边界
 
@@ -23,7 +23,8 @@ styles.css
   升级提示，不修改数据。
 - `versions.json` 声明当前版本最低兼容 Obsidian 版本。
 - 稳定版冻结 schema 9，不包含旧数据库自动迁移路径。
-- v1.2.0 的显示设置保存在插件 `data.json`，不改变数据库或备份格式。
+- v1.3.0 的显示设置保存在插件 `data.json`，导入映射仍保存在设置中，不改变数据库或
+  备份格式；规则工作台的历史统计只读取已保存月份。
 - 生产 `main.js` 打包 React、Recharts 和 SheetJS。根目录
   `THIRD_PARTY_NOTICES.md` 由 lockfile、当前插件版本和
   `build/main.js` 自动生成，并由 `release:check` 验证。
@@ -38,6 +39,9 @@ styles.css
 4. 保持 Ubuntu、macOS 和 Windows CI 的
    `npm ci → typecheck → lint → test → build → release:check` 全部通过。
 5. 每次发布继续只上传标准三文件，并为每个文件生成 artifact attestation。
+6. v1.3.0 发布前人工确认复制 Vault 升级、中文/英文界面、规则冲突与回溯事务、商品
+   统一、部分覆盖、关闭草稿恢复和分类删除弹窗；当前候选未把这些真实 Obsidian smoke
+   结果冒充为自动测试结果。
 
 真实 smoke 状态只允许记录为 `通过（日期/版本/测试人）`、`失败（issue）` 或
 `未测试`。记录不得包含真实数据库、账单内容、私有路径或其他敏感信息。
@@ -53,7 +57,7 @@ styles.css
 - 大数据量分析的分片、缓存和真实 Vault 性能采样；
 - 自动化 Electron/Obsidian 三平台 smoke；
 - 在不改变 SQLite 事实层前提下扩展支付平台导入模板；
-- 评估 SheetJS 延迟加载，以及 Recharts 主版本升级所需的图表回归；
+- 继续采集 Recharts 3 的图表回归，并评估 SheetJS 延迟加载机会；
 - 移动端仅作为独立长期研究，不纳入当前桌面版承诺。
 
 ## 持续发布检查

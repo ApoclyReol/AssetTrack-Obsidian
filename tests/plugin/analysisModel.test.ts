@@ -113,7 +113,8 @@ describe("real-time analysis model", () => {
     expect(reconciliationStatus(-99.99)).toBe("平账");
     expect(reconciliationStatus(100)).toBe("平账");
     expect(reconciliationStatus(-100)).toBe("平账");
-    expect(reconciliationStatus(100.01)).toBe("多消费少支出");
+    expect(reconciliationStatus(100.01)).toBe("多消费少收入");
+    expect(reconciliationStatus(-100.01)).toBe("少收入多支出");
     expect(reconciliationStatus(0)).toBe("平账");
     expect(reconciliationStatus(null)).toBe("");
   });

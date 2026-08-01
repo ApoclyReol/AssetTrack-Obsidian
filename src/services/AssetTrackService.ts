@@ -1,6 +1,9 @@
 import type {
   AccountDefinition,
   AnnualOverview,
+  CategoryBackfillPreview,
+  CategoryBackfillRequest,
+  CategoryBackfillResult,
   CategoryDefinition,
   CsvColumnMapping,
   CsvImportPreview,
@@ -9,8 +12,18 @@ import type {
   FixedAsset,
   MonthCreationPolicy,
   MonthWorkspace,
+  ProductRenamePreview,
+  ProductRenameRequest,
+  ProductRenameResult,
+  ProductHistoryQuery,
+  ProductHistoryIndexResult,
+  ProductHistoryResult,
   RuleCandidate,
   RuleInsights,
+  RuleWorkspaceAnalytics,
+  RuleWorkspaceShell,
+  RuleWorkspace,
+  SaveRuleWorkspaceRequest,
   Transaction
 } from "../types";
 
@@ -69,7 +82,12 @@ export interface AssetTrackService {
   applyRules(
     month: string,
     rows: Transaction[]
-  ): Promise<{ base_revision: number; proposed_rows: Transaction[] }>;
+  ): Promise<{
+    base_revision: number;
+    rules_revision: number;
+    proposed_rows: Transaction[];
+    issues: Array<Record<string, unknown>>;
+  }>;
   inspectCsv(
     month: string,
     filename: string,
@@ -92,6 +110,22 @@ export interface AssetTrackService {
     rows: RuleCandidate[];
   }>;
   ruleInsights(minOccurrences?: number): Promise<RuleInsights>;
+  ruleWorkspace(minOccurrences?: number): Promise<RuleWorkspace>;
+  ruleWorkspaceShell(): Promise<RuleWorkspaceShell>;
+  ruleWorkspaceAnalytics(minOccurrences?: number): Promise<RuleWorkspaceAnalytics>;
+  productHistoryIndex(query: ProductHistoryQuery): Promise<ProductHistoryIndexResult>;
+  productHistory(query: ProductHistoryQuery): Promise<ProductHistoryResult>;
+  previewCategoryBackfill(
+    request: Omit<CategoryBackfillRequest, "expected_month_revisions">
+  ): Promise<CategoryBackfillPreview>;
+  applyCategoryBackfill(
+    request: CategoryBackfillRequest
+  ): Promise<CategoryBackfillResult>;
+  previewProductRename(
+    request: Omit<ProductRenameRequest, "expected_month_revisions">
+  ): Promise<ProductRenamePreview>;
+  applyProductRename(request: ProductRenameRequest): Promise<ProductRenameResult>;
+  saveRuleWorkspace(request: SaveRuleWorkspaceRequest): Promise<RuleWorkspace>;
   debts(): Promise<{ revision: number; rows: Array<Record<string, unknown>> }>;
   saveDebts(
     revision: number,

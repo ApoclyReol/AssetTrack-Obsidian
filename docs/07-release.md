@@ -1,10 +1,11 @@
 # 07 构建与发行
 
-v1.2.0 标签必须为 `1.2.0`，并与 `package.json`、`manifest.json` 和
+v1.3.0 标签必须为 `1.3.0`，并与 `package.json`、`manifest.json` 和
 `versions.json` 完全一致。发布前除标准命令外，应在中英文界面检查金额设置、
-双资产趋势、周期消费表以及 CSV/XLSX/XLS 导入。
+双资产趋势、周期消费表、容错导入、规则工作台、部分规则覆盖、商品统一、
+草稿关闭恢复、回溯 Modal 和统一表格布局。
 
-当前发布文案见 [Release v1.2.0](logs/release-v1.2.0.md)。
+当前发布文案见 [Release v1.3.0](logs/release-v1.3.0.md)。
 
 ## 安装产物
 
@@ -25,6 +26,19 @@ npm run release:check
 `build/`；完成后其根部只包含 `main.js`、`manifest.json` 和 `styles.css`，
 不生成 ZIP 或子目录。发布 workflow 直接上传这三个文件。
 
+## 每次构建的版本同步规则
+
+`npm run build` 不会自动增加版本号，而是把根目录 `manifest.json` 原样复制到
+`build/manifest.json`。所以每次构建必须确保产物对应当前最新版本：
+
+1. 先同步 `package.json`、根目录 `manifest.json` 和 `versions.json` 的目标版本；
+2. 完成全部代码、文档和发行配置修改后，把 `npm run build` 作为最后的产物生成步骤；
+3. 紧接着运行 `npm run release:check`，确认版本、三文件内容和生产 bundle 均为本次构建结果；
+4. 发布或手动安装只取同一次构建生成的三个文件，不手工修改 `build/`，也不沿用旧产物。
+
+版本未改变时也必须在最终修改后重新构建；版本改变时不能只改 build 中的 manifest，必须先
+修改三个版本源文件，再重新生成整个 `build/`。
+
 ## 本地安装
 
 正常用户应从 Community Plugins 目录直接安装。以下手动流程仅用于开发验证或社区
@@ -36,7 +50,7 @@ Release 的 `main.js`、`manifest.json` 和 `styles.css`。更新时保留已有
 
 ## GitHub Release
 
-- tag 与 manifest 版本完全一致，即 `1.1.0`；
+- tag 与 manifest 版本完全一致，使用不带 `v` 前缀的当前版本号；
 - 推送版本 tag 后由 `.github/workflows/release.yml` 重新执行完整验证和生产构建；
 - 只上传 `main.js`、`manifest.json` 和 `styles.css`，不上传插件 ZIP；
 - 对标准三文件生成 GitHub artifact attestations；
@@ -50,6 +64,11 @@ Release 的 `main.js`、`manifest.json` 和 `styles.css`。更新时保留已有
 - 新安装、schema 9 直接打开、未配置门禁和根目录切换；
 - dirty 导航、多 ItemView、禁用/启用和 Obsidian 重启；
 - CSV/XLSX/XLS 映射、增量不去重、覆盖草稿、规则和账户；
+- 缺少日期、空状态、警告保存、无效导入统计；
+- 规则健康摘要、商品名称统一、分类迁移、规则冲突和多月份 revision 回溯；
+- 部分覆盖商品的未覆盖流水规则建议，以及冲突流水的阻止行为；
+- 关闭月流水、借款、分类和规则脏草稿时的取消恢复与确认放弃；
+- 分类删除提示、规则/分类分别保存、英文错误文案、静态表头语义和窄窗口表格换行；
 - ZIP/SQLite 恢复、恢复前安全快照和失败回滚；
 - macOS、Windows 发布验证，以及持续补充的 Linux 最新安装器真实 smoke；
 - 关闭插件后数据库连接和文件锁释放。

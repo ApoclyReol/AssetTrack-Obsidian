@@ -2,17 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Bar,
   CartesianGrid,
-  Cell,
   ComposedChart,
   Legend,
   Line,
   Pie,
   PieChart,
   ReferenceLine,
+  Rectangle,
   ResponsiveContainer,
   Tooltip,
   XAxis,
-  YAxis
+  YAxis,
+  type BarShapeProps
 } from "recharts";
 import { ANALYSIS_MODES, type AnalysisMode } from "../constants";
 import type {
@@ -32,6 +33,7 @@ import {
 } from "./analysisModel";
 import { businessLabel, displayError, getLocale, t } from "../i18n";
 import { money } from "../domain/moneyFormat";
+import { StaticTableHeader } from "./TablePrimitives";
 
 const INFLOW = INFLOW_COLOR;
 const OUTFLOW = OUTFLOW_COLOR;
@@ -59,6 +61,24 @@ type LoadState<T> =
 function percent(value: unknown): string {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? `${parsed.toFixed(1)}%` : "—";
+}
+
+function tooltipMoney(value: unknown): string {
+  return money(value);
+}
+
+function tooltipPercent(value: unknown): string {
+  return percent(value);
+}
+
+function SavingsBarShape(props: BarShapeProps) {
+  const value = Array.isArray(props.value) ? Number(props.value[1]) : Number(props.value);
+  return (
+    <Rectangle
+      {...props}
+      fill={savingsColor(Number.isFinite(value) ? value : null)}
+    />
+  );
 }
 
 function signed(value: unknown, formatter: (input: unknown) => string): string {
@@ -288,7 +308,7 @@ function HomeAnalysis({
       .then((data) => active && setState({ kind: "ready", data }))
       .catch((error) => active && setState({
         kind: "error",
-        message: error instanceof Error ? error.message : String(error)
+        message: displayError(error)
       }));
     return () => { active = false; };
   }, [api, dataVersion]);
@@ -338,15 +358,15 @@ function HomeAnalysis({
       <ChartPanel title={t("固定资产摘要", "Fixed asset summary")}>
         {current.fixed_assets.length ? (
           <div className="asset-track-table-scroll">
-            <table>
-              <thead><tr><th>{t("名称", "Name")}</th><th>{t("类别", "Category")}</th><th>{t("状态", "Status")}</th><th>{t("购买价格", "Purchase price")}</th></tr></thead>
+            <table className="asset-track-analysis-fixed-assets-table">
+              <thead><tr><StaticTableHeader label={t("名称", "Name")} /><StaticTableHeader label={t("类别", "Category")} /><StaticTableHeader label={t("状态", "Status")} className="asset-track-status-column" /><StaticTableHeader label={t("购买价格", "Purchase price")} className="asset-track-amount-column" /></tr></thead>
               <tbody>
                 {current.fixed_assets.map((row) => (
                   <tr key={row.asset_key ?? row.id}>
                     <td>{row.asset_name}</td>
                     <td>{row.category}</td>
-                    <td>{businessLabel(row.status)}</td>
-                    <td>{money(row.purchase_price)}</td>
+                    <td className="asset-track-status-cell">{businessLabel(row.status)}</td>
+                    <td className="asset-track-amount-cell">{money(row.purchase_price)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -378,7 +398,7 @@ function AnnualAnalysis({
       .then((data) => active && setState({ kind: "ready", data }))
       .catch((error) => active && setState({
         kind: "error",
-        message: error instanceof Error ? error.message : String(error)
+        message: displayError(error)
       }));
     return () => { active = false; };
   }, [api, dataVersion, year]);
@@ -430,7 +450,7 @@ function AnnualAnalysis({
             <XAxis dataKey="month" />
             <YAxis yAxisId="flow" tickFormatter={axis} />
             <YAxis yAxisId="asset" orientation="right" tickFormatter={axis} />
-            <Tooltip formatter={(value: number | string) => money(value)} />
+            <Tooltip formatter={tooltipMoney} />
             <Legend />
             <Bar yAxisId="flow" dataKey="total_income" name={t("收入", "Income")} fill={INFLOW} />
             <Bar yAxisId="flow" dataKey="total_expense" name={t("支出", "Expense")} fill={OUTFLOW} />
@@ -449,20 +469,20 @@ function AnnualAnalysis({
         </div>
         {recurring.length ? (
           <div className="asset-track-table-scroll">
-            <table>
+            <table className="asset-track-analysis-recurring-table">
               <thead><tr>
-                <th>{t("商品", "Item")}</th><th>{t("分类", "Category")}</th>
-                <th>{t("出现月份", "Months")}</th><th>{t("次数", "Transactions")}</th>
-                <th>{t("累计金额", "Total")}</th><th>{t("平均单次", "Average")}</th>
-                <th>{t("最近金额", "Latest amount")}</th><th>{t("最后发生日期", "Last date")}</th>
+                <StaticTableHeader label={t("商品", "Item")} /><StaticTableHeader label={t("分类", "Category")} />
+                <StaticTableHeader label={t("出现月份", "Months")} className="asset-track-count-column" /><StaticTableHeader label={t("次数", "Transactions")} className="asset-track-count-column" />
+                <StaticTableHeader label={t("累计金额", "Total")} className="asset-track-amount-column" /><StaticTableHeader label={t("平均单次", "Average")} className="asset-track-amount-column" />
+                <StaticTableHeader label={t("最近金额", "Latest amount")} className="asset-track-amount-column" /><StaticTableHeader label={t("最后发生日期", "Last date")} className="asset-track-date-column" />
               </tr></thead>
               <tbody>{recurring.map((row) => (
                 <tr key={row.product || "__empty__"}>
                   <td>{row.product || t("未填写商品", "Item not specified")}</td>
-                  <td>{row.category}</td><td>{row.months_count}</td>
-                  <td>{row.transaction_count}</td><td>{money(row.total)}</td>
-                  <td>{money(row.average_amount)}</td><td>{money(row.latest_amount)}</td>
-                  <td>{row.last_date}</td>
+                  <td>{row.category}</td><td className="asset-track-count-cell">{row.months_count}</td>
+                  <td className="asset-track-count-cell">{row.transaction_count}</td><td className="asset-track-amount-cell">{money(row.total)}</td>
+                  <td className="asset-track-amount-cell">{money(row.average_amount)}</td><td className="asset-track-amount-cell">{money(row.latest_amount)}</td>
+                  <td className="asset-track-date-cell">{row.last_date}</td>
                 </tr>
               ))}</tbody>
             </table>
@@ -476,16 +496,13 @@ function AnnualAnalysis({
               <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
               <XAxis dataKey="month" />
               <YAxis tickFormatter={(value) => `${Number(value).toFixed(0)}%`} />
-              <Tooltip formatter={(value: number | string) => percent(value)} />
+              <Tooltip formatter={tooltipPercent} />
               <ReferenceLine y={0} stroke="var(--text-muted)" />
-              <Bar dataKey="savings_rate" name={t("单月储蓄率", "Monthly savings rate")}>
-                {monthlySavings.map((row) => (
-                  <Cell
-                    key={row.month}
-                    fill={savingsColor(row.savings_rate)}
-                  />
-                ))}
-              </Bar>
+              <Bar
+                dataKey="savings_rate"
+                name={t("单月储蓄率", "Monthly savings rate")}
+                shape={SavingsBarShape}
+              />
             </ComposedChart>
           </ResponsiveContainer>
         ) : <Empty text={t("近 12 月没有收入大于零的月份。", "No month in the last 12 months has income above zero.")} />}
@@ -497,7 +514,7 @@ function AnnualAnalysis({
               <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
               <XAxis type="number" tickFormatter={axis} />
               <YAxis type="category" dataKey="category" width={80} />
-              <Tooltip formatter={(value: number | string) => money(value)} />
+              <Tooltip formatter={tooltipMoney} />
               <Bar dataKey="total" name={t("年度金额", "Annual amount")} fill={PURPLE} />
             </ComposedChart>
           </ResponsiveContainer>
@@ -508,7 +525,7 @@ function AnnualAnalysis({
               <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
               <XAxis dataKey="pattern" />
               <YAxis tickFormatter={axis} />
-              <Tooltip formatter={(value: number | string) => money(value)} />
+              <Tooltip formatter={tooltipMoney} />
               <Bar dataKey="total" name={t("年度金额", "Annual amount")} fill={GOLD} />
             </ComposedChart>
           </ResponsiveContainer>
@@ -532,7 +549,7 @@ function AnnualAnalysis({
             <XAxis dataKey="month" />
             <YAxis yAxisId="flow" tickFormatter={axis} />
             <YAxis yAxisId="asset" orientation="right" tickFormatter={axis} />
-            <Tooltip formatter={(value: number | string) => money(value)} />
+            <Tooltip formatter={tooltipMoney} />
             <Legend />
             <Bar yAxisId="flow" dataKey="total_income" name={t("收入", "Income")} fill={INFLOW} />
             <Bar yAxisId="flow" dataKey="total_expense" name={t("支出", "Expense")} fill={OUTFLOW} />
@@ -566,7 +583,7 @@ function MonthlyAnalysis({
       .then((data) => active && setState({ kind: "ready", data }))
       .catch((error) => active && setState({
         kind: "error",
-        message: error instanceof Error ? error.message : String(error)
+        message: displayError(error)
       }));
     return () => { active = false; };
   }, [api, dataVersion, month]);
@@ -690,7 +707,7 @@ function MonthlyAnalysis({
                 width={190}
                 tick={<ComparisonCategoryTick rows={comparisonRows} />}
               />
-              <Tooltip formatter={(value: number | string) => money(value)} />
+              <Tooltip formatter={tooltipMoney} />
               <Bar
                 dataKey="previous"
                 name={t("上月", "Previous month")}
@@ -732,17 +749,17 @@ function PiePanel({
   title: string;
   data: Array<{ name: string; value: number }>;
 }) {
+  const coloredData = data.map((item, index) => ({
+    ...item,
+    fill: PIE_COLORS[index % PIE_COLORS.length]
+  }));
   return (
     <ChartPanel title={title}>
       {data.length ? (
         <ResponsiveContainer width="100%" height={280}>
           <PieChart>
-            <Pie data={data} dataKey="value" nameKey="name" innerRadius={48} outerRadius={88}>
-              {data.map((item, index) => (
-                <Cell key={item.name} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-              ))}
-            </Pie>
-            <Tooltip formatter={(value: number | string) => money(value)} />
+            <Pie data={coloredData} dataKey="value" nameKey="name" innerRadius={48} outerRadius={88} />
+            <Tooltip formatter={tooltipMoney} />
             <Legend />
           </PieChart>
         </ResponsiveContainer>
@@ -760,15 +777,15 @@ function BigTicketPanel({
     <ChartPanel title={t("大额支出", "Large expenses")} className="asset-track-big-ticket-panel">
       {rows.length ? (
         <div className="asset-track-table-scroll">
-          <table>
+          <table className="asset-track-analysis-big-ticket-table">
             <thead>
-              <tr><th scope="col">{t("商品", "Item")}</th><th scope="col">{t("金额", "Amount")}</th></tr>
+              <tr><StaticTableHeader label={t("商品", "Item")} /><StaticTableHeader label={t("金额", "Amount")} className="asset-track-amount-column" /></tr>
             </thead>
             <tbody>
               {rows.map((row, index) => (
                 <tr key={`${row.product}-${index}`}>
                   <td>{row.product || t("未填写商品", "Item not specified")}</td>
-                  <td>{money(row.amount)}</td>
+                  <td className="asset-track-amount-cell">{money(row.amount)}</td>
                 </tr>
               ))}
             </tbody>
@@ -789,19 +806,19 @@ function AnomalyPanel({
     <ChartPanel title={t("异常与变化", "Anomalies and changes")} className="asset-track-anomaly-panel">
       {rows.length ? (
         <div className="asset-track-table-scroll">
-          <table>
+          <table className="asset-track-analysis-anomaly-table">
             <thead>
               <tr>
-                <th scope="col">{t("分类", "Category")}</th>
-                <th scope="col">{t("金额", "Amount")}</th>
-                <th scope="col">{t("异常情况", "Anomaly")}</th>
+                <StaticTableHeader label={t("分类", "Category")} />
+                <StaticTableHeader label={t("金额", "Amount")} className="asset-track-amount-column" />
+                <StaticTableHeader label={t("异常情况", "Anomaly")} />
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => (
                 <tr key={row.category}>
                   <td>{row.category}</td>
-                  <td>{money(row.amount)}</td>
+                  <td className="asset-track-amount-cell">{money(row.amount)}</td>
                   <td>{displayError(row.situation)}</td>
                 </tr>
               ))}

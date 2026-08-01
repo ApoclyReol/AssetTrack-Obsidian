@@ -14,6 +14,7 @@ import type {
 } from "../types";
 import { scalarText } from "../domain/text";
 import { businessLabel, displayError, t } from "../i18n";
+import { StaticTableHeader } from "./TablePrimitives";
 
 const TYPES = ["支出", "收入", "代付", "加仓", "提现", "忽略"] as const;
 const REQUIRED_FIELDS: Array<[keyof CsvColumnMapping, string]> = [
@@ -378,9 +379,9 @@ export function CsvImportDialog({
         <details>
           <summary>{t("查看原始数据样例", "View raw data samples")}</summary>
           <div className="asset-track-table-scroll">
-            <table>
+            <table className="asset-track-import-sample-table">
               <thead>
-                <tr>{inspection.headers.map((header) => <th key={header}>{header}</th>)}</tr>
+                <tr>{inspection.headers.map((header) => <StaticTableHeader key={header} label={header} />)}</tr>
               </thead>
               <tbody>
                 {inspection.sample_rows.map((row, index) => (

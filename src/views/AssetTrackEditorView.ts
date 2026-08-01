@@ -14,6 +14,10 @@ import type { CsvColumnMapping } from "../types";
 import { confirmAction } from "../ui/ConfirmModal";
 import { displayError, t } from "../i18n";
 import { AssetTrackErrorBoundary } from "../ui/AssetTrackErrorBoundary";
+import {
+  DRAFT_RECOVERY_EPHEMERAL_KEY,
+  type EditorDraftSnapshot
+} from "../ui/editorDraft";
 
 export interface AssetTrackViewState extends Record<string, unknown> {
   mode?: EditorMode;
@@ -28,8 +32,16 @@ export class AssetTrackEditorView extends ItemView {
     analysisMode: "home"
   };
   private dirty = false;
+  private draftSnapshot: EditorDraftSnapshot | null = null;
   private readonly onDirtyChange = (dirty: boolean): void => {
     this.dirty = dirty;
+    if (!dirty) this.draftSnapshot = null;
+  };
+  private readonly onDraftSnapshotChange = (
+    snapshot: EditorDraftSnapshot | null
+  ): void => {
+    this.draftSnapshot = snapshot;
+    this.dirty = snapshot !== null;
   };
   private readonly onStateChange = (
     mode: EditorMode,
@@ -42,6 +54,10 @@ export class AssetTrackEditorView extends ItemView {
   private readonly subscribeDataChanges = (
     listener: () => void
   ): (() => void) => this.plugin.onDataChange(listener);
+  private readonly notifyDataChanged = (): void => {
+    this.plugin.notifyDataChanged();
+    void this.plugin.refreshViews();
+  };
   private readonly getCsvMapping = (
     signature: string
   ): CsvColumnMapping | undefined =>
@@ -96,6 +112,8 @@ export class AssetTrackEditorView extends ItemView {
     ) {
       return;
     }
+    this.draftSnapshot = null;
+    this.dirty = false;
     const requestedMode = typeof state.mode === "string" ? state.mode : "";
     const requestedAnalysisMode =
       typeof state.analysisMode === "string" ? state.analysisMode : "";
@@ -116,6 +134,29 @@ export class AssetTrackEditorView extends ItemView {
 
   getState(): Record<string, unknown> {
     return this.state;
+  }
+
+  setEphemeralState(state: unknown): void {
+    super.setEphemeralState(state);
+    if (typeof state !== "object" || state === null) return;
+    const token = (state as Record<string, unknown>)[
+      DRAFT_RECOVERY_EPHEMERAL_KEY
+    ];
+    if (typeof token !== "string") return;
+    const snapshot = this.plugin.takeDraftRecovery(token);
+    if (!snapshot) return;
+    this.draftSnapshot = snapshot;
+    this.dirty = true;
+    this.state = {
+      ...this.state,
+      mode: snapshot.kind,
+      month: snapshot.kind === "transactions"
+        ? snapshot.month
+        : this.state.month
+    };
+    this.root?.unmount();
+    this.root = null;
+    this.render();
   }
 
   hasUnsavedChanges(): boolean {
@@ -176,17 +217,21 @@ export class AssetTrackEditorView extends ItemView {
         AssetTrackErrorBoundary,
         { onReload: () => this.refresh() },
         createElement(AssetTrackEditorApp, {
+          app: this.app,
           api: this.plugin.api,
           settings: this.plugin.settings,
           initialMode: this.state.mode ?? "analysis",
           initialAnalysisMode: this.state.analysisMode ?? "home",
           initialMonth: this.state.month,
+          initialDraft: this.draftSnapshot ?? undefined,
           hostWindow: this.contentEl.ownerDocument.defaultView
             ?? this.containerEl.ownerDocument.defaultView
             ?? activeWindow,
           confirmAction: this.confirmAction,
           onDirtyChange: this.onDirtyChange,
+          onDraftSnapshotChange: this.onDraftSnapshotChange,
           onStateChange: this.onStateChange,
+          notifyDataChanged: this.notifyDataChanged,
           subscribeDataChanges: this.subscribeDataChanges,
           getCsvMapping: this.getCsvMapping,
           saveCsvMapping: this.saveCsvMapping
@@ -206,18 +251,24 @@ export class AssetTrackEditorView extends ItemView {
         t("关闭并放弃", "Close and discard")
       );
       if (!discard) {
+        const snapshot = this.draftSnapshot;
         const hostWindow = this.containerEl.ownerDocument.defaultView;
         hostWindow?.setTimeout(
-          () => void this.plugin.openEditor(
-            this.state.mode,
-            this.state.month,
-            this.state.analysisMode
-          ),
+          () => void (snapshot
+            ? this.plugin.reopenEditorWithDraft(this.state, snapshot)
+            : this.plugin.openEditor(
+                this.state.mode,
+                this.state.month,
+                this.state.analysisMode
+              )),
           0
         );
+      } else {
+        this.draftSnapshot = null;
       }
     }
     this.root?.unmount();
     this.root = null;
+    this.dirty = false;
   }
 }

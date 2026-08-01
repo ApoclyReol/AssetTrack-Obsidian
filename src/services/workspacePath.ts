@@ -81,6 +81,3 @@ export function backupsVaultPath(dataDirectory: string): string {
   if (!normalized) throw new Error("尚未选择 Asset-track 数据目录");
   return `${normalized}/backups`;
 }
-
-/** @deprecated Use normalizeDataDirectory. */
-export const normalizeWorkspacePath = normalizeDataDirectory;

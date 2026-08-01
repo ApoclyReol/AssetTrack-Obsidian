@@ -7,6 +7,9 @@ import { inspectCsv, previewCsv } from "../domain/csv";
 import type {
   AccountDefinition,
   AnnualOverview,
+  CategoryBackfillPreview,
+  CategoryBackfillRequest,
+  CategoryBackfillResult,
   CategoryDefinition,
   CsvColumnMapping,
   CsvImportPreview,
@@ -15,7 +18,14 @@ import type {
   FixedAsset,
   MonthCreationPolicy,
   MonthWorkspace,
+  ProductRenamePreview,
+  ProductRenameRequest,
+  ProductRenameResult,
+  ProductHistoryQuery,
+  ProductHistoryResult,
   RuleInsights,
+  RuleWorkspace,
+  SaveRuleWorkspaceRequest,
   Transaction
 } from "../types";
 import { BackupService } from "./BackupService";
@@ -121,7 +131,12 @@ export class LocalAssetTrackService implements AssetTrackService {
   async applyRules(
     month: string,
     rows: Transaction[]
-  ): Promise<{ base_revision: number; proposed_rows: Transaction[] }> {
+  ): Promise<{
+    base_revision: number;
+    rules_revision: number;
+    proposed_rows: Transaction[];
+    issues: Array<Record<string, unknown>>;
+  }> {
     this.ready();
     return this.repository.rulesPreview(month, rows);
   }
@@ -177,6 +192,66 @@ export class LocalAssetTrackService implements AssetTrackService {
   async ruleInsights(minOccurrences = 2): Promise<RuleInsights> {
     this.ready();
     return this.repository.ruleInsights(minOccurrences);
+  }
+
+  async ruleWorkspace(minOccurrences = 2): Promise<RuleWorkspace> {
+    this.ready();
+    return this.repository.ruleWorkspace(minOccurrences);
+  }
+
+  async ruleWorkspaceShell(): Promise<import("../types").RuleWorkspaceShell> {
+    this.ready();
+    return this.repository.ruleWorkspaceShell();
+  }
+
+  async ruleWorkspaceAnalytics(
+    minOccurrences = 2
+  ): Promise<import("../types").RuleWorkspaceAnalytics> {
+    this.ready();
+    return this.repository.ruleWorkspaceAnalytics(minOccurrences);
+  }
+
+  async productHistoryIndex(
+    query: ProductHistoryQuery
+  ): Promise<import("../types").ProductHistoryIndexResult> {
+    this.ready();
+    return this.repository.productHistoryIndex(query);
+  }
+
+  async productHistory(query: ProductHistoryQuery): Promise<ProductHistoryResult> {
+    this.ready();
+    return this.repository.productHistory(query);
+  }
+
+  async previewCategoryBackfill(
+    request: Omit<CategoryBackfillRequest, "expected_month_revisions">
+  ): Promise<CategoryBackfillPreview> {
+    this.ready();
+    return this.repository.previewCategoryBackfill(request);
+  }
+
+  async applyCategoryBackfill(
+    request: CategoryBackfillRequest
+  ): Promise<CategoryBackfillResult> {
+    this.ready();
+    return this.repository.applyCategoryBackfill(request);
+  }
+
+  async previewProductRename(
+    request: Omit<ProductRenameRequest, "expected_month_revisions">
+  ): Promise<ProductRenamePreview> {
+    this.ready();
+    return this.repository.previewProductRename(request);
+  }
+
+  async applyProductRename(request: ProductRenameRequest): Promise<ProductRenameResult> {
+    this.ready();
+    return this.repository.applyProductRename(request);
+  }
+
+  async saveRuleWorkspace(request: SaveRuleWorkspaceRequest): Promise<RuleWorkspace> {
+    this.ready();
+    return this.repository.saveRuleWorkspace(request);
   }
 
   async debts(): Promise<{

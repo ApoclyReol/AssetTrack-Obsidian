@@ -1,13 +1,13 @@
 # Third-Party Notices
 
-Asset Track v1.2.0 的生产 `main.js` 会打包以下直接依赖。版本和许可证
+Asset Track v1.3.0 的生产 `main.js` 会打包以下直接依赖。版本和许可证
 来自 `package-lock.json`；此清单由
 `npm run notices:update` 生成，并由 `npm run release:check` 验证。
 
 | 依赖 | 锁定版本 | 许可证 | 项目 |
 | --- | --- | --- | --- |
 | React / React DOM | 18.3.1 | MIT | https://react.dev/ |
-| Recharts | 2.15.4 | MIT | https://recharts.org/ |
+| Recharts | 3.10.1 | MIT | https://recharts.org/ |
 | SheetJS Community Edition (`xlsx`) | 0.20.3 | Apache-2.0 | https://sheetjs.com/ |
 
 SheetJS 使用固定 CDN tarball，`package-lock.json` 同时锁定下载地址、版本和

@@ -38,6 +38,11 @@ import {
   type AssetTrackViewState
 } from "./views/AssetTrackEditorView";
 import { t } from "./i18n";
+import {
+  DRAFT_RECOVERY_EPHEMERAL_KEY,
+  DraftRecoveryStore,
+  type EditorDraftSnapshot
+} from "./ui/editorDraft";
 
 const electronShell = loadElectronModule().shell;
 
@@ -57,6 +62,7 @@ export default class AssetTrackPlugin extends Plugin {
   settingsIssues: string[] = [];
   private databaseManager: DatabaseManager | null = null;
   private readonly dataListeners = new Set<() => void>();
+  private readonly draftRecoveries = new DraftRecoveryStore();
 
   async onload(): Promise<void> {
     const parsed = parseAssetTrackSettings(await this.loadData());
@@ -98,6 +104,32 @@ export default class AssetTrackPlugin extends Plugin {
       state: { mode, month, analysisMode } satisfies AssetTrackViewState
     });
     await this.app.workspace.revealLeaf(leaf);
+  }
+
+  async reopenEditorWithDraft(
+    state: AssetTrackViewState,
+    snapshot: EditorDraftSnapshot
+  ): Promise<void> {
+    const token = this.draftRecoveries.store(snapshot);
+    const leaf = this.app.workspace.getLeaf("tab");
+    try {
+      await leaf.setViewState({
+        type: VIEW_TYPE_ASSET_TRACK,
+        active: true,
+        state
+      });
+      leaf.setEphemeralState({
+        [DRAFT_RECOVERY_EPHEMERAL_KEY]: token
+      });
+      await this.app.workspace.revealLeaf(leaf);
+    } catch (error) {
+      this.draftRecoveries.delete(token);
+      throw error;
+    }
+  }
+
+  takeDraftRecovery(token: string): EditorDraftSnapshot | undefined {
+    return this.draftRecoveries.take(token);
   }
 
   isDatabaseReady(): boolean {
@@ -401,6 +433,7 @@ export default class AssetTrackPlugin extends Plugin {
   }
 
   onunload(): void {
+    this.draftRecoveries.clear();
     if (this.isDatabaseReady()) void this.api.close();
   }
 }

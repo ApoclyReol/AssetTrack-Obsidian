@@ -46,7 +46,22 @@ release files above are the complete supported plugin bundle.
 
 Bill import supports CSV, XLSX, and XLS files. The mapping dialog can map date,
 amount, income/expense type, description, counterparty, and transaction status.
-Parsing and rule matching happen locally.
+Missing dates default to the first day of the selected month, empty transaction
+statuses can be included explicitly, and warning-only rows can be saved for later
+review. Parsing and rule matching happen locally.
+
+The Rules workspace provides conflict health summaries, product-level history,
+rule explanations, product-name unification, category backfill previews, and
+revision-protected batch updates. Categories, matching rules, and history fixes
+are saved separately so each operation reports its own result. Rule coverage is
+reported independently from duplicate or conflicting rules, so partially covered
+products can still create suggestions for unmatched transactions.
+
+Product-name unification starts with the current transaction type and main
+category, then lets you switch categories or search for other product groups.
+If you cancel discarding a dirty month, debt, category, or rule view while closing
+it, Asset Track reopens that view and restores its in-memory draft for the current
+plugin session. Draft recovery does not persist across app or plugin restarts.
 
 ## Language
 
@@ -101,7 +116,7 @@ includes a read-only recurring-expense table for the latest 12 data months.
 
 ## Compatibility
 
-- Current version: 1.2.0; SQLite schema: 9.
+- Current version: 1.3.0; SQLite schema: 9.
 - Desktop only: macOS, Windows, and Linux; mobile is not supported.
 - Minimum app version: 1.9.10.
 - The desktop runtime must provide Node.js 22.16 or later, `DatabaseSync`, and
@@ -109,9 +124,10 @@ includes a read-only recurring-expense table for the latest 12 data months.
 - Python, a separate Node.js installation, sidecars, and native extension packages
   are not required.
 
-macOS and Windows smoke tests have passed. Linux validation remains a
-post-release quality task; see the
-[post-release quality and feature plan](docs/10-community-release-plan.md).
+Each release candidate is checked in real Obsidian on macOS and Windows before
+its version tag is pushed. The current candidate status is recorded in the
+[v1.3.0 release log](docs/logs/release-v1.3.0.md); Linux validation remains a
+post-release quality task.
 
 ## Development
 

@@ -14,6 +14,9 @@ SQLite。项目不再包含 Python、HTTP API、sidecar 或平台原生扩展。
 - 项目只使用 `build/` 作为构建产物目录，不创建 `dist/` 或 `out/`。
 - 每次构建先清空 `build/`，再将 `main.js`、`manifest.json` 和 `styles.css`
   直接放在该目录下；`build/` 不得包含子目录、ZIP 或其他文件。
+- 构建不会自动升级版本号；构建前先同步 `package.json`、根目录 `manifest.json` 和
+  `versions.json`，完成全部修改后重新生成最新三文件，并运行 `npm run release:check`。
+  不直接编辑或复用旧的 `build/` 文件。
 - 正式数据只能位于用户明确选择的 Vault 内 Asset-track 数据目录。
 - 数据库路径固定为 `<数据目录>/accounting_system.db`，保护备份位于
   `<数据目录>/backups/`。
@@ -44,8 +47,8 @@ docs/                                   当前架构、用户、开发与发行�
 ## 当前 handoff
 
 - Asset Track 已在 Community Plugins 上线，社区目录是推荐安装与更新方式；
-  v1.2.0 是当前版本，保持 schema 9 和核心对账口径，新增金额与阈值设置、资金
-  投入资产/市场净资产双口径和只读周期消费面板。
+  v1.3.0 是当前本地发布候选，保持 schema 9 和核心对账口径，在 v1.2.0 的金额、
+  资产与分析基础上增加导入容错、警告保存、规则工作台、商品回溯和统一表格布局。
 - 确认操作使用 Obsidian 原生 Modal，CSV 映射窗口支持焦点陷阱、Escape 和状态
   播报；流水逐项表按可视行渲染，分块编号为线性预计算。
 - schema 8 私有数据已在 2026-07-28 使用一次性离线流程迁移并核验；迁移工具及
@@ -57,7 +60,7 @@ docs/                                   当前架构、用户、开发与发行�
 - 插件实例共享 `DatabaseManager`、Repository、Service、写入队列和数据变更事件；
   每个 ItemView 仍独立保存草稿与 dirty 状态。
 - 继续维护前先读 `docs/00-reading-guide.md`；本次实现、兼容边界、测试和后续
-  注意事项详见 `docs/logs/release-v1.2.0.md`。
+  注意事项详见 `docs/logs/release-v1.3.0.md`。
 - 后续每次正式更新都在 `docs/logs/` 新增 `release-vN.N.N.md`，并同步修改受影响
   的编号长期文档，不把当前事实只留在 release 日志中。
 

@@ -19,6 +19,7 @@ class ConfirmationModal extends Modal {
   }
 
   onOpen(): void {
+    this.modalEl.addClass("asset-track-confirmation-modal");
     this.setTitle(this.title);
     this.contentEl.createEl("p", { text: this.message });
     new Setting(this.contentEl)
@@ -48,6 +49,44 @@ class ConfirmationModal extends Modal {
   }
 }
 
+class InformationModal extends Modal {
+  private settled = false;
+
+  constructor(
+    app: App,
+    private readonly title: string,
+    private readonly message: string,
+    private readonly actions: Array<{ text: string; onClick?: () => void }>,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.modalEl.addClass("asset-track-confirmation-modal");
+    this.setTitle(this.title);
+    this.contentEl.createEl("p", { text: this.message });
+    const setting = new Setting(this.contentEl);
+    this.actions.forEach((action, index) => {
+      setting.addButton((button) => {
+        if (index === 0) button.setCta();
+        button
+          .setButtonText(action.text)
+          .onClick(() => {
+            if (this.settled) return;
+            this.settled = true;
+            this.close();
+            action.onClick?.();
+          });
+        if (index === 0) button.buttonEl.focus();
+      });
+    });
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
 export function confirmAction(
   app: App,
   title: string,
@@ -63,4 +102,13 @@ export function confirmAction(
       resolve
     ).open();
   });
+}
+
+export function alertAction(
+  app: App,
+  title: string,
+  message: string,
+  actions: Array<{ text: string; onClick?: () => void }>
+): void {
+  new InformationModal(app, title, message, actions).open();
 }
