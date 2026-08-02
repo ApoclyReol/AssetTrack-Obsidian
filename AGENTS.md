@@ -52,7 +52,7 @@ docs/                                   当前架构、用户、开发与发行�
 ## 当前 handoff
 
 - Asset Track 已在 Community Plugins 上线，社区目录是推荐安装与更新方式；
-  v1.4.0 已正式发布，要求 Obsidian 1.13.0+，并在发布声明中要求用户使用当前
+  v1.4.1 已正式发布，要求 Obsidian 1.13.0+，并在发布声明中要求用户使用当前
   最新的 1.13.x 桌面版；保持 schema 9 和核心对账口径，在 v1.2.0 的金额、
   资产与分析基础上增加导入容错、警告保存、规则工作台、商品回溯和统一表格布局。
 - 确认操作使用 Obsidian 原生 Modal，CSV 映射窗口支持焦点陷阱、Escape 和状态
@@ -66,7 +66,7 @@ docs/                                   当前架构、用户、开发与发行�
 - 插件实例共享 `DatabaseManager`、Repository、Service、写入队列和数据变更事件；
   每个 ItemView 仍独立保存草稿与 dirty 状态。
 - 继续维护前先读 `docs/00-reading-guide.md`；本次实现、兼容边界、测试和后续
-  注意事项详见 `docs/logs/release-v1.4.0.md`。
+  注意事项详见 `docs/logs/release-v1.4.1.md`。
 - 后续每次正式更新都在 `docs/logs/` 新增 `release-vN.N.N.md`，并同步修改受影响
   的编号长期文档，不把当前事实只留在 release 日志中。
 

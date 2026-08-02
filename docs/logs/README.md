@@ -23,6 +23,8 @@
   回溯/统一、规则冲突解释和统一表格布局；保持 schema 9。
 - [Release v1.4.0](release-v1.4.0.md)：适配 Obsidian 1.13 声明式设置，移除 Vault
   全库枚举，最低版本提升至 1.13.0；保持 schema 9。
+- [Release v1.4.1](release-v1.4.1.md)：优化规则匹配、分析查询和生产 bundle 性能，
+  拆分 UI 与 Repository 维护边界；保持 schema 9、数据和备份格式兼容。
 
 后续每次正式更新新增 `release-vN.N.N.md`，至少记录：
 

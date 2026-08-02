@@ -4,6 +4,22 @@
 
 - 后续修复与功能进入此区。
 
+## 1.4.1
+
+### 中文更新
+
+- 优化规则匹配和历史规则分析查询，减少重复扫描，在大数据量下提升商品总览和规则工作台响应速度。
+- 优化生产构建配置，减少 `main.js` 体积并改善插件加载效率；本次版本主要是性能优化和开发维护更新。
+- 拆分分析页、编辑器表格、规则历史弹窗和 Repository 辅助职责，降低后续维护和迭代成本。
+- 保持 Obsidian 1.13.0+、schema 9、数据库路径、`data.json` 兼容字段和备份格式不变。
+
+### English updates
+
+- Optimized rule matching and historical rule-analysis queries to avoid repeated scans and improve Item overview and Rules workspace responsiveness on larger datasets.
+- Improved the production build configuration to reduce `main.js` size and improve plugin loading efficiency. This release is primarily a performance and development-maintenance update.
+- Split the analysis pages, editor tables, rule-history modals, and Repository helpers into clearer maintenance boundaries.
+- Obsidian 1.13.0+, schema 9, database paths, compatible `data.json` fields, and backup formats remain unchanged.
+
 ## 1.4.0
 
 ### 中文更新

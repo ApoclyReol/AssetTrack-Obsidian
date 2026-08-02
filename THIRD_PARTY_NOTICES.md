@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-Asset Track v1.4.0 的生产 `main.js` 会打包以下直接依赖。版本和许可证
+Asset Track v1.4.1 的生产 `main.js` 会打包以下直接依赖。版本和许可证
 来自 `package-lock.json`；此清单由
 `npm run notices:update` 生成，并由 `npm run release:check` 验证。
 

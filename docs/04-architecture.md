@@ -68,7 +68,7 @@ SQLite 事实模型中并由同一 Service/Repository 管理；不得引入云�
 
 未配置时不创建数据库。运行时要求 Node 22.16 以上且提供 `DatabaseSync` 和
 `sqlite.backup`；能力不足时只返回升级提示。最低 Obsidian 版本为 1.13.0；发布
-v1.4.0 前请先升级到当前最新的 1.13.x 桌面版。
+当前版本发布前请先升级到当前最新的 1.13.x 桌面版。
 
 插件 `data.json` 只保存 `dataDirectory` 和账单映射元数据，不保存财务事实。
 schema 9 在流水和自动规则中分别保存 `counterparty`；插件运行时不包含旧 schema
