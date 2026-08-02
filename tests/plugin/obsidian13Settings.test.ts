@@ -6,7 +6,10 @@ const root = resolve(import.meta.dirname, "../..");
 
 describe("Obsidian 1.13 settings boundary", () => {
   it("uses declarative settings without a PluginSettingTab display override", () => {
-    const source = readFileSync(resolve(root, "src/settings.ts"), "utf8");
+    const source = readFileSync(resolve(root, "src/settings.ts"), "utf8").replace(
+      /\r\n/g,
+      "\n"
+    );
 
     expect(source).toContain("getSettingDefinitions(): SettingDefinitionItem[]");
     expect(source).toContain('control: {\n              type: "folder"');
