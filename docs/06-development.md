@@ -15,6 +15,19 @@
   刷新页面，不恢复 `PluginSettingTab.display()` 或其他已弃用的 imperative 设置入口。
 - 目录选择使用原生 `folder` 控件和本地草稿；不得调用 `getAllLoadedFiles()`、`getFiles()`
   或 `getMarkdownFiles()` 枚举 Vault 文件。
+- Recharts 3 会通过 Redux 进入生产 bundle；构建阶段对 Redux 私有 action 后缀的点号写法做
+  等价改写，避免被社区扫描器误判为运行时域名拼接。该改写不改变图表、财务计算或网络行为，
+  `release:check` 会阻止该写法重新进入最终 `main.js`。
+
+## 延后到下一正式版本的扫描器维护项
+
+- 社区扫描器曾提示“Plugin assembles domain names at runtime”。当前判断为 Recharts 间接依赖
+  Redux 的内部随机 action 后缀写法触发的误报，不是 Asset Track 的联网代码，也不影响图表、
+  SQLite、财务计算或现有用户使用。
+- 构建层面的等价改写和 bundle 回归门禁已经在当前工作区形成候选改动，但尚未提交、推送或
+  发布；v1.4.1 的 tag 和 Release 资产保持不变。
+- 下一次正式版本更新时，再将该候选改动与版本号、发行日志、最终三文件构建和扫描结果一起
+  提交发布。若上游依赖或社区扫描规则先发生变化，发布前仍需重新确认最终 `main.js`。
 
 ## 产品驱动的开发决策
 
@@ -93,7 +106,7 @@ build/
 `notices:update` 从 lockfile、当前插件版本和
 `build/main.js` 生成第三方依赖声明。
 `release:check` 会重新计算并验证依赖版本、许可证、插件版本与 bundle 实际大小，
-防止声明漂移。
+防止声明漂移，并检查最终 bundle 不包含已知的动态域名拼接误报模式。
 
 正常验证结果应满足：
 

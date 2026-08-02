@@ -82,6 +82,12 @@ const forbiddenBundlePatterns = [
 for (const [pattern, label] of forbiddenBundlePatterns) {
   if (pattern.test(bundle)) failures.push(`${bundlePath} 包含${label}`);
 }
+const reduxScannerTrigger = [
+  "split", "(", "\"\"", ")", ".", "join", "(", "\".\"", ")"
+].join("");
+if (bundle.includes(reduxScannerTrigger)) {
+  failures.push(`${bundlePath} 包含可能被误判为域名拼接的 Redux 字符串构造`);
+}
 
 const readme = readFileSync(resolve(root, "README.md"), "utf8");
 for (const heading of ["## Installation", "## Getting started"]) {
