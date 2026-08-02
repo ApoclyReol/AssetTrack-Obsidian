@@ -88,7 +88,15 @@ schema 9 在流水和自动规则中分别保存 `counterparty`；插件运行�
 
 当前仍保留的技术债：
 
-- `AssetTrackEditorApp.tsx` 尚未完成按 feature 的全面拆分；
+- UI 已完成一轮按职责拆分：`AnalysisView.tsx` 只负责分析导航，首页、商品、年度和月度分析
+  分别位于独立模块；流水表、固定资产表、借款编辑、规则工作台和共享编辑原语也已独立。
+  `AssetTrackEditorApp.tsx` 仍保留 ItemView 路由、草稿 reducer 和 `MonthEditor`，后续只继续
+  拆出边界清晰且不改变草稿/事务契约的部分；
+- `RuleHistoryModal.tsx` 现在只负责历史回溯与分类迁移，商品统一和规则创建分别位于
+  `ProductRenameModal.tsx`、`RuleCreationModal.tsx`，旧导出入口仅作为兼容层保留；
+- `AssetTrackRepository.ts` 仍是事务与 SQL 的主 facade，纯行转换和规则报告已抽到
+  `repositoryPrimitives.ts`、`ruleReporting.ts`。继续拆分时必须保持同一 `DatabaseSync`
+  事务内的 revision、校验和写入边界；
 - 账单解析仍在主线程执行，尚未迁入 Worker；
 - 国际化仍以双参数 `t()` 为主，部分历史错误仍依赖中文文本映射，尚未全面切换
   到消息键和结构化错误码。

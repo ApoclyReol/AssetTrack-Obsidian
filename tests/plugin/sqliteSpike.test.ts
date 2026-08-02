@@ -40,10 +40,36 @@ describe("node:sqlite technical spike", () => {
     expect(annual.rows).toHaveLength(12);
     expect(annual.metrics.total_expense).toBeGreaterThan(0);
     expect(elapsed).toBeLessThan(2_000);
+
+    const saveMonth = db.prepare(
+      "INSERT INTO month_status (month,status,updated_at) VALUES (?,?,?)"
+    );
+    for (let index = 1; index <= 12; index += 1) {
+      saveMonth.run(
+        `2026-${String(index).padStart(2, "0")}`,
+        "saved",
+        "2026-12-31T00:00:00.000Z"
+      );
+    }
+    const insertRule = db.prepare(`
+      INSERT INTO auto_rules
+        (transaction_type,counterparty,product,category_key,category)
+      VALUES (?,?,?,?,?)
+    `);
+    for (let index = 0; index < 20; index += 1) {
+      insertRule.run("支出", "", `商品-${index}`, category, "餐饮基础");
+    }
+    const analyticsStarted = performance.now();
+    const productOverview = repository.productOverview();
+    const ruleInsights = repository.ruleInsights(2);
+    const analyticsElapsed = performance.now() - analyticsStarted;
+    expect(productOverview.groups).toHaveLength(200);
+    expect(ruleInsights.historical_products).toHaveLength(200);
+    expect(analyticsElapsed).toBeLessThan(8_000);
     manager.close();
 
     const reopened = new DatabaseManager(path);
     expect(reopened.validate(true).valid).toBe(true);
     reopened.close();
-  }, 10_000);
+  }, 20_000);
 });

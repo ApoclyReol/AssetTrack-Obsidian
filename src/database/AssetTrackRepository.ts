@@ -1,4 +1,3 @@
-import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import type {
   AccountDefinition,
@@ -58,117 +57,33 @@ import { finiteNumber, roundHalfEven, sum } from "../domain/money";
 import {
   applyRulesWithIssues,
   normalizeProductKey,
-  resolveRule,
+  RuleMatcher,
   ruleMatchLevel,
   rulesEquivalent,
   rulesOverlap,
   RULE_TYPES,
   type RuleRow
 } from "../domain/rules";
+import { validateTransactions } from "../domain/validators";
+import type { ValidationIssue } from "../domain/validators";
 import { scalarText } from "../domain/text";
-import {
-  validateTransactions,
-  type ValidationIssue
-} from "../domain/validators";
-import { AssetTrackError } from "../services/AssetTrackService";
 import { categoryColor } from "./schema";
 import { DatabaseManager } from "./DatabaseManager";
-
-type Row = Record<string, unknown>;
-
-const ASSET_STATUSES = new Set(["在用", "闲置", "已出售", "已报废"]);
-
-export class RevisionConflictError extends AssetTrackError {
-  constructor(expected: number, actual: number) {
-    super(
-      `revision 冲突：草稿基于 ${expected}，当前数据库为 ${actual}`,
-      409,
-      { expected, actual },
-      "revision_conflict"
-    );
-  }
-}
-
-export class RepositoryValidationError extends AssetTrackError {
-  constructor(message: string, issues: ValidationIssue[] = []) {
-    super(message, 422, issues.length ? { message, issues } : message, "validation_error");
-  }
-}
-
-function text(value: unknown): string {
-  return scalarText(value).trim();
-}
-
-function boolean(value: unknown): boolean {
-  return value === true || value === 1 || value === "1";
-}
-
-function rows(statementRows: unknown[]): Row[] {
-  return statementRows as Row[];
-}
-
-function stableJson(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    if (typeof value === "boolean") return value ? "true" : "false";
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(", ")}]`;
-  const object = value as Record<string, unknown>;
-  return `{${Object.keys(object).sort().map(
-    (key) => `${JSON.stringify(key)}: ${stableJson(object[key])}`
-  ).join(", ")}}`;
-}
-
-function contentRevision(value: Row[]): number {
-  const digest = createHash("sha256").update(stableJson(value), "utf8").digest("hex");
-  return Number.parseInt(digest.slice(0, 12), 16);
-}
-
-function normalizeAsset(source: Partial<FixedAsset>, index: number): Required<
-  Pick<FixedAsset, "asset_key" | "asset_name" | "category" | "purchase_price" | "status" | "note">
-> & Pick<FixedAsset, "purchase_date"> {
-  const name = text(source.asset_name);
-  if (!name) throw new RepositoryValidationError(`第 ${index + 1} 行的资产名称不能为空`);
-  const status = text(source.status) || "在用";
-  return {
-    asset_key: text(source.asset_key) || randomUUID().replaceAll("-", ""),
-    asset_name: name,
-    category: text(source.category),
-    purchase_date: text(source.purchase_date) || null,
-    purchase_price: finiteNumber(source.purchase_price, {
-      nonNegative: true,
-      label: "固定资产金额"
-    }),
-    status: ASSET_STATUSES.has(status) ? status : "在用",
-    note: text(source.note)
-  };
-}
-
-function transactionFromRow(row: Row): Transaction {
-  return {
-    id: Number(row.id),
-    transaction_date: text(row.transaction_date),
-    type: text(row.type),
-    category_key: text(row.category_key) || null,
-    category: text(row.category),
-    counterparty: text(row.counterparty),
-    product: text(row.product),
-    amount: Number(row.amount ?? 0)
-  };
-}
-
-function fixedAssetFromRow(row: Row): FixedAsset {
-  return {
-    id: Number(row.id),
-    asset_key: text(row.asset_key),
-    asset_name: text(row.asset_name),
-    category: text(row.category),
-    purchase_date: text(row.purchase_date) || null,
-    purchase_price: Number(row.purchase_price ?? 0),
-    status: text(row.status),
-    note: text(row.note)
-  };
-}
+import { buildRuleReport } from "./ruleReporting";
+import {
+  boolean,
+  contentRevision,
+  exactRuleIndexKey,
+  fixedAssetFromRow,
+  normalizeAsset,
+  RepositoryValidationError,
+  RevisionConflictError,
+  ruleIndexKey,
+  rows,
+  text,
+  transactionFromRow,
+  type Row
+} from "./repositoryPrimitives";
 
 export class AssetTrackRepository {
   constructor(
@@ -1185,79 +1100,12 @@ export class AssetTrackRepository {
 
   rules(db = this.db()): { revision: number; rows: Row[] } {
     const raw = rows(db.prepare("SELECT * FROM auto_rules ORDER BY id").all());
-    const revision = contentRevision(raw);
-    const definitions = raw.map((row) => ({
-      id: Number(row.id),
-      transaction_type: text(row.transaction_type),
-      counterparty: text(row.counterparty),
-      product: text(row.product),
-      category_key: text(row.category_key),
-      category: text(row.category)
-    } satisfies RuleRow & { id: number }));
-    const duplicateIds = new Map<number, number[]>();
-    const conflictIds = new Map<number, number[]>();
-    for (let leftIndex = 0; leftIndex < definitions.length; leftIndex += 1) {
-      for (let rightIndex = leftIndex + 1; rightIndex < definitions.length; rightIndex += 1) {
-        const left = definitions[leftIndex];
-        const right = definitions[rightIndex];
-        const leftCategory = normalizeProductKey(left.category_key) || normalizeProductKey(left.category);
-        const rightCategory = normalizeProductKey(right.category_key) || normalizeProductKey(right.category);
-        if (rulesEquivalent(left, right) && leftCategory === rightCategory) {
-          duplicateIds.set(left.id, [...(duplicateIds.get(left.id) ?? []), right.id]);
-          duplicateIds.set(right.id, [...(duplicateIds.get(right.id) ?? []), left.id]);
-        }
-        const leftLevel = ruleMatchLevel(left);
-        const rightLevel = ruleMatchLevel(right);
-        const samePrecision = leftLevel !== null && leftLevel === rightLevel;
-        const exactOverBroad =
-          (leftLevel === "exact" && rightLevel !== null && rightLevel !== "exact")
-          || (rightLevel === "exact" && leftLevel !== null && leftLevel !== "exact");
-        if (
-          rulesOverlap(left, right)
-          && (samePrecision || exactOverBroad)
-          && leftCategory !== rightCategory
-        ) {
-          conflictIds.set(left.id, [...(conflictIds.get(left.id) ?? []), right.id]);
-          conflictIds.set(right.id, [...(conflictIds.get(right.id) ?? []), left.id]);
-        }
-      }
-    }
     const transactions = rows(db.prepare(`
       SELECT month,type,counterparty,product FROM transactions
       WHERE type IN ('支出','收入')
     `).all());
-    const matchesRule = (rule: RuleRow, transaction: Row): boolean => {
-      const counterparty = normalizeProductKey(rule.counterparty);
-      const product = normalizeProductKey(rule.product);
-      return text(transaction.type) === rule.transaction_type
-        && (!counterparty || counterparty === normalizeProductKey(transaction.counterparty))
-        && (!product || product === normalizeProductKey(transaction.product));
-    };
-    return {
-      revision,
-      rows: raw.map((row) => {
-        const matched = transactions.filter(
-          (transaction) => matchesRule(row as unknown as RuleRow, transaction)
-        );
-        const months = new Set(matched.map((transaction) => text(transaction.month)));
-        return {
-          ...row,
-          match_level: ruleMatchLevel(row as unknown as RuleRow),
-          occurrences: matched.length,
-          months_count: months.size,
-          last_month: [...months].sort().at(-1) ?? "",
-          duplicate_rule_ids: duplicateIds.get(Number(row.id)) ?? [],
-          conflict_rule_ids: conflictIds.get(Number(row.id)) ?? [],
-          rule_status: (conflictIds.has(Number(row.id))
-            ? "冲突"
-            : duplicateIds.has(Number(row.id))
-              ? "重复"
-              : "正常")
-        };
-      })
-    };
+    return buildRuleReport(raw, transactions);
   }
-
   private writeRules(db: DatabaseSync, input: Row[]): void {
     const categories = this.categoryRows(db);
     const byKey = new Map(categories.map((row) => [row.category_key, row]));
@@ -1467,7 +1315,7 @@ export class AssetTrackRepository {
 
   private productStat(
     group: Row[],
-    ruleRows: RuleRow[],
+    ruleMatcher: RuleMatcher,
     ruleStatusById: Map<number, string>,
     categories: CategoryDefinition[]
   ): HistoricalProductStat {
@@ -1486,7 +1334,7 @@ export class AssetTrackRepository {
     const categoryCounts = this.historicalCategoryCounts(group, categories);
     const assigned = categoryCounts.filter((row) => row.category_key);
     const recommended = assigned[0];
-    const resolutions = ordered.map((row) => resolveRule({
+    const transactions = ordered.map((row) => ({
       id: Number(row.id),
       transaction_date: text(row.transaction_date),
       type: text(row.type),
@@ -1495,26 +1343,22 @@ export class AssetTrackRepository {
       counterparty: text(row.counterparty),
       product: text(row.product),
       amount: Number(row.amount ?? 0)
-    }, ruleRows));
-    const matchingRules = ruleRows
-      .filter((rule) => ordered.some((row) =>
-        rule.transaction_type === text(row.type)
-        && (!normalizeProductKey(rule.counterparty)
-          || normalizeProductKey(rule.counterparty) === normalizeProductKey(row.counterparty))
-        && (!normalizeProductKey(rule.product)
-          || normalizeProductKey(rule.product) === normalizeProductKey(row.product))
-      ));
-    const matchingRuleIds = matchingRules
-      .map((rule) => Number(rule.id))
-      .filter((id) => Number.isFinite(id) && id > 0);
-    const matchingRuleLevels = [...new Set(
-      matchingRules
-        .map((rule) => ruleMatchLevel(rule))
-        .filter((level): level is RuleMatchLevel => level !== null)
-    )];
+    } satisfies Transaction));
+    const matchingRuleIds = new Set<number>();
+    const matchingRuleLevels = new Set<RuleMatchLevel>();
+    const resolutions = transactions.map((transaction) => {
+      for (const rule of ruleMatcher.matchingRules(transaction)) {
+        const id = Number(rule.id);
+        if (Number.isFinite(id) && id > 0) matchingRuleIds.add(id);
+        const level = ruleMatchLevel(rule);
+        if (level) matchingRuleLevels.add(level);
+      }
+      return ruleMatcher.resolve(transaction);
+    });
+    const orderedMatchingRuleIds = ruleMatcher.orderedRuleIds(matchingRuleIds);
     const ruleIds = [...new Set([
       ...resolutions.flatMap((resolution) => resolution.rule_ids),
-      ...matchingRuleIds
+      ...orderedMatchingRuleIds
     ])];
     const matchedOccurrences = resolutions.filter(
       (resolution) => resolution.status === "matched"
@@ -1619,7 +1463,7 @@ export class AssetTrackRepository {
       last_month: text(last.month),
       matching_rule_count: ruleIds.length,
       matching_rule_ids: ruleIds,
-      matching_rule_levels: matchingRuleLevels,
+      matching_rule_levels: [...matchingRuleLevels],
       rule_coverage: ruleCoverage,
       matched_occurrences: matchedOccurrences,
       unmatched_occurrences: unmatchedOccurrences,
@@ -1633,6 +1477,7 @@ export class AssetTrackRepository {
   private normalizedRuleRows(db: DatabaseSync): {
     data: ReturnType<AssetTrackRepository["rules"]>;
     rows: RuleRow[];
+    matcher: RuleMatcher;
     statusById: Map<number, string>;
   } {
     const data = this.rules(db);
@@ -1647,6 +1492,7 @@ export class AssetTrackRepository {
     return {
       data,
       rows,
+      matcher: new RuleMatcher(rows),
       statusById: new Map(data.rows.map((row) => [Number(row.id), text(row.rule_status)]))
     };
   }
@@ -1719,13 +1565,10 @@ export class AssetTrackRepository {
         const componentRules = component
           .map((id) => savedById.get(id))
           .filter((rule): rule is SavedRule => Boolean(rule));
-        const affected = history.filter((row) => componentRules.some((rule) =>
-          rule.transaction_type === text(row.type)
-          && (!normalizeProductKey(rule.counterparty)
-            || normalizeProductKey(rule.counterparty) === normalizeProductKey(row.counterparty))
-          && (!normalizeProductKey(rule.product)
-            || normalizeProductKey(rule.product) === normalizeProductKey(row.product))
-        ));
+        const componentRuleIds = new Set(componentRules.map((rule) => Number(rule.id)));
+        const affected = history.filter((row) => ruleData.matcher.matchingRules(
+          transactionFromRow(row)
+        ).some((rule) => componentRuleIds.has(Number(rule.id))));
         groups.push({
           conflict_key: `${kind}:${component.join(",")}`,
           kind,
@@ -1788,7 +1631,7 @@ export class AssetTrackRepository {
     const historicalProducts = [...productGroups.values()]
       .map((group) => this.productStat(
         group,
-        ruleData.rows,
+        ruleData.matcher,
         ruleData.statusById,
         categories
       ))
@@ -1797,19 +1640,23 @@ export class AssetTrackRepository {
         || left.transaction_type.localeCompare(right.transaction_type)
         || left.product.localeCompare(right.product)
       );
+    const productRuleKeys = new Set<string>();
+    const exactRuleKeys = new Set<string>();
+    for (const rule of ruleData.rows) {
+      const level = ruleMatchLevel(rule);
+      const counterpartyKey = normalizeProductKey(rule.counterparty);
+      const productKey = normalizeProductKey(rule.product);
+      if (level === "product") {
+        productRuleKeys.add(ruleIndexKey(rule.transaction_type, productKey));
+      }
+      if (level === "exact" || level === "counterparty") {
+        exactRuleKeys.add(exactRuleIndexKey(rule.transaction_type, counterpartyKey, productKey));
+      }
+    }
     const productRuleExists = (type: string, productKey: string): boolean =>
-      ruleData.rows.some((rule) =>
-        rule.transaction_type === type
-        && ruleMatchLevel(rule) === "product"
-        && normalizeProductKey(rule.product) === productKey
-      );
+      productRuleKeys.has(ruleIndexKey(type, productKey));
     const exactRuleExists = (type: string, counterpartyKey: string, productKey: string): boolean =>
-      ruleData.rows.some((rule) =>
-        rule.transaction_type === type
-        && ruleMatchLevel(rule) === (productKey ? "exact" : "counterparty")
-        && normalizeProductKey(rule.counterparty) === counterpartyKey
-        && normalizeProductKey(rule.product) === productKey
-      );
+      exactRuleKeys.has(exactRuleIndexKey(type, counterpartyKey, productKey));
     const recommendations: RuleCandidate[] = [];
     for (const group of exactGroups.values()) {
       if (group.length < threshold) continue;
@@ -1819,7 +1666,7 @@ export class AssetTrackRepository {
       const counterpartyKey = normalizeProductKey(representative.counterparty);
       const level = productKey ? (counterpartyKey ? "exact" : "product") : (counterpartyKey ? "counterparty" : null);
       if (!level || exactRuleExists(type, counterpartyKey, productKey)) continue;
-      const stat = this.productStat(group, ruleData.rows, ruleData.statusById, categories);
+      const stat = this.productStat(group, ruleData.matcher, ruleData.statusById, categories);
       if (
         stat.has_category_conflict
         || stat.rule_coverage !== "none"
@@ -2064,7 +1911,7 @@ export class AssetTrackRepository {
     const stats = [...groups.values()]
       .map((group) => this.productStat(
         group,
-        ruleData.rows,
+        ruleData.matcher,
         ruleData.statusById,
         categories
       ))
@@ -2121,7 +1968,7 @@ export class AssetTrackRepository {
         product: text(row.product),
         amount: Number(row.amount ?? 0)
       };
-      const ruleMatch = resolveRule(transaction, ruleData.rows);
+      const ruleMatch = ruleData.matcher.resolve(transaction);
       const categoryActive = row.category_active === null || row.category_active === undefined
         ? null
         : boolean(row.category_active);
@@ -2183,7 +2030,7 @@ export class AssetTrackRepository {
     }
     const ruleData = this.normalizedRuleRows(db);
     const conflicts = selected
-      .map((row) => resolveRule(transactionFromRow(row), ruleData.rows))
+      .map((row) => ruleData.matcher.resolve(transactionFromRow(row)))
       .filter((resolution) => resolution.status === "conflict");
     if (conflicts.length) {
       const ruleIds = [...new Set(conflicts.flatMap((resolution) => resolution.rule_ids))];

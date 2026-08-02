@@ -70,8 +70,11 @@ Asset Track 项目已通过 Community Plugins 审核并支持从社区目录安�
 
 ## 工程性路线
 
-- 将 `AssetTrackEditorApp.tsx` 按分析、月度编辑、流水、导入、规则和共享组件逐步
-  拆入 `features/`；拆分时保持 Service/Repository 接口和用户行为不变。
+- v1.4.0 维护阶段已完成第一轮职责拆分：分析页面、流水/固定资产表、借款编辑、规则工作台、
+  商品统一和规则创建均有独立 UI 模块；保留 `AssetTrackEditorApp.tsx` 作为路由、草稿和月份
+  工作区边界。后续只在边界稳定、能降低耦合时继续拆分，不为目录层级而重排代码。
+- 将 `AssetTrackRepository.ts` 继续按只读报告、事务写入和领域查询拆分；所有拆分必须保持
+  Service/Repository 接口、revision 校验和单事务写入行为不变。
 - 将 CSV/XLSX/XLS 解析真正迁入 Worker；v1.4.0 仍只完成 `ArrayBuffer` 读取并移除
   Data URL/Base64 中间副本。
 - 将现有中文错误文本和 `t("中文", "English")` 逐步迁移为稳定消息键与完整

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyRules,
   applyRulesWithIssues,
+  RuleMatcher,
   resolveRule,
   rulesEquivalent,
   rulesOverlap
@@ -139,6 +140,72 @@ describe("counterparty and product rules", () => {
       level: "product",
       category_key: "cat-food",
       rule_ids: [3]
+    });
+  });
+
+  it("indexes candidates without changing source order or wildcard behavior", () => {
+    const rules = [
+      {
+        id: 30,
+        transaction_type: "支出",
+        counterparty: "",
+        product: "咖啡",
+        category_key: "cat-food",
+        category: "餐饮基础"
+      },
+      {
+        id: 10,
+        transaction_type: "支出",
+        counterparty: "商户甲",
+        product: "咖啡",
+        category_key: "cat-quality",
+        category: "餐饮改善"
+      },
+      {
+        id: 11,
+        transaction_type: "支出",
+        counterparty: "商户甲",
+        product: "咖啡",
+        category_key: "cat-quality",
+        category: "餐饮改善"
+      },
+      {
+        id: 20,
+        transaction_type: "支出",
+        counterparty: "商户甲",
+        product: "",
+        category_key: "cat-other",
+        category: "其他支出"
+      },
+      {
+        id: 99,
+        transaction_type: "支出",
+        counterparty: "",
+        product: "",
+        category_key: "cat-all",
+        category: "兜底"
+      }
+    ];
+    const matcher = new RuleMatcher(rules);
+    const row: Transaction = {
+      transaction_date: "2026-01-01",
+      type: "支出",
+      category: "原分类",
+      category_key: null,
+      counterparty: "商户甲",
+      product: "咖啡",
+      amount: 20
+    };
+    expect(matcher.matchingRules(row).map((rule) => rule.id)).toEqual([30, 10, 11, 20, 99]);
+    expect(matcher.resolve(row)).toMatchObject({
+      status: "matched",
+      level: "exact",
+      rule_ids: [10, 11],
+      category_key: "cat-quality"
+    });
+    expect(matcher.resolve({ ...row, counterparty: "", product: "" })).toMatchObject({
+      status: "none",
+      rule_ids: []
     });
   });
 });

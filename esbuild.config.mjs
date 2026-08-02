@@ -10,6 +10,7 @@ const context = await esbuild.context({
   entryPoints: ["src/main.ts"],
   bundle: true,
   platform: "node",
+  mainFields: ["module", "main"],
   external: ["obsidian", "electron", ...builtinModules],
   format: "cjs",
   target: "es2022",
@@ -17,6 +18,9 @@ const context = await esbuild.context({
   sourcemap: production ? false : "inline",
   minify: production,
   treeShaking: true,
+  ...(production
+    ? { define: { "process.env.NODE_ENV": '"production"' } }
+    : {}),
   outfile: `${outputDirectory}/main.js`,
   plugins: [{
     name: "stage-plugin-assets",

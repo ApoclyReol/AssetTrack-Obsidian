@@ -1,7 +1,6 @@
 export const VIEW_TYPE_ASSET_TRACK = "asset-track-editor";
 export const RECOMMENDED_WORKSPACE = "Asset_Track";
 export const DATABASE_NAME = "accounting_system.db";
-export const PLUGIN_VERSION = "1.0.1";
 
 export type EditorMode = "analysis" | "transactions" | "debts" | "rules";
 export type AnalysisMode = "home" | "annual" | "monthly" | "products";

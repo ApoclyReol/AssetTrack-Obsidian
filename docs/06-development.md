@@ -126,7 +126,7 @@ Vault 与合成数据库。
 | 月份校验和保存 | `AssetTrackRepository.saveMonth()` | `databaseRepository.test.ts` |
 | 账单解析与字段映射 | `src/domain/csv.ts` | `csvService.test.ts` |
 | 导入交互与草稿提交 | `CsvImportDialog.tsx`、`csvImportCommit.ts` | `csvImportDialog.test.tsx`、`csvImportCommit.test.ts` |
-| 规则工作台、商品统一与历史迁移 | `AssetTrackEditorApp.tsx`、`RuleHistoryModal.tsx`、`TablePrimitives.tsx`、`AssetTrackRepository.ts` | `databaseRepository.test.ts`、`ruleHistoryModal.test.tsx`、`tablePrimitives.test.tsx` |
+| 规则工作台、商品统一与历史迁移 | `src/ui/RulesEditor.tsx`、`RuleHistoryModal.tsx`、`ProductRenameModal.tsx`、`RuleCreationModal.tsx`、`TablePrimitives.tsx`、`AssetTrackRepository.ts` | `databaseRepository.test.ts`、`ruleHistoryModal.test.tsx`、`tablePrimitives.test.tsx` |
 | ItemView 草稿恢复 | `src/ui/editorDraft.ts`、`src/views/AssetTrackEditorView.ts`、`src/main.ts` | `editorDraft.test.ts`、`editorDraftRecovery.test.tsx`、`assetTrackEditorView.test.ts` |
 | 备份与恢复 | `src/services/BackupService.ts` | `backupService.test.ts` |
 | 数据目录生命周期 | `src/main.ts`、`src/services/workspacePath.ts` | `workspacePath.test.ts`、`settingsValidation.test.ts` |
