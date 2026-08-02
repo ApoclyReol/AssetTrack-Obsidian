@@ -618,13 +618,10 @@ export function HistoryBackfillContent({
           <th scope="col" className="asset-track-date-column"><HistorySortButton field="last_date" label={t("最近日期", "Latest date")} sort={sort} onSort={setSort} /></th>
           <th scope="col" className="asset-track-type-column"><HistorySortButton field="transaction_type" label={t("收支", "Type")} sort={sort} onSort={setSort} /></th>
           <th scope="col"><HistorySortButton field="product" label={t("商品", "Item")} sort={sort} onSort={setSort} /></th>
-          <StaticTableHeader label={t("所属分类", "Category")} />
-          <StaticTableHeader label={t("所属规则", "Rule")} />
-          <StaticTableHeader label={t("健康状态", "Health")} />
-          <th scope="col" className="asset-track-count-column"><HistorySortButton field="counterparty_count" label={t("交易对方数", "Counterparties")} sort={sort} onSort={setSort} /></th>
-          <th scope="col" className="asset-track-count-column"><HistorySortButton field="occurrences" label={t("次数", "Occurrences")} sort={sort} onSort={setSort} /></th>
-          <th scope="col" className="asset-track-count-column"><HistorySortButton field="months_count" label={t("月份数", "Months")} sort={sort} onSort={setSort} /></th>
-          <th scope="col" className="asset-track-amount-column"><HistorySortButton field="total_amount" label={t("总金额", "Total amount")} sort={sort} onSort={setSort} /></th>
+          <StaticTableHeader label={t("所属分类", "Category")} className="asset-track-centered-column" />
+          <StaticTableHeader label={t("所属规则", "Rule")} className="asset-track-centered-column" />
+          <StaticTableHeader label={t("健康状态", "Health")} className="asset-track-centered-column" />
+          <th scope="col" className="asset-track-count-column"><HistorySortButton field="occurrences" label={t("流水数", "Transactions")} sort={sort} onSort={setSort} /></th>
           <ActionTableHeader />
         </tr></thead>
         <tbody>{sortedGroups.map((group) => {
@@ -633,8 +630,8 @@ export function HistoryBackfillContent({
             <td className="asset-track-date-cell">{group.last_date || "—"}</td>
             <td className="asset-track-type-cell">{businessLabel(group.transaction_type)}</td>
             <td title={group.variants.join("、")}>{group.product || t("（空商品）", "(empty item)")}</td>
-            <td>{statusStack(categorySummary(group.category_counts), categoryStatusLabel(group.category_status))}</td>
-            <td>{statusStack(
+            <td className="asset-track-centered-cell">{statusStack(categorySummary(group.category_counts), categoryStatusLabel(group.category_status))}</td>
+            <td className="asset-track-centered-cell">{statusStack(
               ruleCoverageLabel(group.rule_coverage),
               group.rule_status === "冲突" || group.rule_status === "重复"
                 ? ruleStatusLabel(group.rule_status)
@@ -643,11 +640,8 @@ export function HistoryBackfillContent({
                     `${group.matched_occurrences}/${group.occurrences} transactions covered`
                   )
             )}</td>
-            <td>{health}</td>
-            <td className="asset-track-count-cell">{group.counterparty_count}</td>
+            <td className="asset-track-centered-cell">{health}</td>
             <td className="asset-track-count-cell">{group.occurrences}</td>
-            <td className="asset-track-count-cell">{group.months_count}</td>
-            <td className="asset-track-amount-cell">{money(group.total_amount, group.transaction_type)}</td>
             <td className="asset-track-history-actions">
               {onOpenProductRename && <button type="button" onClick={() => onOpenProductRename(group)}>{t("编辑商品", "Edit item")}</button>}
               {onCreateRule && group.rule_suggestion && <button type="button" onClick={() => onCreateRule(group)}>{t("创建规则", "Create rule")}</button>}

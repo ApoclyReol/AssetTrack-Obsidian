@@ -211,6 +211,11 @@ export class LocalAssetTrackService implements AssetTrackService {
     return this.repository.ruleWorkspaceAnalytics(minOccurrences);
   }
 
+  async productOverview(): Promise<import("../types").ProductHistoryIndexResult> {
+    this.ready();
+    return this.repository.productOverview();
+  }
+
   async productHistoryIndex(
     query: ProductHistoryQuery
   ): Promise<import("../types").ProductHistoryIndexResult> {

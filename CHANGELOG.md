@@ -4,6 +4,36 @@
 
 - 后续修复与功能进入此区。
 
+## 1.4.0
+
+### 中文更新
+
+- 最低兼容 Obsidian 版本提升至 1.13.0；安装或更新前请先升级到当前最新的 1.13.x 桌面版。
+- 设置页改用 Obsidian 1.13 `getSettingDefinitions()`，数据目录使用原生文件夹控件，
+  备份恢复和账户管理使用独立设置页；移除已弃用的 `PluginSettingTab.display()`。
+- 移除插件对 `getAllLoadedFiles()`、`getFiles()` 和 `getMarkdownFiles()` 的调用，避免主动
+  获取 Vault 中的全部文件路径。
+- 分类定义仅保留历史流水数；商品冲突处理表移除交易对方数、月份数和金额字段，完整统计移至分析页“商品总览”。
+- 商品总览移除健康状态和所属规则列，保留分类、交易统计和金额统计。
+- 规则页移除 revision 技术信息和 SQLite 实现说明，统一分类、规则和商品历史表头样式。
+- 流水编辑器优化创建月份顺序和提示；空的未编辑月份删除时不再重复确认，行号支持排序，操作列补齐表头。
+- 分类定义操作按钮统一为满宽按钮，并收窄大额、颜色和流水数列；商品总览统一背景、对齐和金额显示。
+- 所有表格采用固定资产摘要的响应式行为，内容自动换行并仅保留纵向滚动，避免不必要的横向滚动。
+- 保持 schema 9、数据库路径、`data.json` 兼容字段和备份格式不变。
+
+### English updates
+
+- The minimum supported Obsidian version is now 1.13.0. Update to the latest available 1.13.x desktop release before installing or updating.
+- Settings now use Obsidian 1.13 `getSettingDefinitions()` with the native folder control; backup and account management use dedicated settings pages, and the deprecated `PluginSettingTab.display()` entry point has been removed.
+- The plugin no longer calls `getAllLoadedFiles()`, `getFiles()`, or `getMarkdownFiles()`, so it does not proactively enumerate every path in the Vault.
+- Category definitions now keep only the historical transaction count; conflict handling no longer shows counterparty, month, or amount metrics, which are available in the new Item overview analysis tab.
+- Item overview no longer includes Health or Matching rule columns; it focuses on category, transaction, and amount statistics.
+- The Rules workspace removes revision and SQLite implementation details and applies consistent table-header styling across category, rule, and item-history tables.
+- The transaction editor improves month creation order and messaging; deleting an unedited empty month no longer asks for repeated confirmation, row numbers are sortable, and operation headers are visible.
+- Category action buttons now use the shared full-width action style, compact columns are used for large-expense flag, color, and transaction count, and Item overview aligns backgrounds, amounts, counts, and dates consistently.
+- All tables follow the Fixed asset summary responsive behavior with wrapping and vertical scrolling only, avoiding unnecessary horizontal scrolling.
+- SQLite schema, database paths, compatible `data.json` fields, and backup formats remain unchanged.
+
 ## 1.3.0
 
 - 规则工作台增加商品/分类冲突与规则冲突双视图；规则冲突按重复、同条件不同分类和条件重叠分组展示，后台层级不暴露给用户。

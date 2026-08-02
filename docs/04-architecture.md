@@ -44,18 +44,24 @@ flowchart LR
 ```
 
 未配置时不创建数据库。运行时要求 Node 22.16 以上且提供 `DatabaseSync` 和
-`sqlite.backup`；能力不足时只返回升级提示。最低 Obsidian 版本为 1.9.10，同时
-建议安装最新桌面安装器。
+`sqlite.backup`；能力不足时只返回升级提示。最低 Obsidian 版本为 1.13.0；发布
+v1.4.0 前请先升级到当前最新的 1.13.x 桌面版。
 
 插件 `data.json` 只保存 `dataDirectory` 和账单映射元数据，不保存财务事实。
 schema 9 在流水和自动规则中分别保存 `counterparty`；插件运行时不包含旧 schema
 自动迁移逻辑。
 
-当前版本起，`data.json` 还保存基础货币、金额格式、平账容差和大额支出阈值；v1.3.0
+当前版本起，`data.json` 还保存基础货币、金额格式、平账容差和大额支出阈值；v1.4.0
 不改变这些设置的兼容方式。
 这些字段只影响展示与分析，不改变 schema 9 或备份格式。月度草稿使用 reducer
 动作标记 dirty，保存后以 canonical workspace 和新 revision 重置。账单文件以
 `ArrayBuffer` 读取，不再构造 Data URL/Base64 中间副本。
+
+设置页使用 Obsidian 1.13 的 `getSettingDefinitions()` 声明设置项；数据目录使用
+原生 `folder` 控件，备份恢复和账户管理使用独立 `SettingPage`。目录选择只更新
+设置页草稿，只有创建、载入或迁移成功后才写入 `data.json`。插件代码不调用
+`getAllLoadedFiles()`、`getFiles()` 或 `getMarkdownFiles()`，不主动枚举 Vault 中的
+全部文件。
 
 当前仍保留的技术债：
 
@@ -85,6 +91,7 @@ schema 9 在流水和自动规则中分别保存 `counterparty`；插件运行�
   `category_key` 加载源分类商品。商品编辑默认按同一收支类型和主要分类加载，可切换分类并
   通过商品搜索自动刷新；选择全部分类时必须带搜索条件。所有商品历史只读取
   `month_status.status='saved'` 的月份。
+  分析页商品总览使用独立的 `productOverview()` 读取全历史商品统计，不改变规则冲突处理接口的“必须带筛选条件”约束。
   规则解析共享 `src/domain/rules.ts`，按精确、商品、交易对方三层优先级处理，同层不同分类返回冲突；
   `RuleConflictGroup` 由现有规则和已保存流水派生，不新增数据库结构。
 - 商品历史把规则审计与实际覆盖范围分开派生：`rule_coverage` 为 `none`、`partial` 或

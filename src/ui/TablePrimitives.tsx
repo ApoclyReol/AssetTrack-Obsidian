@@ -9,21 +9,22 @@ export function StaticTableHeader({
 }) {
   return (
     <th scope="col" className={className}>
-      <span
+      <button
+        type="button"
         className="asset-track-sort asset-track-sort-static"
+        aria-label={label}
+        aria-disabled="true"
+        tabIndex={-1}
       >
         {label}
-      </span>
+      </button>
     </th>
   );
 }
 
 export function ActionTableHeader({ className = "" }: { className?: string }) {
-  return (
-    <th
-      scope="col"
-      className={`asset-track-actions-heading ${className}`.trim()}
-      aria-label={t("操作", "Actions")}
-    />
-  );
+  return <StaticTableHeader
+    label={t("操作", "Actions")}
+    className={`asset-track-actions-heading ${className}`.trim()}
+  />;
 }

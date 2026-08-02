@@ -4,7 +4,7 @@ export const DATABASE_NAME = "accounting_system.db";
 export const PLUGIN_VERSION = "1.0.1";
 
 export type EditorMode = "analysis" | "transactions" | "debts" | "rules";
-export type AnalysisMode = "home" | "annual" | "monthly";
+export type AnalysisMode = "home" | "annual" | "monthly" | "products";
 
 export const EDITOR_MODES: EditorMode[] = [
   "analysis",
@@ -12,4 +12,4 @@ export const EDITOR_MODES: EditorMode[] = [
   "debts",
   "rules"
 ];
-export const ANALYSIS_MODES: AnalysisMode[] = ["home", "annual", "monthly"];
+export const ANALYSIS_MODES: AnalysisMode[] = ["home", "annual", "monthly", "products"];

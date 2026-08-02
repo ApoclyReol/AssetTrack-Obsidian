@@ -95,15 +95,16 @@ Asset Track 自动跟随当前应用语言。`zh`、`zh-CN`、`zh-TW` 及其他 
 
 ## 兼容性
 
-- 当前版本：1.3.0；SQLite schema：9。
+- 当前版本：1.4.0；SQLite schema：9。
 - 仅支持桌面版 macOS、Windows 和 Linux；不支持移动端。
-- 最低应用版本：1.9.10。
+- 最低应用版本：1.13.0。本版本使用 Obsidian 1.13 设置 API；安装前请先升级到
+  当前最新的 1.13.x 桌面版。
 - 桌面运行时必须提供 Node.js 22.16 或更高版本、`DatabaseSync` 和
   `sqlite.backup`。
 - 不需要 Python、单独安装的 Node.js、sidecar 或原生扩展包。
 
 每个发布候选都需要在推送版本标签前重新完成 macOS 和 Windows 真实 Obsidian
-检查；当前候选状态见 [v1.3.0 发布日志](docs/logs/release-v1.3.0.md)。Linux
+检查；当前候选状态见 [v1.4.0 发布日志](docs/logs/release-v1.4.0.md)。Linux
 验证保留为发布后质量任务。
 
 ## 开发

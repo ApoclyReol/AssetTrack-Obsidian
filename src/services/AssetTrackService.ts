@@ -113,6 +113,7 @@ export interface AssetTrackService {
   ruleWorkspace(minOccurrences?: number): Promise<RuleWorkspace>;
   ruleWorkspaceShell(): Promise<RuleWorkspaceShell>;
   ruleWorkspaceAnalytics(minOccurrences?: number): Promise<RuleWorkspaceAnalytics>;
+  productOverview(): Promise<ProductHistoryIndexResult>;
   productHistoryIndex(query: ProductHistoryQuery): Promise<ProductHistoryIndexResult>;
   productHistory(query: ProductHistoryQuery): Promise<ProductHistoryResult>;
   previewCategoryBackfill(

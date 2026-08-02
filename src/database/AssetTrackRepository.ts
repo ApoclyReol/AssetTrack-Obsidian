@@ -2088,6 +2088,16 @@ export class AssetTrackRepository {
     };
   }
 
+  productOverview(): ProductHistoryIndexResult {
+    const db = this.db();
+    const data = this.productHistoryGroups(db, {});
+    return {
+      categories_revision: contentRevision(data.categories as unknown as Row[]),
+      rules_revision: data.ruleData.data.revision,
+      groups: data.stats
+    };
+  }
+
   productHistory(query: ProductHistoryQuery): ProductHistoryResult {
     if (!this.hasProductHistoryFilter(query)) {
       throw new RepositoryValidationError("商品回溯至少选择一个筛选条件后再加载");

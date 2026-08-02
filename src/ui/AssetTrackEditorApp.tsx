@@ -379,7 +379,6 @@ export function AssetTrackEditorApp({
       <header className="asset-track-toolbar">
         <div>
           <strong>Asset Track</strong>
-          <span>{t("SQLite 事实 · TypeScript 计算 · 实时分析", "SQLite source of truth · TypeScript calculations · Live analytics")}</span>
         </div>
         <nav>
           {EDITOR_MODES.map((item) => (
@@ -395,6 +394,16 @@ export function AssetTrackEditorApp({
       </header>
       {mode === "transactions" && (
         <div className="asset-track-month-picker asset-track-period-picker">
+          <button
+            type="button"
+            className="mod-cta asset-track-create-month-button"
+            title={t("创建下一个月份", "Create the next month")}
+            onClick={() => void createNext().catch((error) => new Notice(messageFor(error)))}
+          >
+            {monthPolicy?.next_target
+              ? t(`创建 ${monthPolicy.next_target}`, `Create ${monthPolicy.next_target}`)
+              : t("创建月份", "Create month")}
+          </button>
           <select
             value={month}
             onChange={(event) => void selectMonth(event.target.value)}
@@ -405,14 +414,6 @@ export function AssetTrackEditorApp({
               </option>
             ))}
           </select>
-          <button
-            title={t("创建下一个月份", "Create the next month")}
-            onClick={() => void createNext().catch((error) => new Notice(messageFor(error)))}
-          >
-            {monthPolicy?.next_target
-              ? t(`创建 ${monthPolicy.next_target}`, `Create ${monthPolicy.next_target}`)
-              : t("创建月份", "Create month")}
-          </button>
         </div>
       )}
       {mode === "analysis" && (
@@ -537,6 +538,18 @@ function draftMonthMetrics(workspace: MonthWorkspace): {
     expense,
     discrepancy: theoretical === null ? null : roundHalfEven(expense - theoretical)
   };
+}
+
+function isEmptyMonthDraft(workspace: MonthWorkspace, dirty: boolean): boolean {
+  return workspace.status === "draft"
+    && !dirty
+    && workspace.transactions.length === 0
+    && workspace.cash_accounts.every((account) => Number(account.balance) === 0)
+    && workspace.investment_accounts.every((account) =>
+      Number(account.principal) === 0
+      && Number(account.market_value) === 0
+      && Number(account.cash_balance) === 0
+    );
 }
 
 export function MonthEditor({
@@ -689,6 +702,7 @@ export function MonthEditor({
   };
   if (!draft) return <Status state={state} />;
   const monthMetrics = draftMonthMetrics(draft);
+  const emptyMonth = isEmptyMonthDraft(draft, localDirty);
   const discrepancyStatus = monthMetrics.discrepancy === null
     ? ""
     : reconciliationStatus(monthMetrics.discrepancy, reconciliationTolerance);
@@ -871,7 +885,7 @@ export function MonthEditor({
   };
 
   const deleteMonth = async () => {
-    if (deleteConfirm !== month) {
+    if (!emptyMonth && deleteConfirm !== month) {
       setState({ kind: "error", message: t("确认月份不匹配，未删除。", "The confirmation month did not match. Nothing was deleted.") });
       return;
     }
@@ -889,6 +903,13 @@ export function MonthEditor({
     } catch (error) {
       setState({ kind: "error", message: messageFor(error) });
     }
+  };
+  const requestDelete = () => {
+    if (emptyMonth) {
+      void deleteMonth();
+      return;
+    }
+    setShowDeleteConfirm((visible) => !visible);
   };
 
   return (
@@ -941,7 +962,8 @@ export function MonthEditor({
           <button onClick={() => void load()}>{t("放弃并重载", "Discard and reload")}</button>
           <button
             className="mod-warning"
-            onClick={() => setShowDeleteConfirm((visible) => !visible)}
+            disabled={state.kind === "pending"}
+            onClick={requestDelete}
           >
             {t("删除月份", "Delete month")}
           </button>
@@ -965,7 +987,7 @@ export function MonthEditor({
           <strong>{money(monthMetrics.expense)}</strong>
         </div>
       </section>
-      {showDeleteConfirm && (
+      {showDeleteConfirm && !emptyMonth && (
         <section className="asset-track-delete-confirm">
           <strong>{t(
             "删除后会清理该月全部数据库事实，且无法在界面中撤销。",
@@ -1160,7 +1182,9 @@ function TransactionTable({
   });
   const sorted = useMemo(
     () =>
-      sortRows(visibleIndexes, sort, (index, key) => rows[index][key as keyof Transaction]),
+      sortRows(visibleIndexes, sort, (index, key) => key === "row_number"
+        ? transactionBlockNumber(rows, index)
+        : rows[index][key as keyof Transaction]),
     [rows, sort, visibleIndexes]
   );
   const blockNumbers = useMemo(
@@ -1190,7 +1214,9 @@ function TransactionTable({
         }}
       >
         <div className="asset-track-grid asset-track-grid-head">
-          <span>{t("行号", "Row")}</span>
+          <span className="asset-track-row-number-heading">
+            <SortButton field="row_number" label={t("行号", "Row")} sort={sort} onSort={setSort} />
+          </span>
           {[
             ["transaction_date", t("日期", "Date")],
             ["counterparty", t("交易对方", "Counterparty")],
@@ -1200,7 +1226,15 @@ function TransactionTable({
           ].map(([field, label]) => (
             <SortButton key={field} field={field} label={label} sort={sort} onSort={setSort} />
           ))}
-          <span />
+          <button
+            type="button"
+            className="asset-track-sort asset-track-sort-static asset-track-grid-action-heading"
+            aria-label={t("操作", "Actions")}
+            aria-disabled="true"
+            tabIndex={-1}
+          >
+            {t("操作", "Actions")}
+          </button>
         </div>
         <div className="asset-track-virtual-body">
           {virtualSpacerBlocks(range.start).map((block) => (
@@ -2420,9 +2454,6 @@ export function RulesEditorV2({
         <h2>{t("规则工作台", "Rules workspace")}</h2>
         <span>{t("分类、匹配和按需处理历史问题", "Categories, matching, and on-demand history issue handling")}</span>
       </div>
-      <span className="asset-track-revision-note">
-        {t(`分类 revision ${workspace.categories_revision} · 规则 revision ${workspace.rules_revision}`, `Categories revision ${workspace.categories_revision} · rules revision ${workspace.rules_revision}`)}
-      </span>
     </section>
     <Status state={state} />
     <Section title={t("规则健康摘要", "Rule health summary")}>
@@ -2484,14 +2515,14 @@ export function RulesEditorV2({
         <table className="asset-track-category-table"><thead><tr>{[
           ["name", t("名称", "Name")], ["transaction_type", t("收支", "Type")],
           ["necessity", t("必要性", "Necessity")], ["pattern", t("消费频率", "Frequency")], ["is_big_ticket", t("大额", "Large")], ["color", t("颜色", "Color")],
-          ["transaction_count", t("历史流水", "Transactions")], ["impact_months", t("月份数", "Months")], ["rule_count", t("规则数", "Rules")]
+          ["transaction_count", t("流水数", "Transactions")]
         ].map(([field, label]) => <th key={field} scope="col" className={field === "is_big_ticket"
           ? "asset-track-checkbox-heading"
           : field === "color"
             ? "asset-track-color-column"
             : ["transaction_type", "necessity", "pattern"].includes(field)
               ? "asset-track-type-column"
-              : ["transaction_count", "impact_months", "rule_count"].includes(field)
+              : field === "transaction_count"
                 ? "asset-track-count-column"
                 : undefined}><SortButton field={field} label={label} sort={categorySort} onSort={setCategorySort} /></th>)}<ActionTableHeader /></tr></thead>
           <tbody>{categoryView.map(({ row, originalIndex: index }) => <tr key={row.category_key}>
@@ -2501,7 +2532,7 @@ export function RulesEditorV2({
               <td className="asset-track-type-cell"><select value={row.pattern} onChange={(event) => { const next = clone(workspace.categories); next[index].pattern = event.target.value as CategoryDefinition["pattern"]; setWorkspace({ ...workspace, categories: next }); markCategoryDirty(); }}>{["周期", "日常", "偶尔", "不适用"].map((value) => <option key={value} value={value}>{businessLabel(value)}</option>)}</select></td>
               <td className="asset-track-checkbox-cell"><input type="checkbox" checked={row.is_big_ticket} onChange={(event) => { const next = clone(workspace.categories); next[index].is_big_ticket = event.target.checked; setWorkspace({ ...workspace, categories: next }); markCategoryDirty(); }} /></td>
               <td className="asset-track-color-cell"><input type="color" value={row.color} onChange={(event) => { const next = clone(workspace.categories); next[index].color = event.target.value; setWorkspace({ ...workspace, categories: next }); markCategoryDirty(); }} /></td>
-              <td className="asset-track-count-cell">{row.transaction_count ?? 0}</td><td className="asset-track-count-cell">{row.impact_months?.length ?? 0}</td><td className="asset-track-count-cell">{row.rule_count ?? 0}</td>
+              <td className="asset-track-count-cell">{row.transaction_count ?? 0}</td>
               <td className="asset-track-category-actions asset-track-actions-cell">
                 {row.transaction_count ? <button type="button" onClick={() => openCategoryHistory({ category_key: row.category_key })}>{t("迁移", "Migrate")}</button> : null}
                 <button type="button" onClick={() => void removeCategory(row, index)}>{t("删除", "Delete")}</button>
@@ -2521,14 +2552,14 @@ export function RulesEditorV2({
       <Status state={ruleState} />
       {ruleView.length === 0 ? <EmptyState text={t("尚无已保存匹配规则。", "No saved matching rules yet.")} /> : <div className="asset-track-table-scroll asset-track-responsive-scroll asset-track-rule-table-scroll">
         <table className="asset-track-rules-table"><thead><tr>{[
-          ["transaction_type", t("收支", "Type")], ["counterparty", t("交易对方", "Counterparty")], ["product", t("商品", "Item")], ["category", t("分类", "Category")], ["rule_status", t("规则状态", "Rule status")], ["occurrences", t("历史次数", "Occurrences")], ["last_month", t("最近月份", "Latest month")]
-        ].map(([field, label]) => <th key={field} scope="col"><SortButton field={field} label={label} sort={ruleSort} onSort={setRuleSort} /></th>)}<ActionTableHeader /></tr></thead>
+          ["transaction_type", t("收支", "Type")], ["counterparty", t("交易对方", "Counterparty")], ["product", t("商品", "Item")], ["category", t("分类", "Category")], ["rule_status", t("规则状态", "Rule status")], ["occurrences", t("流水数", "Transactions")], ["last_month", t("最近月份", "Latest month")]
+        ].map(([field, label]) => <th key={field} scope="col" className={field === "transaction_type" ? "asset-track-type-column" : field === "category" || field === "rule_status" ? "asset-track-centered-column" : field === "occurrences" ? "asset-track-count-column" : field === "last_month" ? "asset-track-date-column" : undefined}><SortButton field={field} label={label} sort={ruleSort} onSort={setRuleSort} /></th>)}<ActionTableHeader /></tr></thead>
           <tbody>{ruleView.map(({ row, originalIndex: index }) => <tr key={scalarText(row.id ?? index)}>
-            <td><select value={row.transaction_type} onChange={(event) => { const next = clone(workspace.rules); next[index].transaction_type = event.target.value as "支出" | "收入"; next[index].category_key = ""; next[index].category = ""; setWorkspace({ ...workspace, rules: next }); markRuleDirty(); }}><option value="支出">{businessLabel("支出")}</option><option value="收入">{businessLabel("收入")}</option></select></td>
+            <td className="asset-track-type-cell"><select value={row.transaction_type} onChange={(event) => { const next = clone(workspace.rules); next[index].transaction_type = event.target.value as "支出" | "收入"; next[index].category_key = ""; next[index].category = ""; setWorkspace({ ...workspace, rules: next }); markRuleDirty(); }}><option value="支出">{businessLabel("支出")}</option><option value="收入">{businessLabel("收入")}</option></select></td>
             <td><input value={row.counterparty} onChange={(event) => { const next = clone(workspace.rules); next[index].counterparty = event.target.value; setWorkspace({ ...workspace, rules: next }); markRuleDirty(); }} /></td>
             <td><input value={row.product} onChange={(event) => { const next = clone(workspace.rules); next[index].product = event.target.value; setWorkspace({ ...workspace, rules: next }); markRuleDirty(); }} /></td>
-            <td><select value={row.category_key} onChange={(event) => { const next = clone(workspace.rules); const category = categoryForKey(event.target.value); next[index].category_key = event.target.value; next[index].category = category?.name ?? ""; setWorkspace({ ...workspace, rules: next }); markRuleDirty(); }}><option value="">{t("请选择", "Select")}</option>{workspace.categories.filter((category) => category.transaction_type === row.transaction_type).map((category) => <option key={category.category_key} value={category.category_key} disabled={!category.is_active}>{category.name}{category.is_active ? "" : ` · ${t("停用", "Inactive")}`}</option>)}</select></td>
-            <td className="asset-track-status-cell">{ruleStatusLabel(row.rule_status)}{row.conflict_rule_ids?.length ? ` · ${row.conflict_rule_ids.length}` : ""}</td><td className="asset-track-count-cell">{row.occurrences ?? "—"}</td><td className="asset-track-date-cell">{row.last_month ?? "—"}</td>
+            <td className="asset-track-centered-cell"><select value={row.category_key} onChange={(event) => { const next = clone(workspace.rules); const category = categoryForKey(event.target.value); next[index].category_key = event.target.value; next[index].category = category?.name ?? ""; setWorkspace({ ...workspace, rules: next }); markRuleDirty(); }}><option value="">{t("请选择", "Select")}</option>{workspace.categories.filter((category) => category.transaction_type === row.transaction_type).map((category) => <option key={category.category_key} value={category.category_key} disabled={!category.is_active}>{category.name}{category.is_active ? "" : ` · ${t("停用", "Inactive")}`}</option>)}</select></td>
+            <td className="asset-track-status-cell asset-track-centered-cell">{ruleStatusLabel(row.rule_status)}{row.conflict_rule_ids?.length ? ` · ${row.conflict_rule_ids.length}` : ""}</td><td className="asset-track-count-cell">{row.occurrences ?? "—"}</td><td className="asset-track-date-cell">{row.last_month ?? "—"}</td>
             <td className="asset-track-actions-cell"><button type="button" onClick={() => { setWorkspace({ ...workspace, rules: workspace.rules.filter((_, item) => item !== index) }); markRuleDirty(); }}>{t("删除", "Delete")}</button></td>
           </tr>)}</tbody>
         </table>

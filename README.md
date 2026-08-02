@@ -116,9 +116,10 @@ includes a read-only recurring-expense table for the latest 12 data months.
 
 ## Compatibility
 
-- Current version: 1.3.0; SQLite schema: 9.
+- Current version: 1.4.0; SQLite schema: 9.
 - Desktop only: macOS, Windows, and Linux; mobile is not supported.
-- Minimum app version: 1.9.10.
+- Minimum app version: 1.13.0. This release uses the Obsidian 1.13 settings API;
+  update to the latest available 1.13.x desktop release before installing.
 - The desktop runtime must provide Node.js 22.16 or later, `DatabaseSync`, and
   `sqlite.backup`.
 - Python, a separate Node.js installation, sidecars, and native extension packages
@@ -126,7 +127,7 @@ includes a read-only recurring-expense table for the latest 12 data months.
 
 Each release candidate is checked in real Obsidian on macOS and Windows before
 its version tag is pushed. The current candidate status is recorded in the
-[v1.3.0 release log](docs/logs/release-v1.3.0.md); Linux validation remains a
+[v1.4.0 release log](docs/logs/release-v1.4.0.md); Linux validation remains a
 post-release quality task.
 
 ## Development

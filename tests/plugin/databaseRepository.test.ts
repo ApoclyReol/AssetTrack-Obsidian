@@ -1124,6 +1124,9 @@ describe("node:sqlite schema 9 repository", () => {
       transaction_count: 1
     });
 
+    expect(repository.productOverview().groups).toEqual([
+      expect.objectContaining({ product: "咖啡", occurrences: 1 })
+    ]);
     expect(() => repository.productHistoryIndex({})).toThrow("商品回溯至少选择一个筛选条件后再加载");
     expect(() => repository.productHistory({})).toThrow("商品回溯至少选择一个筛选条件后再加载");
     expect(repository.productHistoryIndex({ transaction_type: "收入" }).groups).toEqual([]);

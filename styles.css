@@ -41,6 +41,28 @@
   background: var(--background-primary);
 }
 
+.asset-track-app select,
+.asset-track-modal select,
+.asset-track-settings select,
+.asset-track-setup-guide select,
+.asset-track-rule-history-modal select,
+.asset-track-product-rename-modal select,
+.asset-track-rule-create-modal select,
+.asset-track-confirmation-modal select {
+  appearance: none;
+  -webkit-appearance: none;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding-right: 8px;
+  padding-left: 8px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background-image: none;
+}
+
 .asset-track-app button:not(:disabled),
 .asset-track-modal button:not(:disabled),
 .asset-track-rule-history-modal button:not(:disabled),
@@ -604,13 +626,6 @@
   margin-top: 10px;
 }
 
-.asset-track-revision-note {
-  max-width: 100%;
-  color: var(--text-muted);
-  font-size: var(--font-ui-small);
-  overflow-wrap: anywhere;
-}
-
 .asset-track-backfill-actions,
 .asset-track-backfill-preview {
   display: flex;
@@ -741,6 +756,12 @@
   vertical-align: middle;
 }
 
+.asset-track-centered-column,
+.asset-track-centered-cell {
+  text-align: center;
+  vertical-align: middle;
+}
+
 .asset-track-amount-column,
 .asset-track-amount-cell {
   text-align: right;
@@ -757,7 +778,7 @@
 }
 
 .asset-track-amount-column .asset-track-sort {
-  text-align: right;
+  text-align: center;
 }
 
 .asset-track-type-column .asset-track-sort-static,
@@ -769,8 +790,17 @@
   justify-content: center;
 }
 
+.asset-track-centered-column .asset-track-sort,
+.asset-track-centered-cell .asset-track-sort {
+  text-align: center;
+}
+
+.asset-track-centered-column .asset-track-sort-static {
+  justify-content: center;
+}
+
 .asset-track-amount-column .asset-track-sort-static {
-  justify-content: flex-end;
+  justify-content: center;
 }
 
 .asset-track-actions-heading,
@@ -778,6 +808,35 @@
   width: 96px;
   text-align: center;
   vertical-align: middle;
+}
+
+.asset-track-actions-heading .asset-track-sort-static {
+  justify-content: center;
+}
+
+.asset-track-category-table .asset-track-actions-heading,
+.asset-track-category-table .asset-track-actions-cell {
+  width: 64px;
+  padding-right: 3px;
+  padding-left: 3px;
+}
+
+.asset-track-category-table .asset-track-actions-heading .asset-track-sort-static {
+  padding-right: 0;
+  padding-left: 0;
+  text-align: center;
+}
+
+.asset-track-category-actions {
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+
+.asset-track-category-table .asset-track-category-actions button {
+  width: 100%;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .asset-track-actions-cell button {
@@ -856,7 +915,7 @@
 
 .asset-track-category-table th:nth-child(1),
 .asset-track-category-table td:nth-child(1) {
-  width: 10%;
+  width: 18%;
 }
 
 .asset-track-category-table th:nth-child(2),
@@ -865,51 +924,73 @@
 .asset-track-category-table td:nth-child(3),
 .asset-track-category-table th:nth-child(4),
 .asset-track-category-table td:nth-child(4) {
-  width: 9%;
+  width: 14%;
 }
 
 .asset-track-category-table th:nth-child(5),
 .asset-track-category-table td:nth-child(5) {
-  width: 58px;
+  width: 10%;
 }
 
 .asset-track-category-table th:nth-child(6),
 .asset-track-category-table td:nth-child(6) {
-  width: 64px;
+  width: 12%;
 }
 
 .asset-track-category-table th:nth-child(7),
-.asset-track-category-table td:nth-child(7),
-.asset-track-category-table th:nth-child(8),
-.asset-track-category-table td:nth-child(8),
-.asset-track-category-table th:nth-child(9),
-.asset-track-category-table td:nth-child(9) {
-  width: 74px;
+.asset-track-category-table td:nth-child(7) {
+  width: 18%;
 }
 
-.asset-track-category-table th:nth-child(10),
-.asset-track-category-table td:nth-child(10),
+.asset-track-category-table th:nth-child(8),
+.asset-track-category-table td:nth-child(8) {
+  width: 64px;
+}
+
 .asset-track-rules-table th:last-child,
 .asset-track-rules-table td:last-child {
   width: 92px;
 }
 
+.asset-track-category-table th,
+.asset-track-category-table td {
+  text-align: center;
+}
+
+.asset-track-category-table input:not([type="checkbox"]):not([type="color"]),
+.asset-track-category-table select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  text-align: center;
+}
+
+.asset-track-category-table input[type="color"] {
+  display: block;
+  width: 32px;
+  margin: 0 auto;
+}
+
 .asset-track-table-scroll.asset-track-rule-table-scroll {
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 
 .asset-track-table-scroll.asset-track-rule-table-scroll table {
   width: 100%;
-  min-width: 1040px;
-  max-width: none;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .asset-track-table-scroll.asset-track-rule-table-scroll .asset-track-category-table {
-  min-width: 1120px;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
 }
 
 .asset-track-table-scroll.asset-track-rule-table-scroll .asset-track-rules-table {
-  min-width: 1040px;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
 }
 
 .asset-track-rules-table th:nth-child(1),
@@ -919,7 +1000,7 @@
 
 .asset-track-rules-table th:nth-child(5),
 .asset-track-rules-table td:nth-child(5) {
-  width: 78px;
+  width: 108px;
 }
 
 .asset-track-rules-table th:nth-child(6),
@@ -929,7 +1010,19 @@
 
 .asset-track-rules-table th:nth-child(7),
 .asset-track-rules-table td:nth-child(7) {
-  width: 96px;
+  width: 104px;
+}
+
+.asset-track-rules-table th:nth-child(4),
+.asset-track-rules-table td:nth-child(4) {
+  width: 150px;
+}
+
+.asset-track-rule-table-scroll input:not([type="checkbox"]):not([type="color"]),
+.asset-track-rule-table-scroll select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .asset-track-analysis-fixed-assets-table th:nth-child(3),
@@ -947,6 +1040,11 @@
 .asset-track-analysis-recurring-table th:nth-child(4),
 .asset-track-analysis-recurring-table td:nth-child(4) {
   width: 68px;
+}
+
+.asset-track-analysis-recurring-table th:nth-child(2),
+.asset-track-analysis-recurring-table td:nth-child(2) {
+  width: 96px;
 }
 
 .asset-track-analysis-recurring-table th:nth-child(5),
@@ -992,6 +1090,19 @@
   cursor: default;
   color: var(--text-normal);
   font-weight: var(--font-semibold);
+}
+
+.asset-track-app .asset-track-sort-static[aria-disabled="true"] {
+  cursor: default;
+  transition: none;
+}
+
+.asset-track-app .asset-track-sort-static[aria-disabled="true"]:hover {
+  color: var(--text-normal);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
 }
 
 .asset-track-table-scroll .asset-track-sort-static,
@@ -1175,21 +1286,12 @@
 }
 
 .asset-track-history-group-table th:nth-child(7),
-.asset-track-history-group-table td:nth-child(7),
-.asset-track-history-group-table th:nth-child(8),
-.asset-track-history-group-table td:nth-child(8),
-.asset-track-history-group-table th:nth-child(9),
-.asset-track-history-group-table td:nth-child(9) {
+.asset-track-history-group-table td:nth-child(7) {
   width: 72px;
 }
 
-.asset-track-history-group-table th:nth-child(10),
-.asset-track-history-group-table td:nth-child(10) {
-  width: 96px;
-}
-
-.asset-track-history-group-table th:nth-child(11),
-.asset-track-history-group-table td:nth-child(11) {
+.asset-track-history-group-table th:nth-child(8),
+.asset-track-history-group-table td:nth-child(8) {
   width: 92px;
 }
 
@@ -1373,7 +1475,7 @@
 
 .asset-track-rule-conflict-rule {
   display: grid;
-  grid-template-columns: minmax(100px, 0.7fr) minmax(120px, 1fr) minmax(120px, 1fr) minmax(140px, 1fr) auto;
+  grid-template-columns: minmax(0, 0.7fr) repeat(3, minmax(0, 1fr)) auto;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -1607,7 +1709,8 @@
   max-height: 58vh;
   min-width: 0;
   margin-bottom: 12px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s);
 }
@@ -1615,10 +1718,17 @@
 .asset-track-grid {
   display: grid;
   grid-template-columns:
-    48px 130px minmax(150px, 0.8fr) 180px minmax(220px, 1fr) 120px 72px;
+    minmax(0, 0.55fr)
+    minmax(0, 1fr)
+    minmax(0, 1.25fr)
+    minmax(0, 1fr)
+    minmax(0, 1.1fr)
+    minmax(64px, 0.85fr)
+    minmax(56px, 0.6fr);
   align-items: center;
   gap: 6px;
-  min-width: 1040px;
+  min-width: 0;
+  width: 100%;
   box-sizing: border-box;
   height: var(--asset-track-virtual-row-height);
   min-height: var(--asset-track-virtual-row-height);
@@ -1627,8 +1737,12 @@
 }
 
 .asset-track-grid > input,
-.asset-track-grid > select {
+.asset-track-grid > select,
+.asset-track-grid > button {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .asset-track-grid-head {
@@ -1716,9 +1830,41 @@
 }
 
 .asset-track-row-number {
-  color: var(--text-muted);
+  color: var(--text-normal);
   text-align: center;
   font-variant-numeric: tabular-nums;
+}
+
+.asset-track-row-number-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.asset-track-row-number-heading .asset-track-sort {
+  text-align: center;
+}
+
+.asset-track-grid-action-heading {
+  justify-content: center;
+  padding-right: 0;
+  padding-left: 0;
+  text-align: center;
+}
+
+.asset-track-app .asset-track-create-month-button {
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+  background: var(--interactive-accent);
+  font-weight: var(--font-semibold);
+}
+
+.asset-track-app .asset-track-create-month-button:hover:not(:disabled) {
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent-hover);
+  background: var(--interactive-accent-hover);
+  box-shadow: 0 0 0 2px rgba(var(--interactive-accent-rgb), 0.32);
 }
 
 .asset-track-delete-confirm {
@@ -1834,6 +1980,108 @@
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 12px;
+}
+
+.asset-track-analysis-filter {
+  display: grid;
+  min-width: 140px;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.asset-track-analysis-filter select,
+.asset-track-analysis-filter input {
+  min-width: 0;
+}
+
+.asset-track-analysis-search {
+  min-width: min(260px, 100%);
+}
+
+.asset-track-analysis-filter-status {
+  align-self: end;
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.asset-track-analysis-product-overview-scroll {
+  overflow-x: hidden;
+}
+
+.asset-track-analysis-product-overview-table {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  table-layout: fixed;
+  color: var(--text-normal);
+  background: var(--background-secondary);
+}
+
+.asset-track-analysis-product-overview-table th:nth-child(1),
+.asset-track-analysis-product-overview-table td:nth-child(1) {
+  width: 16%;
+}
+
+.asset-track-analysis-product-overview-table th:nth-child(2),
+.asset-track-analysis-product-overview-table td:nth-child(2) {
+  width: 8%;
+}
+
+.asset-track-analysis-product-overview-table th:nth-child(3),
+.asset-track-analysis-product-overview-table td:nth-child(3) {
+  width: 22%;
+}
+
+.asset-track-analysis-product-overview-table th:nth-child(4),
+.asset-track-analysis-product-overview-table td:nth-child(4),
+.asset-track-analysis-product-overview-table th:nth-child(5),
+.asset-track-analysis-product-overview-table td:nth-child(5) {
+  width: 8%;
+}
+
+.asset-track-analysis-product-overview-table th:nth-child(6),
+.asset-track-analysis-product-overview-table td:nth-child(6) {
+  width: 8%;
+}
+
+.asset-track-analysis-product-overview-table th:nth-child(7),
+.asset-track-analysis-product-overview-table td:nth-child(7),
+.asset-track-analysis-product-overview-table th:nth-child(8),
+.asset-track-analysis-product-overview-table td:nth-child(8) {
+  width: 10%;
+}
+
+.asset-track-analysis-product-overview-table th:nth-child(9),
+.asset-track-analysis-product-overview-table td:nth-child(9) {
+  width: 10%;
+}
+
+.asset-track-analysis-product-overview-table tbody tr {
+  background: var(--background-secondary);
+}
+
+.asset-track-analysis-product-overview-table td:nth-child(1) {
+  text-align: left;
+}
+
+.asset-track-analysis-product-overview-table td:nth-child(2),
+.asset-track-analysis-product-overview-table td:nth-child(3),
+.asset-track-analysis-product-overview-table td:nth-child(4),
+.asset-track-analysis-product-overview-table td:nth-child(5),
+.asset-track-analysis-product-overview-table td:nth-child(6),
+.asset-track-analysis-product-overview-table td:nth-child(9) {
+  text-align: center;
+}
+
+.asset-track-analysis-product-overview-table td:nth-child(7),
+.asset-track-analysis-product-overview-table td:nth-child(8) {
+  text-align: right;
+}
+
+.asset-track-analysis-product-overview-table .asset-track-history-status-stack {
+  text-align: center;
 }
 
 .asset-track-analysis-cards {

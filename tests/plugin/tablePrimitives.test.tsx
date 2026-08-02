@@ -7,7 +7,7 @@ import { ActionTableHeader, StaticTableHeader } from "../../src/ui/TablePrimitiv
 describe("table header primitives", () => {
   afterEach(cleanup);
 
-  it("renders non-sortable headers as static labels", () => {
+  it("renders non-sortable headers with the uniform button treatment", () => {
     render(
       <table>
         <thead>
@@ -19,12 +19,14 @@ describe("table header primitives", () => {
     );
 
     const header = screen.getByRole("columnheader");
-    expect(screen.queryByRole("button", { name: "状态" })).toBeNull();
+    const button = screen.getByRole("button", { name: "状态" });
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    expect(button.getAttribute("tabindex")).toBe("-1");
     expect(header.textContent?.trim()).toBe("状态");
     expect(header.querySelector(".asset-track-sort-static")).toBeTruthy();
   });
 
-  it("keeps the operation header visually empty but accessible", () => {
+  it("uses the uniform button treatment for the operation header", () => {
     render(
       <table>
         <thead>
@@ -36,7 +38,10 @@ describe("table header primitives", () => {
     );
 
     const header = screen.getByRole("columnheader");
-    expect(header.getAttribute("aria-label")).toBeTruthy();
-    expect(header.textContent?.trim()).toBe("");
+    const button = screen.getByRole("button", { name: "操作" });
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    expect(button.getAttribute("tabindex")).toBe("-1");
+    expect(header.textContent?.trim()).toBe("操作");
+    expect(header.classList.contains("asset-track-actions-heading")).toBe(true);
   });
 });

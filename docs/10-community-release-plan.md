@@ -13,18 +13,21 @@ styles.css
 ```
 
 插件不依赖 Python、sidecar、平台原生扩展或 CPU 架构包。历史稳定版本的 macOS
-和 Windows 真实 Obsidian smoke 不替代 v1.3.0 候选验证；本版本推送标签前仍需按
+和 Windows 真实 Obsidian smoke 不替代 v1.4.0 候选验证；本版本推送标签前仍需按
 发布日志重新完成两个平台门禁。Linux 验证属于发布后持续质量工作。
 
 ## 稳定兼容边界
 
-- `manifest.json` 最低 Obsidian 版本为 1.9.10。
+- `manifest.json` 最低 Obsidian 版本为 1.13.0；安装或更新 v1.4.0 前要求用户先升级
+  到当前最新的 1.13.x 桌面版。
 - 运行时探测 Node ≥22.16、`DatabaseSync` 和 `sqlite.backup`；旧桌面安装器只显示
   升级提示，不修改数据。
 - `versions.json` 声明当前版本最低兼容 Obsidian 版本。
 - 稳定版冻结 schema 9，不包含旧数据库自动迁移路径。
-- v1.3.0 的显示设置保存在插件 `data.json`，导入映射仍保存在设置中，不改变数据库或
+- v1.4.0 的显示设置保存在插件 `data.json`，导入映射仍保存在设置中，不改变数据库或
   备份格式；规则工作台的历史统计只读取已保存月份。
+- 设置页使用 Obsidian 1.13 `getSettingDefinitions()`；数据目录选择只保留页面草稿，
+  成功创建、载入或迁移后才保存路径。插件代码不枚举 Vault 全部文件。
 - 生产 `main.js` 打包 React、Recharts 和 SheetJS。根目录
   `THIRD_PARTY_NOTICES.md` 由 lockfile、当前插件版本和
   `build/main.js` 自动生成，并由 `release:check` 验证。
@@ -39,7 +42,7 @@ styles.css
 4. 保持 Ubuntu、macOS 和 Windows CI 的
    `npm ci → typecheck → lint → test → build → release:check` 全部通过。
 5. 每次发布继续只上传标准三文件，并为每个文件生成 artifact attestation。
-6. v1.3.0 发布前人工确认复制 Vault 升级、中文/英文界面、规则冲突与回溯事务、商品
+6. v1.4.0 发布前人工确认复制 Vault 升级、中文/英文界面、规则冲突与回溯事务、商品
    统一、部分覆盖、关闭草稿恢复和分类删除弹窗；当前候选未把这些真实 Obsidian smoke
    结果冒充为自动测试结果。
 

@@ -73,7 +73,7 @@ if (
 const bundle = readFileSync(resolve(root, bundlePath), "utf8");
 const forbiddenBundlePatterns = [
   [/(?:createElement|createEl)\(\s*["']script["']\s*\)/, "动态 script 元素创建"],
-  [/\b(?:getFiles|getMarkdownFiles)\s*\(/, "Vault 全库枚举 API"],
+  [/\b(?:getAllLoadedFiles|getFiles|getMarkdownFiles)\s*\(/, "Vault 全库枚举 API"],
   [
     /\bnavigator\s*\.\s*clipboard\b|\bclipboard\s*\.\s*(?:read|readText|write|writeText)\s*\(/i,
     "程序化剪贴板访问"

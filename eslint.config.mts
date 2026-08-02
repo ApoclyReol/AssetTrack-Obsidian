@@ -42,13 +42,5 @@ export default defineConfig(
       "no-undef": "off",
       "obsidianmd/settings-tab/no-manual-html-headings": "warn"
     }
-  },
-  {
-    files: ["src/settings.ts"],
-    rules: {
-      // Obsidian <1.13 requires imperative display(); keep the fallback while
-      // exposing an empty definition list for newer settings search.
-      "@typescript-eslint/no-deprecated": "off"
-    }
   }
 );

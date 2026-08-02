@@ -1,6 +1,6 @@
 # 06 开发说明
 
-## v1.3.0 维护边界
+## v1.4.0 维护边界
 
 - 金额展示统一调用 `src/domain/moneyFormat.ts`。
 - 分析阈值来自 `AssetTrackSettings`，Repository 不复制界面常量。
@@ -9,6 +9,10 @@
 - 导入契约使用 `ArrayBuffer`，不得重新引入 Data URL/Base64 中间副本。
 - 领域错误在 UI 边界统一经过 `displayError()`；新增用户可见错误时必须同时补充中英文
   文案或稳定错误码，不要让纯领域模块直接依赖 Obsidian。
+- 设置页使用 Obsidian 1.13 `getSettingDefinitions()`；设置值变更后调用 `update()`
+  刷新页面，不恢复 `PluginSettingTab.display()` 或其他已弃用的 imperative 设置入口。
+- 目录选择使用原生 `folder` 控件和本地草稿；不得调用 `getAllLoadedFiles()`、`getFiles()`
+  或 `getMarkdownFiles()` 枚举 Vault 文件。
 
 ## 源码边界
 
@@ -110,8 +114,9 @@ Vault 与合成数据库。
 | 数据目录生命周期 | `src/main.ts`、`src/services/workspacePath.ts` | `workspacePath.test.ts`、`settingsValidation.test.ts` |
 | 分析界面 | `src/ui/AnalysisView.tsx`、`analysisModel.ts` | `analysisModel.test.ts` |
 
-表格 UI 维护应复用 `src/ui/TablePrimitives.tsx` 的统一表头原语。新增表格时，必须明确语义列宽、
-正文小字号、上下居中、金额/数量/日期对齐方式，并验证窄窗口下不会出现无意义的横向溢出。
+表格 UI 维护应复用 `src/ui/TablePrimitives.tsx` 的统一表头原语，并遵守
+`docs/05-design-system.md` 的表格响应式规范。新增表格时，必须明确语义列宽、正文小字号、
+上下居中、金额/数量/日期对齐方式，并验证窄窗口下不会出现无意义的横向溢出或表格级最小宽度。
 
 规则工作台的商品历史只读取 `month_status.status='saved'` 的月份；规则覆盖范围必须按
 每条历史流水计算，不能用单条规则把整个商品组标记为已覆盖。商品统一和分类回溯必须
