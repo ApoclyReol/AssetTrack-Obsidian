@@ -117,8 +117,9 @@ git diff --check
 `styles.css` 为
 `478053ed8fdae14551b3f2515fd0558245bf8ebbb3e9c3a9d3dfcd4b71a01ef6`。
 
-以上只代表本地自动化验证完成；在真实 Obsidian 1.13.x smoke、跨平台人工门禁和
-Release workflow/attestation 完成前，不将本候选标记为可发布。
+以上自动化验证已由 main 分支 CI 在 Ubuntu、macOS 和 Windows 上再次通过。真实
+Obsidian 1.13.x smoke 与跨平台人工门禁仍需单独完成；Release workflow、三文件发布
+和 artifact attestation 已于正式发布时完成。
 
 最终构建目录必须只包含：
 
@@ -128,7 +129,20 @@ build/manifest.json
 build/styles.css
 ```
 
-## 发布前人工门禁
+## 正式发布结果
+
+- 发布提交：`1f4d3a6ab51882e145655627c8c3e213590a9512`；Windows CI 换行兼容测试修复
+  已在该提交中补入。
+- 标签：[`1.4.0`](https://github.com/ApoclyReol/AssetTrack-Obsidian/releases/tag/1.4.0)，
+  精确指向上述提交。
+- main 分支跨平台 CI：[`30731515984`](https://github.com/ApoclyReol/AssetTrack-Obsidian/actions/runs/30731515984)，
+  Ubuntu、macOS 和 Windows 全部通过。
+- Release workflow：[`30731570076`](https://github.com/ApoclyReol/AssetTrack-Obsidian/actions/runs/30731570076)，
+  构建、版本核对、标准资产检查和 attestation 全部通过。
+- GitHub Release：[`Asset Track 1.4.0`](https://github.com/ApoclyReol/AssetTrack-Obsidian/releases/tag/1.4.0)，
+  已发布中英文具体更新说明，并仅包含 `main.js`、`manifest.json`、`styles.css`。
+
+## 人工门禁（发布后仍需补充）
 
 1. 在隔离复制 Vault 中用 v1.3.0 数据验证更新后设置、schema 9、账户、月份、流水和
    备份未被改写。
@@ -140,8 +154,8 @@ build/styles.css
    卸载后重启结果；Linux 按发布后质量计划记录。
 5. 确认最终三文件来自同一次构建，Git 不包含数据库、备份、真实账单、Vault、依赖或
    其他敏感文件。
-6. 人工门禁通过后，创建不带 `v` 前缀的 `1.4.0` 标签，由 Release workflow 生成三文件
-   并核验 artifact attestation。
+6. 1.4.0 标签、三文件 Release 和 artifact attestation 已完成；仍需补充真实 Obsidian
+   1.13.x 的安装与使用记录，作为发布后的人工质量门禁。
 
 ### 当前人工门禁状态
 
@@ -151,4 +165,4 @@ build/styles.css
 | macOS 安装、更新、重载、卸载后重启 | 未测试 |
 | Windows 安装、更新、重载、卸载后重启 | 未测试 |
 | 复制 Vault 数据、schema 9 与备份兼容 | 未测试 |
-| 最终三文件、Release workflow 与 attestation | 未测试 |
+| 最终三文件、Release workflow 与 attestation | 已通过；见正式发布结果 |
