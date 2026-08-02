@@ -86,4 +86,10 @@ build/styles.css
 - `manifest.json`: `518fe11438e654ac9a1af6b993165ad267507e82294624e298484eb859a94b40`；
 - `styles.css`: `478053ed8fdae14551b3f2515fd0558245bf8ebbb3e9c3a9d3dfcd4b71a01ef6`。
 
-Release workflow、GitHub Release 资产和 artifact attestation 在正式发布后补录于本文。
+- Release workflow：[`30740858754`](https://github.com/ApoclyReol/AssetTrack-Obsidian/actions/runs/30740858754)，
+  Ubuntu 上的安装、typecheck、lint、测试、构建、发行校验、版本核对和三文件检查全部通过；
+- GitHub Release：[`Asset Track 1.4.1`](https://github.com/ApoclyReol/AssetTrack-Obsidian/releases/tag/1.4.1)，
+  已发布中英文具体更新说明，并仅包含 `main.js`、`manifest.json` 和 `styles.css`；
+- artifact attestation 已通过 GitHub API 按完整 SHA-256 核对，attestation subject 同时覆盖三项正式资产，
+  来源为 `refs/tags/1.4.1` 的 `.github/workflows/release.yml`。本地 Sigstore verifier 因环境无法初始化
+  可用 verifier，未作为最终判断依据。
