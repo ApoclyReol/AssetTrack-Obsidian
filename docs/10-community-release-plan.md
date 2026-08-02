@@ -1,5 +1,7 @@
 # 10 发布后质量与功能路线
 
+> 文档角色：开发与维护。本文记录社区发布后的质量门禁和演进计划，不是用户操作文档。
+
 ## 当前结论
 
 Asset Track 已通过 Community Plugins 审核，用户可以从 Obsidian 社区目录直接
@@ -12,9 +14,9 @@ manifest.json
 styles.css
 ```
 
-插件不依赖 Python、sidecar、平台原生扩展或 CPU 架构包。历史稳定版本的 macOS
-和 Windows 真实 Obsidian smoke 不替代 v1.4.0 候选验证；本版本推送标签前仍需按
-发布日志重新完成两个平台门禁。Linux 验证属于发布后持续质量工作。
+插件不依赖 Python、sidecar、平台原生扩展或 CPU 架构包。v1.4.0 已完成自动化构建、
+跨平台 CI、标准三文件发布和 attestation；真实 Obsidian smoke 与复制 Vault 回归
+仍按发布日志作为发布后的人工质量门禁持续补充。Linux 验证属于发布后持续质量工作。
 
 ## 稳定兼容边界
 
@@ -42,8 +44,8 @@ styles.css
 4. 保持 Ubuntu、macOS 和 Windows CI 的
    `npm ci → typecheck → lint → test → build → release:check` 全部通过。
 5. 每次发布继续只上传标准三文件，并为每个文件生成 artifact attestation。
-6. v1.4.0 发布前人工确认复制 Vault 升级、中文/英文界面、规则冲突与回溯事务、商品
-   统一、部分覆盖、关闭草稿恢复和分类删除弹窗；当前候选未把这些真实 Obsidian smoke
+6. v1.4.0 发布后持续记录复制 Vault 升级、中文/英文界面、规则冲突与回溯事务、商品
+   统一、部分覆盖、关闭草稿恢复和分类删除弹窗；不能把这些真实 Obsidian smoke
    结果冒充为自动测试结果。
 
 真实 smoke 状态只允许记录为 `通过（日期/版本/测试人）`、`失败（issue）` 或
@@ -73,7 +75,7 @@ styles.css
 - 项目只使用 `build/` 作为产物目录；构建时清空该目录，根部只保留标准三文件，
   不生成 `dist/`、`out/`、ZIP 或子目录；
 - GitHub Release 只包含 `main.js`、`manifest.json` 和 `styles.css`；
-- README、长期文档、CHANGELOG、SECURITY 和 release 日志与当前安装方式一致；
+- README、长期文档、SECURITY 和 release 日志与当前安装方式一致；
 - Git 不包含数据库、备份、真实账单、Vault、日志、密钥、依赖或构建缓存。
 
 官方参考：

@@ -6,6 +6,11 @@ AssetTrack 是桌面版 Obsidian 插件。正式运行链为 React/TypeScript It
 TypeScript Service/Repository、Obsidian Electron 内置 `node:sqlite` 和本地
 SQLite。项目不再包含 Python、HTTP API、sidecar 或平台原生扩展。
 
+产品定位不是高频手工记账，而是以月度账单导入为入口、以统一 SQLite 数据库为唯一
+事实、以资产闭环验证数据质量、由用户完全私有控制的个人财务结算系统。后续功能
+默认围绕“导入 → 规范 → 补充资产 → 对账验证 → 分析”迭代；手工编辑只承担纠错、
+补漏和特殊流水。产品原则和非目标以 `docs/01-product-requirements.md` 为准。
+
 ## 事实来源与交付边界
 
 - 开始任务先检查实时 Git、目录、schema、数据路径和相关测试。
@@ -47,8 +52,8 @@ docs/                                   当前架构、用户、开发与发行�
 ## 当前 handoff
 
 - Asset Track 已在 Community Plugins 上线，社区目录是推荐安装与更新方式；
-  v1.4.0 是当前本地发布候选，要求 Obsidian 1.13.0+，并在发布声明中要求用户使用
-  当前最新的 1.13.x 桌面版；保持 schema 9 和核心对账口径，在 v1.2.0 的金额、
+  v1.4.0 已正式发布，要求 Obsidian 1.13.0+，并在发布声明中要求用户使用当前
+  最新的 1.13.x 桌面版；保持 schema 9 和核心对账口径，在 v1.2.0 的金额、
   资产与分析基础上增加导入容错、警告保存、规则工作台、商品回溯和统一表格布局。
 - 确认操作使用 Obsidian 原生 Modal，CSV 映射窗口支持焦点陷阱、Escape 和状态
   播报；流水逐项表按可视行渲染，分块编号为线性预计算。

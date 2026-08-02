@@ -3,7 +3,7 @@
   "name": "Asset Track",
   "version": "1.4.0",
   "minAppVersion": "1.13.0",
-  "description": "A local-first personal finance tracker with monthly accounts, transactions, imports, analytics, and backups.",
+  "description": "A local-first personal finance system that turns monthly bill imports into a unified, private source of truth for assets, spending, reconciliation, analytics, and backups.",
   "author": "Apocly",
   "isDesktopOnly": true
 }
