@@ -44,16 +44,16 @@ import {
   MAX_IMPORT_FILE_BYTES,
   prepareCsvImportCommit
 } from "./csvImportCommit";
+import { monthEnd, previousMonth } from "../domain/dates";
 import { roundHalfEven, sum } from "../domain/money";
 import { businessLabel, getLocale, t } from "../i18n";
 import { configureMoneyFormat, money } from "../domain/moneyFormat";
-import { CollectionEditor } from "./CollectionEditor";
+import { MonthDebtSection } from "./MonthDebtSection";
 import {
   FixedAssetTable,
   TransactionSummaryTable,
   TransactionTable
 } from "./TransactionTables";
-export { CollectionEditor } from "./CollectionEditor";
 import {
   EmptyState,
   IssueList,
@@ -270,7 +270,7 @@ export function AssetTrackEditorApp({
               className={mode === item ? "is-active" : ""}
               onClick={() => void switchMode(item)}
             >
-              {{ analysis: t("分析", "Analysis"), transactions: t("流水", "Transactions"), debts: t("借款", "Debts"), rules: t("规则", "Rules") }[item]}
+              {{ analysis: t("分析", "Analysis"), transactions: t("流水", "Transactions"), rules: t("规则", "Rules") }[item]}
             </button>
           ))}
         </nav>
@@ -339,35 +339,6 @@ export function AssetTrackEditorApp({
         />
       )}
       {mode === "transactions" && !month && <EmptyState text={t("尚无月份，请创建第一个月份。", "No months exist yet. Create the first month.")} />}
-      {mode === "debts" && (
-        <CollectionEditor
-          title={t("借款管理", "Debt management")}
-          load={() => api.debts()}
-          save={(revision, rows) => api.saveDebts(revision, rows)}
-          createRow={() => ({
-            start_date: new Date().toISOString().slice(0, 10),
-            description: "",
-            counterparty: "",
-            amount: 0,
-            is_paid: false,
-            paid_date: null
-          })}
-          columns={[
-            ["start_date", t("发生日期", "Start date"), "date"],
-            ["description", t("说明", "Description"), "text"],
-            ["counterparty", t("对方", "Counterparty"), "text"],
-            ["amount", t("金额", "Amount"), "number"],
-            ["is_paid", t("已还", "Paid"), "checkbox"],
-            ["paid_date", t("还清日期", "Paid date"), "date"]
-          ]}
-          onDirty={setDirty}
-          initialDraft={recoveryDraft.current?.kind === "debts"
-            ? recoveryDraft.current
-            : undefined}
-          onDraftChange={handleDraftSnapshotChange}
-          onSaved={() => setDataVersion((value) => value + 1)}
-        />
-      )}
       {mode === "rules" && (
         <RulesEditorV2
           app={app}
@@ -407,7 +378,7 @@ function draftMonthMetrics(workspace: MonthWorkspace): {
     && workspace.overview.reconciliation.theoretical.previous_cash !== null
     ? workspace.overview.reconciliation.theoretical.previous_cash
       + income
-      + (workspace.overview.reconciliation.theoretical.debt_change ?? 0)
+      + draftDebtChange(workspace)
       - sum(workspace.cash_accounts.map((row) => Number(row.balance) || 0))
       - sum(workspace.transactions
         .filter((row) => row.type === "加仓")
@@ -421,6 +392,44 @@ function draftMonthMetrics(workspace: MonthWorkspace): {
     expense,
     discrepancy: theoretical === null ? null : roundHalfEven(expense - theoretical)
   };
+}
+
+function normalizedDebtDate(value: string | null | undefined): string {
+  return String(value ?? "").replace(/\//g, "-");
+}
+
+function draftDebtPaidDate(
+  row: MonthWorkspace["debts"][number],
+  currentMonthEnd: string
+): string | null {
+  const paidDate = normalizedDebtDate(row.paid_date);
+  if (row.is_paid) return paidDate || currentMonthEnd;
+  return paidDate && paidDate > currentMonthEnd ? paidDate : null;
+}
+
+function draftDebtActiveAt(
+  rows: MonthWorkspace["debts"],
+  boundary: string,
+  currentMonthEnd: string
+): number {
+  return sum(rows.map((row) => {
+    const startDate = normalizedDebtDate(row.start_date);
+    if (!startDate || startDate > boundary) return 0;
+    const paidDate = draftDebtPaidDate(row, currentMonthEnd);
+    if (paidDate && paidDate <= boundary) return 0;
+    return Number(row.amount) || 0;
+  }));
+}
+
+function draftDebtChange(workspace: MonthWorkspace): number {
+  const previous = previousMonth(workspace.month);
+  if (!previous) return 0;
+  const currentMonthEnd = monthEnd(workspace.month);
+  const previousMonthEnd = monthEnd(previous);
+  return roundHalfEven(
+    draftDebtActiveAt(workspace.debts, currentMonthEnd, currentMonthEnd)
+    - draftDebtActiveAt(workspace.debts, previousMonthEnd, currentMonthEnd)
+  );
 }
 
 function isEmptyMonthDraft(workspace: MonthWorkspace, dirty: boolean): boolean {
@@ -648,7 +657,9 @@ export function MonthEditor({
         cash_accounts: draft.cash_accounts,
         investment_accounts: draft.investment_accounts,
         transactions: draft.transactions,
-        fixed_assets: draft.fixed_assets
+        fixed_assets: draft.fixed_assets,
+        debt_revision: draft.debt_revision,
+        debts: draft.debts
       });
       dispatchDraft({ type: "reset", workspace: clone(saved) });
       const persistedValidation = await api.validateTransactions(month, saved.transactions);
@@ -1007,6 +1018,12 @@ export function MonthEditor({
           onUpdate={updateTransaction}
         />
       )}
+      <MonthDebtSection
+        month={month}
+        rows={draft.debts}
+        onChange={(rows) => mark({ ...draft, debts: rows })}
+        onBlocked={(message) => new Notice(message)}
+      />
       <FixedAssetTable
         rows={draft.fixed_assets}
         onUpdate={updateAsset}

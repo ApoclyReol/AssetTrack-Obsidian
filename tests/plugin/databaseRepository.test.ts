@@ -111,6 +111,135 @@ describe("node:sqlite schema 9 repository", () => {
     expect((await repository.getMonth("2026-01")).cash_accounts[0].balance).toBe(1020);
   });
 
+  it("projects inherited debts into the month and repays them as fact rows", async () => {
+    const { manager, repository } = fixture();
+    await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 1000 }],
+      [{
+        account_key: "investment-default",
+        principal: 0,
+        market_value: 0,
+        cash_balance: 0
+      }],
+      [],
+      []
+    );
+    manager.connection().prepare(`
+      INSERT INTO debt_manager
+        (description,counterparty,amount,start_date,is_paid,paid_date)
+      VALUES ('信用借款','银行',200,'2026-01-01',0,NULL)
+    `).run();
+
+    const january = await repository.getMonth("2026-01");
+    const february = await repository.getMonth("2026-02");
+    expect(january.debts[0]).toMatchObject({
+      description: "信用借款",
+      is_paid: false
+    });
+    expect(february.debts[0]).toMatchObject({
+      description: "信用借款",
+      is_paid: false
+    });
+
+    const saved = await repository.saveMonth(
+      "2026-02",
+      0,
+      [{ account_key: "cash-default", balance: 800 }],
+      [{
+        account_key: "investment-default",
+        principal: 0,
+        market_value: 0,
+        cash_balance: 0
+      }],
+      [],
+      [],
+      {
+        expected_revision: february.debt_revision,
+        rows: [{ ...february.debts[0], is_paid: true }]
+      }
+    );
+
+    expect(saved.debts[0]).toMatchObject({
+      is_paid: true,
+      paid_date: "2026-02-28"
+    });
+    expect(saved.overview.reconciliation?.theoretical.debt_change).toBe(-200);
+    expect(saved.overview.reconciliation?.discrepancy).toBe(0);
+    const earlier = await repository.getMonth("2026-01");
+    expect(earlier.debts[0].is_paid).toBe(false);
+    expect(earlier.debts[0].paid_date).toBe("2026-02-28");
+    await expect(repository.saveMonth(
+      "2026-01",
+      earlier.revision,
+      earlier.cash_accounts,
+      earlier.investment_accounts,
+      earlier.transactions,
+      earlier.fixed_assets,
+      {
+        expected_revision: earlier.debt_revision,
+        rows: [{ ...earlier.debts[0], is_paid: true }]
+      }
+    )).rejects.toMatchObject({
+      status: 422,
+      message: "借款未来 2026-02-28 已还清，不可修改此月借款。"
+    });
+    expect((await repository.getMonth("2026-03")).debts).toHaveLength(0);
+  });
+
+  it("keeps a same-month borrowed-and-paid debt out of reconciliation", async () => {
+    const { repository } = fixture();
+    await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 1000 }],
+      [{
+        account_key: "investment-default",
+        principal: 0,
+        market_value: 0,
+        cash_balance: 0
+      }],
+      [],
+      []
+    );
+    const february = await repository.getMonth("2026-02");
+
+    const saved = await repository.saveMonth(
+      "2026-02",
+      0,
+      [{ account_key: "cash-default", balance: 1000 }],
+      [{
+        account_key: "investment-default",
+        principal: 0,
+        market_value: 0,
+        cash_balance: 0
+      }],
+      [],
+      [],
+      {
+        expected_revision: february.debt_revision,
+        rows: [{
+          description: "周转借款",
+          counterparty: "朋友",
+          amount: 300,
+          start_date: "2026-02-01",
+          is_paid: true,
+          paid_date: null
+        }]
+      }
+    );
+
+    expect(saved.debts).toHaveLength(1);
+    expect(saved.debts[0]).toMatchObject({
+      description: "周转借款",
+      is_paid: true,
+      paid_date: "2026-02-28"
+    });
+    expect(saved.overview.reconciliation?.theoretical.debt_change).toBe(0);
+    expect(saved.overview.reconciliation?.discrepancy).toBe(0);
+  });
+
   it("rolls back all month tables when transaction validation fails", async () => {
     const { repository } = fixture();
     await expect(repository.saveMonth(

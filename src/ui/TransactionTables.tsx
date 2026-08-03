@@ -24,7 +24,30 @@ import {
   sortRows,
   type SortState
 } from "./editorPrimitives";
-import { ActionTableHeader, StaticTableHeader } from "./TablePrimitives";
+import { ActionTableHeader } from "./TablePrimitives";
+
+const CATEGORY_TRANSACTION_TYPES = new Set(["支出", "收入"]);
+const SUMMARY_SORT_FIELDS = new Set(["type", "product", "count", "amount", "category"]);
+
+function transactionTypeUsesCategory(type: string): boolean {
+  return CATEGORY_TRANSACTION_TYPES.has(type);
+}
+
+function summaryCategoryLabel(group: TransactionGroup): string {
+  if (!transactionTypeUsesCategory(group.type)) return "";
+  if (group.categories.length === 0) return t("未分类", "Uncategorized");
+  if (group.categories.length === 1) return group.categories[0];
+  return t(
+    `${group.categories.length} 个分类（有冲突）`,
+    `${group.categories.length} categories (conflict)`
+  );
+}
+
+function summarySortValue(group: TransactionGroup, key: string): unknown {
+  if (key === "type") return businessLabel(group.type);
+  if (key === "category") return summaryCategoryLabel(group);
+  return group[key as keyof TransactionGroup];
+}
 
 export function TransactionTable({
   title,
@@ -50,6 +73,15 @@ export function TransactionTable({
     scrollTop: 0,
     height: 600
   });
+  const usesCategory = transactionTypeUsesCategory(title);
+  const gridClassName = `asset-track-grid${usesCategory ? "" : " asset-track-grid--no-category"}`;
+  const columns: Array<[string, string]> = [
+    ["transaction_date", t("日期", "Date")],
+    ["counterparty", t("交易对方", "Counterparty")],
+    ...(usesCategory ? [["category", t("分类", "Category")] as [string, string]] : []),
+    ["product", t("商品", "Item")],
+    ["amount", t("金额", "Amount")]
+  ];
   const sorted = useMemo(
     () =>
       sortRows(visibleIndexes, sort, (index, key) => key === "row_number"
@@ -83,17 +115,11 @@ export function TransactionTable({
           });
         }}
       >
-        <div className="asset-track-grid asset-track-grid-head">
+        <div className={`${gridClassName} asset-track-grid-head`}>
           <span className="asset-track-row-number-heading">
             <SortButton field="row_number" label={t("行号", "Row")} sort={sort} onSort={setSort} />
           </span>
-          {[
-            ["transaction_date", t("日期", "Date")],
-            ["counterparty", t("交易对方", "Counterparty")],
-            ["category", t("分类", "Category")],
-            ["product", t("商品", "Item")],
-            ["amount", t("金额", "Amount")]
-          ].map(([field, label]) => (
+          {columns.map(([field, label]) => (
             <SortButton key={field} field={field} label={label} sort={sort} onSort={setSort} />
           ))}
           <button
@@ -117,15 +143,14 @@ export function TransactionTable({
           {visibleRows.map(({ row: originalIndex }, visibleIndex) => {
             const row = rows[originalIndex];
             const blockNumber = blockNumbers[originalIndex];
-            const special = ["代付", "加仓", "提现"].includes(row.type);
-            const options = categories.filter(
+            const options = usesCategory ? categories.filter(
               (category) =>
                 category.transaction_type === row.type &&
                 (category.is_active || category.category_key === row.category_key)
-            );
+            ) : [];
             return (
               <div
-                className="asset-track-grid"
+                className={gridClassName}
                 key={row.id ?? row.client_id ?? originalIndex}
                 role="row"
                 aria-rowindex={range.start + visibleIndex + 2}
@@ -142,19 +167,20 @@ export function TransactionTable({
                   placeholder={t("交易对方", "Counterparty")}
                   onChange={(event) => onUpdate(originalIndex, "counterparty", event.target.value)}
                 />
-                <select
-                  aria-label={t(`${title}第 ${blockNumber} 行分类`, `${displayTitle} row ${blockNumber} category`)}
-                  disabled={special}
-                  value={row.category_key ?? ""}
-                  onChange={(event) => onUpdate(originalIndex, "category_key", event.target.value)}
-                >
-                  <option value="">{t("请选择", "Select")}</option>
-                  {options.map((category) => (
-                    <option key={category.category_key} value={category.category_key}>
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
+                {usesCategory && (
+                  <select
+                    aria-label={t(`${title}第 ${blockNumber} 行分类`, `${displayTitle} row ${blockNumber} category`)}
+                    value={row.category_key ?? ""}
+                    onChange={(event) => onUpdate(originalIndex, "category_key", event.target.value)}
+                  >
+                    <option value="">{t("请选择", "Select")}</option>
+                    {options.map((category) => (
+                      <option key={category.category_key} value={category.category_key}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <input
                   aria-label={t(`${title}第 ${blockNumber} 行商品`, `${displayTitle} row ${blockNumber} item`)}
                   value={row.product}
@@ -208,21 +234,23 @@ export function TransactionSummaryTable({
   onExpanded: (key: string) => void;
   onUpdate: (index: number, field: keyof Transaction, value: string) => void;
 }) {
-  const groups = sortRows(groupTransactions(rows), sort, (group, key) =>
-    group[key as keyof TransactionGroup]
-  );
+  const effectiveSort = sort && SUMMARY_SORT_FIELDS.has(sort.key) ? sort : null;
+  const groups = sortRows(groupTransactions(rows), effectiveSort, summarySortValue);
   return (
     <Section title={t("商品汇总", "Item summary")}>
       <div className="asset-track-table-scroll">
         <table className="asset-track-summary-table">
           <thead>
             <tr>
-              <StaticTableHeader label={t("收支", "Type")} className="asset-track-type-column" />
-              <th scope="col"><SortButton label={t("商品", "Item")} field="product" sort={sort} onSort={onSort} /></th>
-              <th scope="col" className="asset-track-count-column"><SortButton label={t("出现次数", "Occurrences")} field="count" sort={sort} onSort={onSort} /></th>
-              <th scope="col" className="asset-track-amount-column"><SortButton label={t("总金额", "Total amount")} field="amount" sort={sort} onSort={onSort} /></th>
-              <th scope="col" className="asset-track-date-column"><SortButton label={t("最近日期", "Latest date")} field="lastDate" sort={sort} onSort={onSort} /></th>
-              <StaticTableHeader label={t("分类", "Category")} />
+              <th scope="col" className="asset-track-type-column">
+                <SortButton label={t("收支", "Type")} field="type" sort={effectiveSort} onSort={onSort} />
+              </th>
+              <th scope="col"><SortButton label={t("商品", "Item")} field="product" sort={effectiveSort} onSort={onSort} /></th>
+              <th scope="col" className="asset-track-count-column"><SortButton label={t("出现次数", "Occurrences")} field="count" sort={effectiveSort} onSort={onSort} /></th>
+              <th scope="col" className="asset-track-amount-column"><SortButton label={t("总金额", "Total amount")} field="amount" sort={effectiveSort} onSort={onSort} /></th>
+              <th scope="col" className="asset-track-summary-category-column">
+                <SortButton label={t("分类", "Category")} field="category" sort={effectiveSort} onSort={onSort} />
+              </th>
               <ActionTableHeader />
             </tr>
           </thead>
@@ -237,21 +265,7 @@ export function TransactionSummaryTable({
                     group.amount,
                     group.type as "收入" | "支出" | "代付" | "加仓" | "提现"
                   )}</td>
-                  <td className="asset-track-date-cell">
-                    {group.firstDate === group.lastDate
-                      ? group.lastDate
-                      : `${group.firstDate} ～ ${group.lastDate}`}
-                  </td>
-                  <td>
-                    {group.categories.length === 0
-                      ? t("未分类", "Uncategorized")
-                      : group.categories.length === 1
-                        ? group.categories[0]
-                        : t(
-                            `${group.categories.length} 个分类（有冲突）`,
-                            `${group.categories.length} categories (conflict)`
-                          )}
-                  </td>
+                  <td className="asset-track-summary-category-cell">{summaryCategoryLabel(group)}</td>
                   <td className="asset-track-actions-cell">
                     <button onClick={() => onExpanded(expanded === group.key ? "" : group.key)}>
                       {expanded === group.key ? t("收起", "Collapse") : t("展开逐项", "Expand items")}
@@ -260,25 +274,29 @@ export function TransactionSummaryTable({
                 </tr>
                 {expanded === group.key && (
                   <tr key={`${group.key}:expanded`}>
-                    <td colSpan={7}>
+                    <td colSpan={6}>
                       <div className="asset-track-summary-details">
                         {group.indexes.map((index) => {
                           const item = rows[index];
+                          const usesCategory = transactionTypeUsesCategory(item.type);
                           const available = categories.filter(
                             (category) => category.is_active && category.transaction_type === item.type
                           );
                           return (
-                            <div key={item.id ?? item.client_id ?? index}>
+                            <div
+                              className={`asset-track-summary-detail-row${usesCategory ? "" : " asset-track-summary-detail-row--no-category"}`}
+                              key={item.id ?? item.client_id ?? index}
+                            >
                               <input type="date" value={item.transaction_date} onChange={(event) => onUpdate(index, "transaction_date", event.target.value)} />
                               <input value={item.counterparty ?? ""} placeholder={t("交易对方", "Counterparty")} onChange={(event) => onUpdate(index, "counterparty", event.target.value)} />
                               <input value={item.product} onChange={(event) => onUpdate(index, "product", event.target.value)} />
                               <input type="number" value={item.amount} onChange={(event) => onUpdate(index, "amount", event.target.value)} />
-                              {["支出", "收入"].includes(item.type) ? (
+                              {usesCategory && (
                                 <select value={item.category_key ?? ""} onChange={(event) => onUpdate(index, "category_key", event.target.value)}>
                                   <option value="">{t("请选择分类", "Select category")}</option>
                                   {available.map((category) => <option key={category.category_key} value={category.category_key}>{category.name}</option>)}
                                 </select>
-                              ) : <span>{t("无需分类", "No category required")}</span>}
+                              )}
                             </div>
                           );
                         })}

@@ -107,6 +107,8 @@ export class LocalAssetTrackService implements AssetTrackService {
       investment_accounts: MonthWorkspace["investment_accounts"];
       transactions: Transaction[];
       fixed_assets: FixedAsset[];
+      debt_revision?: number;
+      debts?: MonthWorkspace["debts"];
     }
   ): Promise<MonthWorkspace> {
     this.ready();
@@ -116,7 +118,13 @@ export class LocalAssetTrackService implements AssetTrackService {
       payload.cash_accounts,
       payload.investment_accounts,
       payload.transactions,
-      payload.fixed_assets
+      payload.fixed_assets,
+      payload.debt_revision === undefined || payload.debts === undefined
+        ? undefined
+        : {
+            expected_revision: payload.debt_revision,
+            rows: payload.debts
+          }
     );
   }
 
@@ -259,10 +267,7 @@ export class LocalAssetTrackService implements AssetTrackService {
     return this.repository.saveRuleWorkspace(request);
   }
 
-  async debts(): Promise<{
-    revision: number;
-    rows: Array<Record<string, unknown>>;
-  }> {
+  async debts(): Promise<{ revision: number; rows: MonthWorkspace["debts"] }> {
     this.ready();
     return this.repository.debts();
   }

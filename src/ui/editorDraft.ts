@@ -12,12 +12,6 @@ export interface MonthEditorDraftSnapshot {
   issues: Array<Record<string, unknown>>;
 }
 
-export interface DebtEditorDraftSnapshot {
-  kind: "debts";
-  revision: number;
-  rows: Array<Record<string, unknown>>;
-}
-
 export interface RulesEditorDraftSnapshot {
   kind: "rules";
   workspace: RuleWorkspace;
@@ -28,7 +22,6 @@ export interface RulesEditorDraftSnapshot {
 
 export type EditorDraftSnapshot =
   | MonthEditorDraftSnapshot
-  | DebtEditorDraftSnapshot
   | RulesEditorDraftSnapshot;
 
 export const DRAFT_RECOVERY_EPHEMERAL_KEY =

@@ -347,13 +347,25 @@ export interface FixedAsset {
   note: string;
 }
 
+export interface DebtRecord {
+  id?: number;
+  description: string;
+  counterparty: string;
+  amount: number;
+  start_date: string;
+  is_paid: boolean;
+  paid_date?: string | null;
+}
+
 export interface MonthWorkspace {
   month: string;
   revision: number;
   status: "draft" | "saved";
+  debt_revision: number;
   cash_accounts: CashAccountBalance[];
   investment_accounts: InvestmentAccountBalance[];
   transactions: Transaction[];
+  debts: DebtRecord[];
   fixed_assets: FixedAsset[];
   computed: Record<string, unknown>;
   overview: MonthOverview;

@@ -371,18 +371,37 @@
   font-size: var(--font-ui-small);
 }
 
+.asset-track-debt-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.asset-track-debt-summary span,
+.asset-track-muted {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
 .asset-track-summary-details {
   display: grid;
   gap: 6px;
   padding: 6px;
 }
 
-.asset-track-summary-details > div {
+.asset-track-summary-detail-row {
   display: grid;
   grid-template-columns:
     140px minmax(160px, 1fr) minmax(220px, 1fr)
     120px minmax(150px, 220px);
   gap: 8px;
+}
+
+.asset-track-summary-detail-row--no-category {
+  grid-template-columns:
+    140px minmax(180px, 1fr) minmax(240px, 1.25fr)
+    120px;
 }
 
 .asset-track-modal-backdrop {
@@ -850,6 +869,11 @@
   width: 72px;
 }
 
+.asset-track-summary-table th:nth-child(2),
+.asset-track-summary-table td:nth-child(2) {
+  width: 36%;
+}
+
 .asset-track-summary-table th:nth-child(3),
 .asset-track-summary-table td:nth-child(3) {
   width: 78px;
@@ -857,16 +881,16 @@
 
 .asset-track-summary-table th:nth-child(4),
 .asset-track-summary-table td:nth-child(4) {
-  width: 100px;
+  width: 110px;
 }
 
 .asset-track-summary-table th:nth-child(5),
 .asset-track-summary-table td:nth-child(5) {
-  width: 112px;
+  width: 28%;
 }
 
-.asset-track-summary-table th:nth-child(7),
-.asset-track-summary-table td:nth-child(7) {
+.asset-track-summary-table th:nth-child(6),
+.asset-track-summary-table td:nth-child(6) {
   width: 96px;
 }
 
@@ -888,6 +912,27 @@
 .asset-track-fixed-assets-table th:nth-child(7),
 .asset-track-fixed-assets-table td:nth-child(7) {
   width: 88px;
+}
+
+.asset-track-debt-table th:nth-child(1),
+.asset-track-debt-table td:nth-child(1) {
+  width: 104px;
+}
+
+.asset-track-debt-table th:nth-child(4),
+.asset-track-debt-table td:nth-child(4) {
+  width: 112px;
+}
+
+.asset-track-debt-table th:nth-child(5),
+.asset-track-debt-table td:nth-child(5) {
+  width: 88px;
+}
+
+.asset-track-debt-table th:nth-child(6),
+.asset-track-debt-table td:nth-child(6) {
+  width: 88px;
+  text-align: center;
 }
 
 .asset-track-collection-table th:nth-child(1),
@@ -1736,6 +1781,16 @@
   border-bottom: 1px solid var(--background-modifier-border);
 }
 
+.asset-track-grid--no-category {
+  grid-template-columns:
+    minmax(0, 0.55fr)
+    minmax(0, 1fr)
+    minmax(0, 1.35fr)
+    minmax(0, 1.35fr)
+    minmax(64px, 0.85fr)
+    minmax(56px, 0.6fr);
+}
+
 .asset-track-grid > input,
 .asset-track-grid > select,
 .asset-track-grid > button {
@@ -2264,7 +2319,8 @@
   .asset-track-mapping-grid,
   .asset-track-investment-row,
   .asset-track-month-metrics,
-  .asset-track-summary-details > div {
+  .asset-track-summary-detail-row,
+  .asset-track-summary-detail-row--no-category {
     grid-template-columns: minmax(0, 1fr);
   }
 

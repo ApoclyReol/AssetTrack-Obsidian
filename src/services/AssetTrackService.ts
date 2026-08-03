@@ -73,6 +73,8 @@ export interface AssetTrackService {
       investment_accounts: MonthWorkspace["investment_accounts"];
       transactions: Transaction[];
       fixed_assets: FixedAsset[];
+      debt_revision?: number;
+      debts?: MonthWorkspace["debts"];
     }
   ): Promise<MonthWorkspace>;
   validateTransactions(
@@ -127,7 +129,7 @@ export interface AssetTrackService {
   ): Promise<ProductRenamePreview>;
   applyProductRename(request: ProductRenameRequest): Promise<ProductRenameResult>;
   saveRuleWorkspace(request: SaveRuleWorkspaceRequest): Promise<RuleWorkspace>;
-  debts(): Promise<{ revision: number; rows: Array<Record<string, unknown>> }>;
+  debts(): Promise<{ revision: number; rows: MonthWorkspace["debts"] }>;
   saveDebts(
     revision: number,
     rows: Array<Record<string, unknown>>

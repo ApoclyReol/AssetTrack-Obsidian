@@ -74,7 +74,7 @@ SQLite 事实模型中并由同一 Service/Repository 管理；不得引入云�
 schema 9 在流水和自动规则中分别保存 `counterparty`；插件运行时不包含旧 schema
 自动迁移逻辑。
 
-当前版本起，`data.json` 还保存基础货币、金额格式、平账容差和大额支出阈值；v1.4.0
+当前版本起，`data.json` 还保存基础货币、金额格式、平账容差和大额支出阈值；v1.5.0
 不改变这些设置的兼容方式。
 这些字段只影响展示与分析，不改变 schema 9 或备份格式。月度草稿使用 reducer
 动作标记 dirty，保存后以 canonical workspace 和新 revision 重置。账单文件以
@@ -89,7 +89,7 @@ schema 9 在流水和自动规则中分别保存 `counterparty`；插件运行�
 当前仍保留的技术债：
 
 - UI 已完成一轮按职责拆分：`AnalysisView.tsx` 只负责分析导航，首页、商品、年度和月度分析
-  分别位于独立模块；流水表、固定资产表、借款编辑、规则工作台和共享编辑原语也已独立。
+  分别位于独立模块；流水表、月内借款区块、固定资产表、规则工作台和共享编辑原语也已独立。
   `AssetTrackEditorApp.tsx` 仍保留 ItemView 路由、草稿 reducer 和 `MonthEditor`，后续只继续
   拆出边界清晰且不改变草稿/事务契约的部分；
 - `RuleHistoryModal.tsx` 现在只负责历史回溯与分类迁移，商品统一和规则创建分别位于
@@ -108,11 +108,11 @@ schema 9 在流水和自动规则中分别保存 `counterparty`；插件运行�
 
 - 插件实例共享 DatabaseManager、Repository、Service、写入队列和数据变更事件。
 - 每个 ItemView 独立保存当前页面、月份、排序、筛选、草稿和 dirty 状态。
-- ItemView 持续接收月流水、借款、分类和规则编辑器的可序列化草稿快照。由于
+- ItemView 持续接收月流水、月内借款、分类和规则编辑器的可序列化草稿快照。由于
   Obsidian 的 `onClose()` 不能取消关闭，用户取消放弃时由插件内存中的一次性恢复令牌
   重新打开同一模式并恢复草稿；令牌不写数据库、设置或 workspace layout，插件卸载时清空。
   恢复后仍以草稿携带的旧 revision 保存，数据库 revision 已变化时只提示外部修改，不覆盖草稿。
-- 月份、借款、规则、分类和账户保存均携带 revision。
+- 月份、月内借款、规则、分类和账户保存均携带 revision。
 - 月份校验、revision 检查、所有月度表更新和 revision 增加位于同一
   `BEGIN IMMEDIATE` 事务。
 - 规则工作台首次使用 `ruleWorkspaceShell()` 读取轻量分类、规则和 revision，历史分析在首次绘制后

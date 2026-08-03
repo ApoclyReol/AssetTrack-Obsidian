@@ -2,7 +2,7 @@
 
 > 文档角色：开发与维护。本文服务源码修改、测试、构建和代码评审，不承担用户使用说明。
 
-## v1.4.1 维护边界
+## v1.5.0 维护边界
 
 - 金额展示统一调用 `src/domain/moneyFormat.ts`。
 - 分析阈值来自 `AssetTrackSettings`，Repository 不复制界面常量。
@@ -13,6 +13,8 @@
   文案或稳定错误码，不要让纯领域模块直接依赖 Obsidian。
 - 设置页使用 Obsidian 1.13 `getSettingDefinitions()`；设置值变更后调用 `update()`
   刷新页面，不恢复 `PluginSettingTab.display()` 或其他已弃用的 imperative 设置入口。
+- 月流水页拥有当月借款草稿；实时对账差额必须使用草稿中的交易、现金和借款事实，
+  不能回退到保存快照中的旧 `debt_change`。
 - 目录选择使用原生 `folder` 控件和本地草稿；不得调用 `getAllLoadedFiles()`、`getFiles()`
   或 `getMarkdownFiles()` 枚举 Vault 文件。
 - Recharts 3 会通过 Redux 进入生产 bundle；构建阶段对 Redux 私有 action 后缀的点号写法做
@@ -24,10 +26,8 @@
 - 社区扫描器曾提示“Plugin assembles domain names at runtime”。当前判断为 Recharts 间接依赖
   Redux 的内部随机 action 后缀写法触发的误报，不是 Asset Track 的联网代码，也不影响图表、
   SQLite、财务计算或现有用户使用。
-- 构建层面的等价改写和 bundle 回归门禁已经在当前工作区形成候选改动，但尚未提交、推送或
-  发布；v1.4.1 的 tag 和 Release 资产保持不变。
-- 下一次正式版本更新时，再将该候选改动与版本号、发行日志、最终三文件构建和扫描结果一起
-  提交发布。若上游依赖或社区扫描规则先发生变化，发布前仍需重新确认最终 `main.js`。
+- 构建层面的等价改写和 bundle 回归门禁已经纳入当前发布线；后续若上游依赖或社区扫描规则
+  变化，发布前仍需重新确认最终 `main.js`。
 
 ## 产品驱动的开发决策
 

@@ -4,6 +4,26 @@
 
 - 后续修复与功能进入此区。
 
+## 1.5.0
+
+### 中文更新
+
+- 借款管理整合到月流水页：上月未还借款会自动继承，用户在对应月份新增借款或勾选“本月还清”，底层仍写入全局借款事实表。
+- 借款变化进入月流水顶部对账差额的实时计算，新增、还清或修改当月借款金额后不必等保存即可看到差额变化。
+- 关闭未来月份已还清借款的历史月份修改入口；若历史月份修改会覆盖未来还清事实，界面和 Repository 都会拒绝。
+- 代付、加仓、提现不再显示分类列、分类选择或“无需分类”占位；保存时继续拒绝特殊类型携带分类。
+- 按商品汇总移除“最近日期”列，优化商品、分类等列宽，并支持按收支和分类排序。
+- 保持 Obsidian 1.13.0+、SQLite schema 9、数据库路径、备份格式和既有 `data.json` 兼容字段不变。
+
+### English updates
+
+- Debt management is now part of the monthly transaction page. Unpaid debts carry forward automatically, and users add or mark debts as paid in the relevant month while the global debt fact table remains the source of truth.
+- Debt changes now feed the live reconciliation difference in the monthly editor. Adding, repaying, or changing same-month debt amounts updates the difference before saving.
+- Historical months cannot overwrite a debt that has already been paid in a future month; both the UI and Repository reject that boundary.
+- Proxy payment, investment deposit, and investment withdrawal rows no longer show category columns, category selectors, or “no category required” placeholders.
+- Item summary removes the Latest date column, improves item/category column proportions, and supports sorting by type and category.
+- Obsidian 1.13.0+, SQLite schema 9, database paths, backup formats, and compatible `data.json` fields remain unchanged.
+
 ## 1.4.1
 
 ### 中文更新

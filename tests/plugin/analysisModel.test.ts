@@ -47,7 +47,7 @@ function annualRow(index: number): AnnualRow {
 
 describe("real-time analysis model", () => {
   it("keeps the editor, analysis, and transaction sections stable", () => {
-    expect(EDITOR_MODES).toEqual(["analysis", "transactions", "debts", "rules"]);
+    expect(EDITOR_MODES).toEqual(["analysis", "transactions", "rules"]);
     expect(ANALYSIS_MODES).toEqual(["home", "annual", "monthly", "products"]);
     expect(TRANSACTION_SECTIONS).toEqual(["支出", "收入", "代付", "加仓", "提现"]);
   });

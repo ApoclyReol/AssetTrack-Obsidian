@@ -25,6 +25,8 @@
   全库枚举，最低版本提升至 1.13.0；保持 schema 9。
 - [Release v1.4.1](release-v1.4.1.md)：优化规则匹配、分析查询和生产 bundle 性能，
   拆分 UI 与 Repository 维护边界；保持 schema 9、数据和备份格式兼容。
+- [Release v1.5.0](release-v1.5.0.md)：将借款整合到月流水事实和实时对账差额，
+  简化特殊流水分类展示，优化商品汇总列宽和排序；保持 schema 9。
 
 后续每次正式更新新增 `release-vN.N.N.md`，至少记录：
 

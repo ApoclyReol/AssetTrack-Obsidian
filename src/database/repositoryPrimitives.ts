@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type {
+  DebtRecord,
   FixedAsset,
   Transaction
 } from "../types";
@@ -109,5 +110,17 @@ export function fixedAssetFromRow(row: Row): FixedAsset {
     purchase_price: Number(row.purchase_price ?? 0),
     status: text(row.status),
     note: text(row.note)
+  };
+}
+
+export function debtFromRow(row: Row): DebtRecord {
+  return {
+    id: Number(row.id),
+    description: text(row.description),
+    counterparty: text(row.counterparty),
+    amount: Number(row.amount ?? 0),
+    start_date: text(row.start_date),
+    is_paid: boolean(row.is_paid),
+    paid_date: text(row.paid_date) || null
   };
 }

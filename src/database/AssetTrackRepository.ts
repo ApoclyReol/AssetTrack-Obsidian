@@ -9,6 +9,7 @@ import type {
   CategoryBackfillRequest,
   CategoryBackfillResult,
   CurrentAsset,
+  DebtRecord,
   FixedAsset,
   HistoricalCategoryCount,
   HistoricalProductStat,
@@ -73,6 +74,7 @@ import { buildRuleReport } from "./ruleReporting";
 import {
   boolean,
   contentRevision,
+  debtFromRow,
   exactRuleIndexKey,
   fixedAssetFromRow,
   normalizeAsset,
@@ -661,10 +663,17 @@ export class AssetTrackRepository {
     cashAccounts: CashAccountBalance[],
     investmentAccounts: InvestmentAccountBalance[],
     transactions: Transaction[],
-    fixedAssets: FixedAsset[]
+    fixedAssets: FixedAsset[],
+    debts?: {
+      expected_revision: number;
+      rows: DebtRecord[];
+    }
   ): Promise<MonthWorkspace> {
     const revision = await this.manager.write((db) => {
       const current = this.checkMonthRevision(db, month, expectedRevision);
+      if (debts) {
+        this.saveMonthDebtRows(db, month, debts.expected_revision, debts.rows);
+      }
       const definitions = new Map(rows(db.prepare(
         "SELECT account_key,account_type FROM account_definitions"
       ).all()).map((row) => [text(row.account_key), text(row.account_type)]));
@@ -768,6 +777,189 @@ export class AssetTrackRepository {
       WHERE REPLACE(start_date,'/','-')<=?
         AND (is_paid=0 OR REPLACE(paid_date,'/','-')>?)
     `).all(end, end)).map((row) => Number(row.amount ?? 0)));
+  }
+
+  private debtRecordFromRow(row: Row): DebtRecord {
+    const debt = debtFromRow(row);
+    return {
+      ...debt,
+      start_date: (() => {
+        try { return normalizeDate(debt.start_date); } catch { return debt.start_date; }
+      })(),
+      paid_date: debt.paid_date
+        ? (() => {
+          try { return normalizeDate(debt.paid_date); } catch { return debt.paid_date; }
+        })()
+        : null
+    };
+  }
+
+  private debtRows(db = this.db()): DebtRecord[] {
+    return rows(db.prepare(
+      "SELECT * FROM debt_manager ORDER BY is_paid,start_date DESC,id"
+    ).all()).map((row) => this.debtRecordFromRow(row));
+  }
+
+  private debtRowsForMonth(
+    db: DatabaseSync,
+    month: string,
+    viewState: boolean
+  ): DebtRecord[] {
+    if (!isMonth(month)) throw new RepositoryValidationError(`非法月份：${month}`);
+    const start = `${month}-01`;
+    const end = monthEnd(month);
+    return rows(db.prepare(`
+      SELECT * FROM debt_manager
+      WHERE REPLACE(start_date,'/','-')<=?
+        AND (
+          is_paid=0
+          OR REPLACE(paid_date,'/','-')>?
+          OR (
+            REPLACE(paid_date,'/','-')>=?
+            AND REPLACE(paid_date,'/','-')<=?
+          )
+          OR (
+            REPLACE(start_date,'/','-')>=?
+            AND REPLACE(start_date,'/','-')<=?
+          )
+        )
+      ORDER BY
+        CASE
+          WHEN is_paid=0 OR REPLACE(paid_date,'/','-')>? THEN 0
+          ELSE 1
+        END,
+        start_date DESC,
+        id
+    `).all(end, end, start, end, start, end, end)).map((row) => {
+      const debt = this.debtRecordFromRow(row);
+      return viewState
+        ? {
+            ...debt,
+            is_paid: Boolean(debt.is_paid && debt.paid_date && debt.paid_date <= end)
+          }
+        : debt;
+    });
+  }
+
+  private monthDebts(db: DatabaseSync, month: string): {
+    revision: number;
+    rows: DebtRecord[];
+  } {
+    const result = this.debtRowsForMonth(db, month, true);
+    return {
+      revision: contentRevision(result as unknown as Row[]),
+      rows: result
+    };
+  }
+
+  private futureDebtLockedMessage(paidDate: string): string {
+    return `借款未来 ${paidDate} 已还清，不可修改此月借款。`;
+  }
+
+  private saveMonthDebtRows(
+    db: DatabaseSync,
+    month: string,
+    expectedRevision: number,
+    input: DebtRecord[]
+  ): void {
+    const current = this.monthDebts(db, month);
+    if (current.revision !== expectedRevision) {
+      throw new RevisionConflictError(expectedRevision, current.revision);
+    }
+    const end = monthEnd(month);
+    const currentFacts = new Map(
+      this.debtRowsForMonth(db, month, false)
+        .filter((row) => row.id !== undefined)
+        .map((row) => [Number(row.id), row])
+    );
+    const submitted = new Set<number>();
+    const insert = db.prepare(`
+      INSERT INTO debt_manager
+        (description,counterparty,amount,start_date,is_paid,paid_date)
+      VALUES (?,?,?,?,?,?)
+    `);
+    const update = db.prepare(`
+      UPDATE debt_manager SET
+        description=?,counterparty=?,amount=?,start_date=?,is_paid=?,paid_date=?
+      WHERE id=?
+    `);
+
+    for (const row of input) {
+      const id = row.id === undefined || row.id === null
+        ? null
+        : Number(row.id);
+      const source = id === null ? null : currentFacts.get(id);
+      if (id !== null) {
+        if (!source || submitted.has(id)) {
+          throw new RepositoryValidationError("借款 id 无效或重复");
+        }
+        submitted.add(id);
+      }
+      const startsThisMonth = source
+        ? source.start_date.slice(0, 7) === month
+        : true;
+      const nextPaidInThisMonth = boolean(row.is_paid);
+      const description = startsThisMonth ? text(row.description) : source?.description ?? "";
+      const counterparty = startsThisMonth ? text(row.counterparty) : source?.counterparty ?? "";
+      const amount = startsThisMonth
+        ? finiteNumber(row.amount, { label: "借款金额" })
+        : source?.amount ?? 0;
+      const sourcePaidInFuture = Boolean(
+        source?.is_paid
+        && source.paid_date
+        && source.paid_date > end
+      );
+      if (
+        source
+        && sourcePaidInFuture
+        && (
+          nextPaidInThisMonth
+          || description !== source.description
+          || counterparty !== source.counterparty
+          || amount !== source.amount
+        )
+      ) {
+        throw new RepositoryValidationError(
+          this.futureDebtLockedMessage(source.paid_date ?? "")
+        );
+      }
+      const sourcePaidInThisMonth = Boolean(
+        source?.is_paid
+        && source.paid_date
+        && source.paid_date <= end
+      );
+      const paidDate = nextPaidInThisMonth
+        ? sourcePaidInThisMonth
+          ? source?.paid_date ?? end
+          : end
+        : source?.is_paid && source.paid_date && source.paid_date > end
+          ? source.paid_date
+          : null;
+      const isPaid = paidDate !== null;
+      const values = [
+        description,
+        counterparty,
+        amount,
+        source?.start_date ?? `${month}-01`,
+        isPaid ? 1 : 0,
+        paidDate
+      ] as const;
+      if (id === null) insert.run(...values);
+      else update.run(...values, id);
+    }
+
+    const remove = db.prepare("DELETE FROM debt_manager WHERE id=?");
+    for (const row of current.rows) {
+      if (row.id === undefined || submitted.has(Number(row.id))) continue;
+      if (row.start_date.slice(0, 7) === month) {
+        if (row.is_paid && row.paid_date && row.paid_date > end) {
+          throw new RepositoryValidationError(
+            this.futureDebtLockedMessage(row.paid_date)
+          );
+        }
+        remove.run(Number(row.id));
+      }
+    }
   }
 
   private annualRows(db = this.db()): ExtendedAnnualRow[] {
@@ -1079,13 +1271,16 @@ export class AssetTrackRepository {
       FROM transactions WHERE month=? ORDER BY id
     `).all(month)).map(transactionFromRow);
     const categories = this.categoryRows(db);
+    const debts = this.monthDebts(db, month);
     return {
       month,
       revision: this.getRevision(month, db),
       status: this.getMonthStatus(month, db),
+      debt_revision: debts.revision,
       cash_accounts: this.cashAccounts(db, month),
       investment_accounts: this.investmentAccounts(db, month),
       transactions,
+      debts: debts.rows,
       fixed_assets: rows(db.prepare(
         "SELECT * FROM fixed_assets WHERE month=? ORDER BY id"
       ).all(month)).map(fixedAssetFromRow),
@@ -2326,24 +2521,15 @@ export class AssetTrackRepository {
     ).map(([value, stats]) => [value, stats.count]);
   }
 
-  debts(db = this.db()): { revision: number; rows: Row[] } {
-    const result = rows(db.prepare(
-      "SELECT * FROM debt_manager ORDER BY is_paid,start_date DESC"
-    ).all()).map((row) => ({
-      ...row,
-      start_date: (() => {
-        try { return normalizeDate(row.start_date); } catch { return row.start_date; }
-      })(),
-      paid_date: text(row.paid_date)
-        ? (() => {
-          try { return normalizeDate(row.paid_date); } catch { return row.paid_date; }
-        })()
-        : null
-    }));
-    return { revision: contentRevision(result), rows: result };
+  debts(db = this.db()): { revision: number; rows: DebtRecord[] } {
+    const result = this.debtRows(db);
+    return { revision: contentRevision(result as unknown as Row[]), rows: result };
   }
 
-  async saveDebts(expectedRevision: number, input: Row[]): Promise<{ revision: number; rows: Row[] }> {
+  async saveDebts(expectedRevision: number, input: Row[]): Promise<{
+    revision: number;
+    rows: DebtRecord[];
+  }> {
     await this.manager.write((db) => {
       const current = this.debts(db);
       if (current.revision !== expectedRevision) {

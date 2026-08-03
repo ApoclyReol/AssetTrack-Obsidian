@@ -34,15 +34,29 @@ function setup(discard: boolean) {
   } });
   const view = new AssetTrackEditorView(leaf, plugin);
   const snapshot: EditorDraftSnapshot = {
-    kind: "debts",
-    revision: 2,
-    rows: [{ id: 1, description: "未保存草稿" }]
+    kind: "transactions",
+    month: "2026-08",
+    workspace: {
+      month: "2026-08",
+      revision: 2,
+      status: "saved",
+      debt_revision: 3,
+      cash_accounts: [],
+      investment_accounts: [],
+      transactions: [],
+      debts: [{ id: 1, description: "未保存草稿", counterparty: "", amount: 1, start_date: "2026-08-01", is_paid: false, paid_date: null }],
+      fixed_assets: [],
+      computed: {},
+      overview: { available: false }
+    },
+    categories: [],
+    issues: []
   };
   const unmount = vi.fn();
   Object.assign(view as unknown as TestViewFields, {
     dirty: true,
     draftSnapshot: snapshot,
-    state: { mode: "debts", analysisMode: "home" },
+    state: { mode: "transactions", analysisMode: "home", month: "2026-08" },
     root: { unmount },
     confirmAction: vi.fn().mockResolvedValue(discard)
   });
@@ -63,7 +77,7 @@ describe("AssetTrackEditorView close recovery", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 0));
 
     expect(context.reopenEditorWithDraft).toHaveBeenCalledWith(
-      { mode: "debts", analysisMode: "home" },
+      { mode: "transactions", analysisMode: "home", month: "2026-08" },
       context.snapshot
     );
     expect(context.openEditor).not.toHaveBeenCalled();
@@ -89,9 +103,11 @@ describe("AssetTrackEditorView close recovery", () => {
         month: "2026-08",
         revision: 2,
         status: "saved",
+        debt_revision: 1,
         cash_accounts: [],
         investment_accounts: [],
         transactions: [],
+        debts: [],
         fixed_assets: [],
         computed: {},
         overview: { available: false }
