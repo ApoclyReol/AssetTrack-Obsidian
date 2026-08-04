@@ -25,9 +25,11 @@ import { money } from "../domain/moneyFormat";
 import { normalizeProductKey } from "../domain/rules";
 import { scalarText } from "../domain/text";
 import { ActionTableHeader, StaticTableHeader } from "./TablePrimitives";
+import { EmptyState } from "./editorPrimitives";
 export {
   ProductRenameContent,
   ProductRenameModal,
+  type ProductRenameGroup,
   type ProductRenameModalOptions
 } from "./ProductRenameModal";
 export { RuleCreationModal, type RuleCreationModalOptions } from "./RuleCreationModal";
@@ -87,12 +89,13 @@ function historyGroupKey(transactionType: string, productKey: string): string {
 }
 
 function initialFilters(
-  initialQuery: ProductHistoryQuery | undefined
+  initialQuery: ProductHistoryQuery | undefined,
+  defaultIssueFilter: HistoryFilters["issue_filter"] = "conflict"
 ): HistoryFilters {
   return {
     transaction_type: initialQuery?.transaction_type ?? "",
     category_key: initialQuery?.category_key ?? "",
-    issue_filter: initialQuery?.issue_filter ?? "conflict",
+    issue_filter: initialQuery?.issue_filter ?? defaultIssueFilter,
     product_search: initialQuery?.product_search ?? "",
     from_month: initialQuery?.from_month ?? "",
     to_month: initialQuery?.to_month ?? "",
@@ -107,7 +110,7 @@ function categorySummary(
 ): string {
   return counts.map((count) =>
     `${count.category || t("未分类", "Uncategorized")} (${count.occurrences})`
-  ).join("、") || t("无历史分类", "No historical category");
+  ).join("\n") || t("无历史分类", "No historical category");
 }
 
 function categoryStatusLabel(value: HistoricalProductStat["category_status"]): string {
@@ -132,7 +135,7 @@ function healthLabels(group: HistoricalProductStat): string[] {
     (category) => Boolean(category.category_key) && category.is_active === false
   );
   const hasUncategorized = group.category_counts.some((category) => !category.category_key);
-  if (group.has_category_conflict) labels.push(t("分类冲突", "Category conflict"));
+  if (group.has_category_conflict) labels.push(t("商品-分类冲突", "Item-category conflict"));
   if (group.rule_status === "冲突") labels.push(t("规则冲突", "Rule conflict"));
   if (group.rule_status === "重复") labels.push(t("重复规则", "Duplicate rule"));
   if (hasInactive) labels.push(t("停用分类", "Inactive category"));
@@ -186,7 +189,7 @@ function sortGroups(
 
 function issueLabel(filter: ProductHistoryIssueFilter): string {
   return {
-    conflict: t("分类冲突", "Category conflict"),
+    conflict: t("商品-分类冲突", "Item-category conflict"),
     "rule-conflict": t("规则冲突", "Rule conflict"),
     duplicate: t("重复规则", "Duplicate rule"),
     inactive: t("停用分类", "Inactive category"),
@@ -237,6 +240,7 @@ export function HistoryBackfillContent({
   hostWindow,
   detailOnly = false,
   detailGroup,
+  overview = false,
   confirmAction,
   onSaved,
   onDataChanged,
@@ -249,6 +253,7 @@ export function HistoryBackfillContent({
 }: Omit<RuleHistoryModalOptions, "app"> & {
   embedded?: boolean;
   hostWindow: Window;
+  overview?: boolean;
   hideIssueFilter?: boolean;
   onOpenDetail?: (group: HistoricalProductStat, query: ProductHistoryQuery) => void;
   onOpenProductRename?: (group: HistoricalProductStat) => void;
@@ -256,7 +261,7 @@ export function HistoryBackfillContent({
   onQueryChange?: (query: ProductHistoryQuery) => void;
   onClose?: () => void;
 }) {
-  const [filters, setFilters] = useState<HistoryFilters>(() => initialFilters(initialQuery));
+  const [filters, setFilters] = useState<HistoryFilters>(() => initialFilters(initialQuery, overview ? "" : "conflict"));
   const [groups, setGroups] = useState<HistoricalProductStat[] | null>(null);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<HistoricalProductStat | null>(null);
@@ -270,7 +275,10 @@ export function HistoryBackfillContent({
   const requestSequence = useRef(0);
   const autoLoadTimer = useRef<number | null>(null);
 
-  const query = useMemo(() => queryFromFilters(filters), [filters]);
+  const query = useMemo(
+    () => queryFromFilters(overview ? { ...filters, issue_filter: "" } : filters),
+    [filters, overview]
+  );
   const hasFilter = Object.keys(query).length > 0;
   const sortedGroups = useMemo(
     () => sortGroups(groups ?? [], sort),
@@ -290,11 +298,15 @@ export function HistoryBackfillContent({
     setLoading(true);
     setMessage(categoryMode
       ? t("正在加载当前分类下的商品…", "Loading items in this category…")
-      : t("正在加载筛选后的历史统计…", "Loading filtered history statistics…"));
+      : overview
+        ? t("正在加载商品总览…", "Loading item overview…")
+        : t("正在加载筛选后的历史统计…", "Loading filtered history statistics…"));
     try {
-      const result = categoryMode
-        ? await api.productHistory(requestedQuery)
-        : await api.productHistoryIndex(requestedQuery);
+      const result = overview && mode === "product" && Object.keys(requestedQuery).length === 0
+        ? await api.productOverview()
+        : categoryMode
+          ? await api.productHistory(requestedQuery)
+          : await api.productHistoryIndex(requestedQuery);
       if (sequence !== requestSequence.current) return;
       setGroups(result.groups);
       setHasLoadedOnce(true);
@@ -302,19 +314,17 @@ export function HistoryBackfillContent({
       setDetailRows("rows" in result ? result.rows : null);
       setSelectedIds(new Set());
       setPreview(null);
-      setMessage(categoryMode
-        ? t(`已加载 ${result.groups.length} 个商品。`, `Loaded ${result.groups.length} items.`)
-        : t(`已加载 ${result.groups.length} 个商品分组。`, `Loaded ${result.groups.length} item groups.`));
+      setMessage("");
     } catch (error) {
       if (sequence === requestSequence.current) setMessage(errorMessage(error));
     } finally {
       if (sequence === requestSequence.current) setLoading(false);
     }
-  }, [api]);
+  }, [api, mode, overview]);
 
   const updateFilter = (next: Partial<HistoryFilters>) => {
     const nextFilters = { ...filters, ...next };
-    const nextQuery = queryFromFilters(nextFilters);
+    const nextQuery = queryFromFilters(overview ? { ...nextFilters, issue_filter: "" } : nextFilters);
     const dynamicLoad = mode === "product" && !detailOnly && hasLoadedOnce;
     requestSequence.current += 1;
     setLoading(false);
@@ -329,13 +339,13 @@ export function HistoryBackfillContent({
       hostWindow.clearTimeout(autoLoadTimer.current);
       autoLoadTimer.current = null;
     }
-    if (dynamicLoad && Object.keys(nextQuery).length > 0) {
+    if (dynamicLoad && (overview || Object.keys(nextQuery).length > 0)) {
       autoLoadTimer.current = hostWindow.setTimeout(() => {
         void loadStatsForQuery(nextQuery);
       }, 250);
     } else {
       setGroups(null);
-      if (Object.keys(nextQuery).length === 0) {
+      if (!overview && Object.keys(nextQuery).length === 0) {
         setMessage(t("请选择至少一个筛选条件。", "Choose at least one filter."));
       }
     }
@@ -348,8 +358,12 @@ export function HistoryBackfillContent({
       hostWindow.clearTimeout(autoLoadTimer.current);
       autoLoadTimer.current = null;
     }
-    setFilters(initialFilters(mode === "category" ? initialQuery : undefined));
-    onQueryChange?.(queryFromFilters(initialFilters(mode === "category" ? initialQuery : undefined)));
+    const nextFilters = initialFilters(
+      mode === "category" ? initialQuery : undefined,
+      overview ? "" : "conflict"
+    );
+    setFilters(nextFilters);
+    onQueryChange?.(queryFromFilters(overview ? { ...nextFilters, issue_filter: "" } : nextFilters));
     setGroups(null);
     setHasLoadedOnce(false);
     setSelectedGroup(null);
@@ -399,9 +413,9 @@ export function HistoryBackfillContent({
 
   useEffect(() => {
     if (mode !== "product" || detailOnly || hasLoadedOnce) return;
-    if (!hasFilter) return;
+    if (!overview && !hasFilter) return;
     void loadStatsForQuery(query);
-  }, [detailOnly, hasFilter, hasLoadedOnce, loadStatsForQuery, mode, query]);
+  }, [detailOnly, hasFilter, hasLoadedOnce, loadStatsForQuery, mode, overview, query]);
 
   useEffect(() => {
     if (mode !== "category" || detailOnly || !initialQuery?.category_key) return;
@@ -448,7 +462,7 @@ export function HistoryBackfillContent({
 
   const previewBackfill = async () => {
     if (mode === "product" && selectedGroup?.rule_status === "冲突") {
-      setMessage(t("请先处理当前商品的规则冲突，再迁移历史分类。", "Resolve this item's rule conflict before migrating historical categories."));
+      setMessage(t("请先处理当前商品的规则冲突，再修改历史分类。", "Resolve this item's rule conflict before editing historical categories."));
       return;
     }
     if (mode === "category" && sortedGroups.some((group) =>
@@ -480,15 +494,17 @@ export function HistoryBackfillContent({
 
   const applyBackfill = async () => {
     if (!preview) return;
-    const confirmed = await confirmAction(
-      t("确认迁移历史分类？", "Confirm historical category migration?"),
-      t(
-        `将修改 ${preview.transaction_count} 条流水，涉及 ${preview.month_count} 个月份；原始日期、金额和商品不会改变。`,
-        `This will update ${preview.transaction_count} transactions across ${preview.month_count} months. Dates, amounts, and items will not change.`
-      ),
-      t("确认写入", "Apply changes")
-    );
-    if (!confirmed) return;
+    if (mode === "category") {
+      const confirmed = await confirmAction(
+        t("确认迁移历史分类？", "Confirm historical category migration?"),
+        t(
+          `将修改 ${preview.transaction_count} 条流水，涉及 ${preview.month_count} 个月份；原始日期、金额和商品不会改变。`,
+          `This will update ${preview.transaction_count} transactions across ${preview.month_count} months. Dates, amounts, and items will not change.`
+        ),
+        t("确认写入", "Apply changes")
+      );
+      if (!confirmed) return;
+    }
     setLoading(true);
     setMessage(t("正在写入历史分类…", "Applying historical categories…"));
     try {
@@ -502,7 +518,7 @@ export function HistoryBackfillContent({
       onSaved();
       onDataChanged();
       new Notice(t(`已更新 ${result.updated_count} 条历史流水。`, `Updated ${result.updated_count} historical transactions.`));
-      setMessage(t(`已更新 ${result.updated_count} 条历史流水。`, `Updated ${result.updated_count} historical transactions.`));
+      setMessage("");
       if (!embedded) onClose?.();
     } catch (error) {
       setMessage(errorMessage(error));
@@ -556,20 +572,24 @@ export function HistoryBackfillContent({
   };
 
   return <div className="asset-track-rule-history-modal-content">
-    {mode === "product" && !detailOnly && !embedded && <div className="asset-track-rule-history-filters">
+    {mode === "product" && !detailOnly && (!embedded || overview) && <div className="asset-track-rule-history-filters">
       <div className="asset-track-rule-history-filter-heading">
-        <strong>{t("默认显示分类冲突", "Category conflicts are shown by default")}</strong>
-        <span>{t("筛选条件变化后会自动刷新统计。", "Statistics refresh automatically when filters change.")}</span>
+        <strong>{overview
+          ? t("筛选商品总览", "Filter item overview")
+          : t("默认显示商品-分类冲突", "Item-category conflicts are shown by default")}</strong>
+        <span>{overview
+          ? t("可按收支、分类、商品和时间筛选。", "Filter by type, category, item, and time.")
+          : t("筛选条件变化后会自动刷新统计。", "Statistics refresh automatically when filters change.")}</span>
       </div>
-      <div className="asset-track-filter-grid">
-        <label>{t("收支", "Type")}
+      <div className={`asset-track-filter-grid${overview ? " asset-track-filter-grid--overview" : ""}`}>
+        <label className="asset-track-rule-history-filter-type">{t("收支", "Type")}
           <select value={filters.transaction_type} onChange={(event) => updateFilter({ transaction_type: event.target.value as HistoryFilters["transaction_type"] })}>
             <option value="">{t("全部", "All")}</option>
             <option value="支出">{businessLabel("支出")}</option>
             <option value="收入">{businessLabel("收入")}</option>
           </select>
         </label>
-        {!hideIssueFilter && <label>{t("问题类型", "Issue")}
+        {!hideIssueFilter && !overview && <label>{t("问题类型", "Issue")}
           <select value={filters.issue_filter} onChange={(event) => updateFilter({ issue_filter: event.target.value as HistoryFilters["issue_filter"] })}>
             <option value="">{t("全部", "All")}</option>
             <optgroup label={t("分类问题", "Category issues")}>
@@ -580,35 +600,35 @@ export function HistoryBackfillContent({
             </optgroup>
           </select>
         </label>}
-        <label>{t("分类", "Category")}
+        <label className="asset-track-rule-history-filter-category">{t("分类", "Category")}
           <select value={filters.category_key} onChange={(event) => updateFilter({ category_key: event.target.value })}>
             <option value="">{t("全部", "All")}</option>
             {categories.map((category) => <option key={category.category_key} value={category.category_key}>{category.name}</option>)}
           </select>
         </label>
-        <label>{t("商品搜索", "Item search")}
-          <input value={filters.product_search} onChange={(event) => updateFilter({ product_search: event.target.value })} />
+        <label className="asset-track-rule-history-filter-search">{t("商品搜索", "Item search")}
+          <input placeholder={t("搜索商品名", "Search item name")} value={filters.product_search} onChange={(event) => updateFilter({ product_search: event.target.value })} />
         </label>
-        <label>{t("起始年份", "From year")}
+        <label className="asset-track-rule-history-filter-year">{t("起始年份", "From year")}
           <input type="number" min="2000" max="2100" placeholder={t("例如 2026", "e.g. 2026")} value={filters.from_month.slice(0, 4)} onChange={(event) => updateFilter({ from_month: event.target.value ? `${event.target.value}-01` : "" })} />
         </label>
-        <label>{t("结束年份", "To year")}
+        <label className="asset-track-rule-history-filter-year">{t("结束年份", "To year")}
           <input type="number" min="2000" max="2100" placeholder={t("例如 2026", "e.g. 2026")} value={filters.to_month.slice(0, 4)} onChange={(event) => updateFilter({ to_month: event.target.value ? `${event.target.value}-12` : "" })} />
         </label>
-        <label>{t("最少次数", "Minimum occurrences")}
+        <label className="asset-track-rule-history-filter-count">{t("最少次数", "Minimum occurrences")}
           <input type="number" min="1" value={filters.min_occurrences} onChange={(event) => updateFilter({ min_occurrences: event.target.value })} />
         </label>
       </div>
       <div className="asset-track-rule-history-filter-actions">
         <button type="button" disabled={loading} onClick={resetFilters}>{t("重置筛选", "Reset filters")}</button>
         {loading && <span role="status">{t("正在更新统计…", "Updating statistics…")}</span>}
-        {!hasFilter && !loading && <span role="status">{t("请选择至少一个筛选条件。", "Choose at least one filter.")}</span>}
+        {!overview && !hasFilter && !loading && <span role="status">{t("请选择至少一个筛选条件。", "Choose at least one filter.")}</span>}
       </div>
     </div>}
 
     {message && <p className="asset-track-rule-history-message" role="status">{message}</p>}
 
-    {mode === "product" && !detailOnly && !hasFilter && !groups && !selectedGroup && <p className="asset-track-rule-history-empty" role="status">
+    {mode === "product" && !overview && !detailOnly && !hasFilter && !groups && !selectedGroup && <p className="asset-track-rule-history-empty" role="status">
       {t("请选择至少一个筛选条件。", "Choose at least one filter.")}
     </p>}
 
@@ -616,8 +636,11 @@ export function HistoryBackfillContent({
       {t("正在加载当前分类下的商品…", "Loading items in this category…")}
     </p>}
 
-    {mode === "product" && !detailOnly && !selectedGroup && groups && <div className="asset-track-table-scroll asset-track-history-group-scroll">
-      {sortedGroups.length === 0 ? <p className="asset-track-rule-history-empty">{t("没有符合筛选条件的商品历史。", "No item history matches the filters.")}</p> : <table className="asset-track-history-group-table">
+    {mode === "product" && !detailOnly && !selectedGroup && groups && (sortedGroups.length === 0
+      ? <EmptyState text={overview
+        ? t("暂无商品记录。", "No item records yet.")
+        : t("暂无商品-分类冲突。", "No item-category conflicts.")} />
+      : <div className="asset-track-table-scroll asset-track-history-group-scroll"><table className={`asset-track-history-group-table${overview ? " asset-track-history-group-table--overview" : " asset-track-history-group-table--health"}`}>
         <thead><tr>
           <th scope="col" className="asset-track-date-column"><HistorySortButton field="last_date" label={t("最近日期", "Latest date")} sort={sort} onSort={setSort} /></th>
           <th scope="col" className="asset-track-type-column"><HistorySortButton field="transaction_type" label={t("收支", "Type")} sort={sort} onSort={setSort} /></th>
@@ -648,13 +671,12 @@ export function HistoryBackfillContent({
             <td className="asset-track-count-cell">{group.occurrences}</td>
             <td className="asset-track-history-actions">
               {onOpenProductRename && <button type="button" onClick={() => onOpenProductRename(group)}>{t("编辑商品", "Edit item")}</button>}
-              {onCreateRule && group.rule_suggestion && <button type="button" onClick={() => onCreateRule(group)}>{t("创建规则", "Create rule")}</button>}
-              <button type="button" onClick={() => void openDetail(group)}>{t("查看回溯", "View history")}</button>
+              {onCreateRule && group.rule_status === "未创建" && <button type="button" onClick={() => onCreateRule(group)}>{t("创建规则", "Create rule")}</button>}
+              <button type="button" onClick={() => void openDetail(group)}>{t("编辑分类", "Edit category")}</button>
             </td>
           </tr>;
         })}</tbody>
-      </table>}
-    </div>}
+      </table></div>)}
 
     {mode === "category" && groups && <div className="asset-track-rule-history-category-migration">
       <div className="asset-track-rule-history-detail-header">
@@ -719,8 +741,8 @@ export function HistoryBackfillContent({
         <div>
           <h3>{selectedGroup.product || t("（空商品）", "(empty item)")} · {businessLabel(selectedGroup.transaction_type)}</h3>
           <p>{selectedGroup.rule_status === "冲突"
-            ? t("当前规则存在冲突，请先处理规则后再迁移历史分类。", "These rules conflict. Resolve them before migrating historical categories.")
-            : t("请选择需要迁移的冲突流水，再指定目标分类并生成预览。", "Select the conflicting transactions, choose a target category, and preview the change.")}</p>
+            ? t("当前规则存在冲突，请先处理规则后再修改历史分类。", "These rules conflict. Resolve them before editing historical categories.")
+            : t("请选择需要修改分类的流水，再指定目标分类。", "Select transactions whose category should change, then choose the target category.")}</p>
         </div>
         <button type="button" onClick={() => {
           if (detailOnly) onClose?.();
@@ -734,17 +756,17 @@ export function HistoryBackfillContent({
       </div>
       <div className="asset-track-rule-history-selection-actions">
         <button type="button" disabled={!visibleIds.length} onClick={toggleAllVisible}>
-          {allVisibleSelected ? t("取消全选冲突流水", "Deselect all conflicting transactions") : t("全选冲突流水", "Select all conflicting transactions")}
+          {allVisibleSelected ? t("取消全选流水", "Deselect all transactions") : t("全选流水", "Select all transactions")}
         </button>
         <span className="asset-track-selected-count" role="status">{t(`已选择 ${selectedIds.size} 条`, `${selectedIds.size} selected`)}</span>
       </div>
       <div className="asset-track-table-scroll asset-track-history-detail-scroll">
         <table className="asset-track-history-detail-table"><thead><tr>
-          <StaticTableHeader label={t("日期", "Date")} className="asset-track-date-column" /><StaticTableHeader label={t("选择", "Select")} className="asset-track-checkbox-heading" /><StaticTableHeader label={t("月份", "Month")} className="asset-track-date-column" /><StaticTableHeader label={t("交易对方", "Counterparty")} /><StaticTableHeader label={t("商品", "Item")} /><StaticTableHeader label={t("原分类", "Original category")} /><StaticTableHeader label={t("金额", "Amount")} className="asset-track-amount-column" /><StaticTableHeader label={t("规则解释", "Rule explanation")} />
+          <StaticTableHeader label={t("日期", "Date")} className="asset-track-date-column" /><StaticTableHeader label={t("选择", "Select")} className="asset-track-checkbox-heading" /><StaticTableHeader label={t("交易对方", "Counterparty")} /><StaticTableHeader label={t("商品", "Item")} /><StaticTableHeader label={t("原分类", "Original category")} /><StaticTableHeader label={t("金额", "Amount")} className="asset-track-amount-column" /><StaticTableHeader label={t("规则解释", "Rule explanation")} />
         </tr></thead><tbody>{detailView.map((row) => <tr key={row.id}>
           <td className="asset-track-date-cell">{row.transaction_date}</td>
           <td><input type="checkbox" checked={selectedIds.has(row.id)} onChange={() => toggleSelected(row.id)} aria-label={t(`选择 ${row.transaction_date} ${row.counterparty || "流水"}`, `Select ${row.transaction_date} ${row.counterparty || "transaction"}`)} /></td>
-          <td className="asset-track-date-cell">{row.month}</td><td>{row.counterparty || t("（空）", "(empty)")}</td><td>{row.product || t("（空商品）", "(empty item)")}</td><td>{row.category || t("未分类", "Uncategorized")}</td><td className="asset-track-amount-cell">{money(row.amount, row.type)}</td>
+          <td>{row.counterparty || t("（空）", "(empty)")}</td><td>{row.product || t("（空商品）", "(empty item)")}</td><td>{row.category || t("未分类", "Uncategorized")}</td><td className="asset-track-amount-cell">{money(row.amount, row.type)}</td>
           <td>{row.rule_match.status === "conflict"
             ? `${t("规则冲突", "Rule conflict")}（${row.rule_match.rule_ids.length}）`
             : row.rule_match.status === "matched"
@@ -759,15 +781,9 @@ export function HistoryBackfillContent({
             {targetCategories.map((category) => <option key={category.category_key} value={category.category_key}>{category.name}</option>)}
           </select>
         </label>
-        <button type="button" className="mod-cta" disabled={loading || selectedGroup.rule_status === "冲突"} onClick={() => void previewBackfill()}>{t("生成回溯预览", "Preview backfill")}</button>
+        <button type="button" className="mod-cta" disabled={loading || selectedGroup.rule_status === "冲突"} onClick={() => void previewBackfill()}>{t("修改分类", "Edit category")}</button>
+        {preview && <button type="button" className="mod-warning" disabled={loading} onClick={() => void applyBackfill()}>{t(`确认修改 ${preview.transaction_count} 条`, `Confirm ${preview.transaction_count} edits`)}</button>}
       </div>
-      {preview && <div className="asset-track-backfill-preview" role="status">
-        <strong>{t("回溯预览", "Backfill preview")}</strong>
-        <p>{t(`将 ${preview.transaction_count} 条流水迁移到“${preview.target_category}”，涉及 ${preview.month_count} 个月份。`, `Move ${preview.transaction_count} transactions to “${preview.target_category}” across ${preview.month_count} months.`)}</p>
-        <p>{t("原分类：", "Old categories: ")}{categorySummary(preview.old_categories)}</p>
-        <p>{preview.months.map((month) => `${month.month} revision ${month.revision} (${month.count})`).join(" · ")}</p>
-        <button type="button" className="mod-cta" disabled={loading} onClick={() => void applyBackfill()}>{t("确认写入", "Apply changes")}</button>
-      </div>}
     </div>}
   </div>;
 }
@@ -784,8 +800,8 @@ export class RuleHistoryModal extends Modal {
       this.options.mode === "category"
         ? t("迁移分类历史引用", "Migrate category history")
         : this.options.detailOnly
-          ? t("商品回溯详情", "Item history details")
-        : t("商品回溯管理", "Item history management")
+          ? t("编辑分类", "Edit category")
+        : t("商品总览", "Item overview")
     );
     this.modalEl.addClass("asset-track-rule-history-modal");
     const hostWindow = this.app.workspace.containerEl.ownerDocument.defaultView;

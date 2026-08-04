@@ -57,7 +57,7 @@ export interface CsvImportPreview {
   import_stats: CsvImportStats;
 }
 
-export type RuleMatchLevel = "exact" | "product" | "counterparty";
+export type RuleMatchLevel = "product";
 
 export type ProductCategoryStatus = "正常" | "停用" | "未分类" | "混合";
 
@@ -89,7 +89,6 @@ export interface RuleCandidate {
   transaction_type: "支出" | "收入";
   product: string;
   product_key?: string;
-  counterparty: string;
   variants: string[];
   category: string;
   category_key?: string | null;
@@ -106,7 +105,6 @@ export type RuleCoverage = "none" | "partial" | "full";
 
 export interface HistoricalRuleSuggestion {
   transaction_type: "支出" | "收入";
-  counterparty: string;
   product: string;
   category_key: string;
   category: string;
@@ -166,7 +164,6 @@ export interface RuleHealthSummary {
 export interface SavedRule {
   id?: number;
   transaction_type: "支出" | "收入";
-  counterparty: string;
   product: string;
   category_key: string;
   category: string;
@@ -179,7 +176,7 @@ export interface SavedRule {
   match_level?: RuleMatchLevel;
 }
 
-export type RuleConflictKind = "duplicate" | "same-condition" | "overlap";
+export type RuleConflictKind = "duplicate" | "same-condition";
 
 export interface RuleConflictGroup {
   conflict_key: string;
@@ -347,6 +344,10 @@ export interface FixedAsset {
   note: string;
 }
 
+export interface AnnualFixedAsset extends FixedAsset {
+  last_seen_month: string;
+}
+
 export interface DebtRecord {
   id?: number;
   description: string;
@@ -370,6 +371,32 @@ export interface MonthWorkspace {
   computed: Record<string, unknown>;
   overview: MonthOverview;
 }
+
+export type MonthSection = "assets" | "transactions" | "debts" | "fixed_assets";
+
+export type MonthSectionSaveRequest =
+  | {
+      expected_revision: number;
+      section: "assets";
+      cash_accounts: CashAccountBalance[];
+      investment_accounts: InvestmentAccountBalance[];
+    }
+  | {
+      expected_revision: number;
+      section: "transactions";
+      transactions: Transaction[];
+    }
+  | {
+      expected_revision: number;
+      section: "debts";
+      debt_revision: number;
+      debts: DebtRecord[];
+    }
+  | {
+      expected_revision: number;
+      section: "fixed_assets";
+      fixed_assets: FixedAsset[];
+    };
 
 export interface CurrentAsset {
   month: string | null;
@@ -560,6 +587,7 @@ export interface AnnualOverview {
   latest: AnnualRow | null;
   rolling_rows: AnnualRow[];
   recurring_expenses: RecurringExpenseSummary[];
+  fixed_assets: AnnualFixedAsset[];
   all_trend_rows: AnnualRow[];
   cost_audit: AnnualCostAudit;
 }

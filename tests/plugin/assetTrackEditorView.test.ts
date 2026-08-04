@@ -56,7 +56,7 @@ function setup(discard: boolean) {
   Object.assign(view as unknown as TestViewFields, {
     dirty: true,
     draftSnapshot: snapshot,
-    state: { mode: "transactions", analysisMode: "home", month: "2026-08" },
+    state: { mode: "transactions", analysisMode: "annual", month: "2026-08" },
     root: { unmount },
     confirmAction: vi.fn().mockResolvedValue(discard)
   });
@@ -77,7 +77,7 @@ describe("AssetTrackEditorView close recovery", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 0));
 
     expect(context.reopenEditorWithDraft).toHaveBeenCalledWith(
-      { mode: "transactions", analysisMode: "home", month: "2026-08" },
+      { mode: "transactions", analysisMode: "annual", month: "2026-08" },
       context.snapshot
     );
     expect(context.openEditor).not.toHaveBeenCalled();

@@ -11,7 +11,7 @@ import { businessLabel, displayError, t } from "../i18n";
 export interface RuleCreationModalOptions {
   app: App;
   categories: CategoryDefinition[];
-  initial: Pick<SavedRule, "transaction_type" | "counterparty" | "product" | "category_key" | "category">;
+  initial: Pick<SavedRule, "transaction_type" | "product" | "category_key" | "category">;
   onConfirm: (rule: SavedRule) => void | Promise<void>;
 }
 
@@ -29,7 +29,6 @@ function RuleCreationContent({
   onClose
 }: Omit<RuleCreationModalOptions, "app"> & { onClose: () => void }) {
   const [transactionType, setTransactionType] = useState(initial.transaction_type);
-  const [counterparty, setCounterparty] = useState(initial.counterparty);
   const [product, setProduct] = useState(initial.product);
   const [categoryKey, setCategoryKey] = useState(initial.category_key);
   const [message, setMessage] = useState("");
@@ -39,11 +38,10 @@ function RuleCreationContent({
   );
 
   const submit = async () => {
-    const nextCounterparty = counterparty.trim();
     const nextProduct = product.trim();
     const category = availableCategories.find((item) => item.category_key === categoryKey);
-    if (!nextCounterparty && !nextProduct) {
-      setMessage(t("至少填写交易对方或商品中的一项。", "Enter at least a counterparty or an item."));
+    if (!nextProduct) {
+      setMessage(t("请填写商品。", "Enter an item."));
       return;
     }
     if (!category) {
@@ -55,7 +53,6 @@ function RuleCreationContent({
     try {
       await onConfirm({
         transaction_type: transactionType,
-        counterparty: nextCounterparty,
         product: nextProduct,
         category_key: category.category_key,
         category: category.name
@@ -69,7 +66,7 @@ function RuleCreationContent({
   };
 
   return <div className="asset-track-rule-create-content">
-    <p>{t("确认后会立即保存规则，并刷新冲突面板。", "The rule is saved immediately after confirmation and the conflict panel is refreshed.")}</p>
+    <p>{t("确认后会立即保存规则，并刷新数据健康表。", "The rule is saved immediately after confirmation and the data-health table is refreshed.")}</p>
     {message && <p className="asset-track-rule-history-message" role="alert">{message}</p>}
     <label>{t("收支", "Type")}
       <select disabled={loading} value={transactionType} onChange={(event) => {
@@ -80,9 +77,6 @@ function RuleCreationContent({
         <option value="支出">{businessLabel("支出")}</option>
         <option value="收入">{businessLabel("收入")}</option>
       </select>
-    </label>
-    <label>{t("交易对方", "Counterparty")}
-      <input disabled={loading} value={counterparty} onChange={(event) => setCounterparty(event.target.value)} />
     </label>
     <label>{t("商品", "Item")}
       <input disabled={loading} value={product} onChange={(event) => setProduct(event.target.value)} />

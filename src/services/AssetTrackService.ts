@@ -11,6 +11,7 @@ import type {
   CurrentAsset,
   FixedAsset,
   MonthCreationPolicy,
+  MonthSectionSaveRequest,
   MonthWorkspace,
   ProductRenamePreview,
   ProductRenameRequest,
@@ -76,6 +77,10 @@ export interface AssetTrackService {
       debt_revision?: number;
       debts?: MonthWorkspace["debts"];
     }
+  ): Promise<MonthWorkspace>;
+  saveMonthSection(
+    month: string,
+    payload: MonthSectionSaveRequest
   ): Promise<MonthWorkspace>;
   validateTransactions(
     month: string,

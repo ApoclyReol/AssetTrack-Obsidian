@@ -75,12 +75,21 @@ export function savingsColor(value: number | null): string {
 export function reconciliationStatus(
   value: number | null,
   tolerance = 100
-): "多消费少收入" | "少收入多支出" | "平账" | "" {
+): "少收入" | "少支出" | "平账" | "" {
   if (value === null || !Number.isFinite(value)) return "";
   if (Math.abs(value) <= tolerance) return "平账";
-  if (value > 0) return "多消费少收入";
-  if (value < 0) return "少收入多支出";
+  if (value > 0) return "少收入";
+  if (value < 0) return "少支出";
   return "平账";
+}
+
+export function reconciliationTone(
+  value: number | null,
+  tolerance = 100
+): "inflow" | "outflow" | undefined {
+  return reconciliationStatus(value, tolerance) === "平账"
+    ? undefined
+    : changeTone(value);
 }
 
 export function sampleAnnualRows(

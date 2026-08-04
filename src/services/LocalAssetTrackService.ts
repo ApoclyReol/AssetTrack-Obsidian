@@ -17,6 +17,7 @@ import type {
   CurrentAsset,
   FixedAsset,
   MonthCreationPolicy,
+  MonthSectionSaveRequest,
   MonthWorkspace,
   ProductRenamePreview,
   ProductRenameRequest,
@@ -126,6 +127,14 @@ export class LocalAssetTrackService implements AssetTrackService {
             rows: payload.debts
           }
     );
+  }
+
+  async saveMonthSection(
+    month: string,
+    payload: MonthSectionSaveRequest
+  ): Promise<MonthWorkspace> {
+    this.ready();
+    return this.repository.saveMonthSection(month, payload);
   }
 
   async validateTransactions(

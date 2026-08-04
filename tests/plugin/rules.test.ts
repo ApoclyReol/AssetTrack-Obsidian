@@ -4,69 +4,65 @@ import {
   applyRulesWithIssues,
   RuleMatcher,
   resolveRule,
-  rulesEquivalent,
-  rulesOverlap
+  rulesEquivalent
 } from "../../src/domain/rules";
 import type { Transaction } from "../../src/types";
 
-describe("counterparty and product rules", () => {
-  it("prefers a two-field rule over a broader product rule", () => {
+describe("product-only matching rules", () => {
+  it("matches by product and ignores transaction counterparties", () => {
     const row: Transaction = {
       transaction_date: "2026-01-01",
       type: "支出",
       category: "",
       category_key: null,
-      counterparty: "示例咖啡店",
+      counterparty: "另一家商户",
       product: "拿铁",
       amount: 20
     };
-    const [result] = applyRules([row], [
+    expect(resolveRule(row, [
       {
+        id: 1,
         transaction_type: "支出",
-        counterparty: "",
+        counterparty: "示例咖啡店",
         product: "拿铁",
         category_key: "cat-food",
         category: "餐饮基础"
       },
       {
+        id: 2,
         transaction_type: "支出",
         counterparty: "示例咖啡店",
-        product: "拿铁",
+        product: "",
         category_key: "cat-quality",
         category: "餐饮改善"
       }
-    ]);
-    expect(result.category).toBe("餐饮改善");
+    ])).toMatchObject({
+      status: "matched",
+      level: "product",
+      category_key: "cat-food",
+      rule_ids: [1]
+    });
   });
 
-  it("recognizes normalized duplicates and broad-vs-specific conflicts", () => {
-    const exact = {
+  it("treats the same type and product as the same rule condition", () => {
+    const left = {
       transaction_type: "支出",
-      counterparty: " 商户甲 ",
-      product: "咖啡",
+      counterparty: "商户甲",
+      product: " 咖啡 ",
       category_key: "cat-food",
       category: "餐饮基础"
     };
-    const same = {
-      ...exact,
-      counterparty: "商户甲",
-      product: " 咖啡 "
+    const right = {
+      ...left,
+      counterparty: "商户乙",
+      product: "咖啡"
     };
-    const broad = {
-      ...exact,
-      product: "",
-      category_key: "cat-quality",
-      category: "餐饮改善"
-    };
-    expect(rulesEquivalent(exact, same)).toBe(true);
-    expect(rulesOverlap(exact, broad)).toBe(true);
-    expect(rulesOverlap(exact, {
-      ...exact,
-      transaction_type: "收入"
-    })).toBe(false);
+    expect(rulesEquivalent(left, right)).toBe(true);
+    expect(rulesEquivalent(left, { ...left, transaction_type: "收入" })).toBe(false);
+    expect(rulesEquivalent(left, { ...left, product: "" })).toBe(false);
   });
 
-  it("keeps a row unchanged when the highest matching level conflicts", () => {
+  it("leaves a transaction unchanged when product rules map to different categories", () => {
     const row: Transaction = {
       id: 17,
       transaction_date: "2026-01-01",
@@ -89,7 +85,7 @@ describe("counterparty and product rules", () => {
       {
         id: 2,
         transaction_type: "支出",
-        counterparty: "商户甲",
+        counterparty: "商户乙",
         product: "咖啡",
         category_key: "cat-quality",
         category: "餐饮改善"
@@ -97,7 +93,7 @@ describe("counterparty and product rules", () => {
     ];
     expect(resolveRule(row, rules)).toMatchObject({
       status: "conflict",
-      level: "exact",
+      level: "product",
       rule_ids: [1, 2]
     });
     const result = applyRulesWithIssues([row], rules);
@@ -108,42 +104,7 @@ describe("counterparty and product rules", () => {
     expect(applyRules([row], rules)[0]).toEqual(row);
   });
 
-  it("prefers a product rule over a counterparty rule", () => {
-    const row: Transaction = {
-      transaction_date: "2026-01-01",
-      type: "支出",
-      category: "原分类",
-      category_key: null,
-      counterparty: "商户甲",
-      product: "咖啡",
-      amount: 20
-    };
-    expect(resolveRule(row, [
-      {
-        id: 3,
-        transaction_type: "支出",
-        counterparty: "",
-        product: "咖啡",
-        category_key: "cat-food",
-        category: "餐饮基础"
-      },
-      {
-        id: 4,
-        transaction_type: "支出",
-        counterparty: "商户甲",
-        product: "",
-        category_key: "cat-quality",
-        category: "餐饮改善"
-      }
-    ])).toMatchObject({
-      status: "matched",
-      level: "product",
-      category_key: "cat-food",
-      rule_ids: [3]
-    });
-  });
-
-  it("indexes candidates without changing source order or wildcard behavior", () => {
+  it("keeps source order for same-product rules and ignores blank-product rules", () => {
     const rules = [
       {
         id: 30,
@@ -158,16 +119,8 @@ describe("counterparty and product rules", () => {
         transaction_type: "支出",
         counterparty: "商户甲",
         product: "咖啡",
-        category_key: "cat-quality",
-        category: "餐饮改善"
-      },
-      {
-        id: 11,
-        transaction_type: "支出",
-        counterparty: "商户甲",
-        product: "咖啡",
-        category_key: "cat-quality",
-        category: "餐饮改善"
+        category_key: "cat-food",
+        category: "餐饮基础"
       },
       {
         id: 20,
@@ -176,14 +129,6 @@ describe("counterparty and product rules", () => {
         product: "",
         category_key: "cat-other",
         category: "其他支出"
-      },
-      {
-        id: 99,
-        transaction_type: "支出",
-        counterparty: "",
-        product: "",
-        category_key: "cat-all",
-        category: "兜底"
       }
     ];
     const matcher = new RuleMatcher(rules);
@@ -192,18 +137,18 @@ describe("counterparty and product rules", () => {
       type: "支出",
       category: "原分类",
       category_key: null,
-      counterparty: "商户甲",
+      counterparty: "不相关商户",
       product: "咖啡",
       amount: 20
     };
-    expect(matcher.matchingRules(row).map((rule) => rule.id)).toEqual([30, 10, 11, 20, 99]);
+    expect(matcher.matchingRules(row).map((rule) => rule.id)).toEqual([30, 10]);
     expect(matcher.resolve(row)).toMatchObject({
       status: "matched",
-      level: "exact",
-      rule_ids: [10, 11],
-      category_key: "cat-quality"
+      level: "product",
+      rule_ids: [30, 10],
+      category_key: "cat-food"
     });
-    expect(matcher.resolve({ ...row, counterparty: "", product: "" })).toMatchObject({
+    expect(matcher.resolve({ ...row, product: "" })).toMatchObject({
       status: "none",
       rule_ids: []
     });

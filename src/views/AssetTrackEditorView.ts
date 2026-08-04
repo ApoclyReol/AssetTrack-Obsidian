@@ -11,7 +11,7 @@ import {
 import { AssetTrackEditorApp } from "../ui/AssetTrackEditorApp";
 import type AssetTrackPlugin from "../main";
 import type { CsvColumnMapping } from "../types";
-import { confirmAction } from "../ui/ConfirmModal";
+import { chooseAction, confirmAction, type ChoiceAction } from "../ui/ConfirmModal";
 import { displayError, t } from "../i18n";
 import { AssetTrackErrorBoundary } from "../ui/AssetTrackErrorBoundary";
 import {
@@ -29,7 +29,7 @@ export class AssetTrackEditorView extends ItemView {
   private root: Root | null = null;
   private state: AssetTrackViewState = {
     mode: "analysis",
-    analysisMode: "home"
+    analysisMode: "annual"
   };
   private dirty = false;
   private draftSnapshot: EditorDraftSnapshot | null = null;
@@ -76,6 +76,11 @@ export class AssetTrackEditorView extends ItemView {
     confirmText?: string
   ): Promise<boolean> =>
     confirmAction(this.app, title, message, confirmText);
+  private readonly chooseAction = <T extends string>(
+    title: string,
+    message: string,
+    actions: Array<ChoiceAction<T>>
+  ): Promise<T | null> => chooseAction(this.app, title, message, actions);
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: AssetTrackPlugin) {
     super(leaf);
@@ -117,15 +122,18 @@ export class AssetTrackEditorView extends ItemView {
     const requestedMode = typeof state.mode === "string" ? state.mode : "";
     const requestedAnalysisMode =
       typeof state.analysisMode === "string" ? state.analysisMode : "";
+    const normalizedAnalysisMode = requestedAnalysisMode === "home"
+      ? "annual"
+      : requestedAnalysisMode;
     this.state = {
       mode: EDITOR_MODES.includes(requestedMode as EditorMode)
         ? requestedMode as EditorMode
         : "analysis",
       analysisMode: ANALYSIS_MODES.includes(
-        requestedAnalysisMode as AnalysisMode
+        normalizedAnalysisMode as AnalysisMode
       )
-        ? requestedAnalysisMode as AnalysisMode
-        : "home",
+        ? normalizedAnalysisMode as AnalysisMode
+        : "annual",
       month: state.month as string | undefined
     };
     await super.setState(state, result);
@@ -221,13 +229,14 @@ export class AssetTrackEditorView extends ItemView {
           api: this.plugin.api,
           settings: this.plugin.settings,
           initialMode: this.state.mode ?? "analysis",
-          initialAnalysisMode: this.state.analysisMode ?? "home",
+          initialAnalysisMode: this.state.analysisMode ?? "annual",
           initialMonth: this.state.month,
           initialDraft: this.draftSnapshot ?? undefined,
           hostWindow: this.contentEl.ownerDocument.defaultView
             ?? this.containerEl.ownerDocument.defaultView
             ?? activeWindow,
           confirmAction: this.confirmAction,
+          chooseAction: this.chooseAction,
           onDirtyChange: this.onDirtyChange,
           onDraftSnapshotChange: this.onDraftSnapshotChange,
           onStateChange: this.onStateChange,

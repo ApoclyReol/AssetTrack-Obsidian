@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CategoryDefinition,
   FixedAsset,
@@ -29,6 +29,10 @@ import { ActionTableHeader } from "./TablePrimitives";
 const CATEGORY_TRANSACTION_TYPES = new Set(["支出", "收入"]);
 const SUMMARY_SORT_FIELDS = new Set(["type", "product", "count", "amount", "category"]);
 
+function tableRowKey(row: { id?: number; client_id?: string }, index: number): string {
+  return String(row.id ?? row.client_id ?? `new-${index}`);
+}
+
 function transactionTypeUsesCategory(type: string): boolean {
   return CATEGORY_TRANSACTION_TYPES.has(type);
 }
@@ -37,10 +41,7 @@ function summaryCategoryLabel(group: TransactionGroup): string {
   if (!transactionTypeUsesCategory(group.type)) return "";
   if (group.categories.length === 0) return t("未分类", "Uncategorized");
   if (group.categories.length === 1) return group.categories[0];
-  return t(
-    `${group.categories.length} 个分类（有冲突）`,
-    `${group.categories.length} categories (conflict)`
-  );
+  return group.categories.join("\n");
 }
 
 function summarySortValue(group: TransactionGroup, key: string): unknown {
@@ -73,6 +74,9 @@ export function TransactionTable({
     scrollTop: 0,
     height: 600
   });
+  const virtualTableRef = useRef<HTMLDivElement | null>(null);
+  const previousRowCount = useRef(rows.length);
+  const pendingFocusKey = useRef<string | null>(null);
   const usesCategory = transactionTypeUsesCategory(title);
   const gridClassName = `asset-track-grid${usesCategory ? "" : " asset-track-grid--no-category"}`;
   const columns: Array<[string, string]> = [
@@ -99,12 +103,43 @@ export function TransactionTable({
     viewport.height
   );
   const visibleRows = sorted.slice(range.start, range.end);
+  useEffect(() => {
+    if (rows.length > previousRowCount.current) {
+      const newIndex = rows.length - 1;
+      if (rows[newIndex]?.type === title) {
+        const sortedPosition = sorted.findIndex(({ row }) => row === newIndex);
+        if (sortedPosition >= 0) {
+          pendingFocusKey.current = tableRowKey(rows[newIndex], newIndex);
+          const nextScrollTop = (sortedPosition + 1) * 50;
+          const table = virtualTableRef.current;
+          if (table) {
+            table.scrollTop = nextScrollTop;
+            setViewport({
+              scrollTop: nextScrollTop,
+              height: table.clientHeight
+            });
+          }
+        }
+      }
+    }
+    previousRowCount.current = rows.length;
+  }, [rows, sorted, title]);
+  useEffect(() => {
+    if (!pendingFocusKey.current) return;
+    const target = Array.from(virtualTableRef.current?.querySelectorAll("[data-asset-track-row-key]") ?? [])
+      .find((element) => element.getAttribute("data-asset-track-row-key") === pendingFocusKey.current);
+    const input = target?.querySelector("input, select") as HTMLInputElement | HTMLSelectElement | null;
+    if (!input) return;
+    input.focus();
+    pendingFocusKey.current = null;
+  }, [visibleRows, viewport.scrollTop]);
   return (
     <Section title={t(
       `${title}（${visibleIndexes.length} 行）`,
       `${displayTitle} (${visibleIndexes.length} rows)`
     )}>
       <div
+        ref={virtualTableRef}
         className="asset-track-virtual-table"
         role="table"
         aria-rowcount={sorted.length + 1}
@@ -151,6 +186,7 @@ export function TransactionTable({
             return (
               <div
                 className={gridClassName}
+                data-asset-track-row-key={tableRowKey(row, originalIndex)}
                 key={row.id ?? row.client_id ?? originalIndex}
                 role="row"
                 aria-rowindex={range.start + visibleIndex + 2}
@@ -317,18 +353,41 @@ export function FixedAssetTable({
   rows,
   onUpdate,
   onDelete,
-  onAdd
+  onAdd,
+  hideTitle = false
 }: {
   rows: FixedAsset[];
   onUpdate: (index: number, field: keyof FixedAsset, value: string) => void;
   onDelete: (index: number) => void;
   onAdd: () => void;
+  hideTitle?: boolean;
 }) {
   const [sort, setSort] = useState<SortState>(null);
+  const tableScrollRef = useRef<HTMLDivElement | null>(null);
+  const previousRowCount = useRef(rows.length);
+  const pendingFocusKey = useRef<string | null>(null);
   const sorted = sortRows(rows, sort, (row, key) => row[key as keyof FixedAsset]);
+  useEffect(() => {
+    if (rows.length > previousRowCount.current) {
+      const newIndex = rows.length - 1;
+      pendingFocusKey.current = tableRowKey(rows[newIndex], newIndex);
+      const tableScroll = tableScrollRef.current;
+      if (tableScroll) tableScroll.scrollTop = tableScroll.scrollHeight;
+    }
+    previousRowCount.current = rows.length;
+  }, [rows]);
+  useEffect(() => {
+    if (!pendingFocusKey.current) return;
+    const target = Array.from(tableScrollRef.current?.querySelectorAll("[data-asset-track-row-key]") ?? [])
+      .find((element) => element.getAttribute("data-asset-track-row-key") === pendingFocusKey.current);
+    const input = target?.querySelector("input:not(:disabled), select:not(:disabled)") as HTMLInputElement | HTMLSelectElement | null;
+    if (!input) return;
+    input.focus();
+    pendingFocusKey.current = null;
+  }, [rows, sorted]);
   return (
-    <Section title={t(`固定资产（${rows.length} 项）`, `Fixed assets (${rows.length})`)}>
-      <div className="asset-track-table-scroll">
+    <Section title={hideTitle ? undefined : t(`固定资产（${rows.length} 项）`, `Fixed assets (${rows.length})`)}>
+      <div ref={tableScrollRef} className="asset-track-table-scroll">
         <table className="asset-track-fixed-assets-table">
           <thead>
             <tr>
@@ -355,7 +414,7 @@ export function FixedAssetTable({
           </thead>
           <tbody>
             {sorted.map(({ row, originalIndex }) => (
-              <tr key={row.id ?? row.asset_key ?? row.client_id ?? originalIndex}>
+              <tr data-asset-track-row-key={tableRowKey(row, originalIndex)} key={row.id ?? row.asset_key ?? row.client_id ?? originalIndex}>
                 {(["asset_name", "category", "purchase_date", "purchase_price"] as const).map((field) => (
                   <td key={field} className={field === "purchase_date"
                     ? "asset-track-date-cell"

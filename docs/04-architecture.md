@@ -71,10 +71,10 @@ SQLite 事实模型中并由同一 Service/Repository 管理；不得引入云�
 当前版本发布前请先升级到当前最新的 1.13.x 桌面版。
 
 插件 `data.json` 只保存 `dataDirectory` 和账单映射元数据，不保存财务事实。
-schema 9 在流水和自动规则中分别保存 `counterparty`；插件运行时不包含旧 schema
-自动迁移逻辑。
+schema 9 在流水和自动规则中分别保存 `counterparty`；流水字段继续作为事实和统计数据使用，
+自动规则中的该列仅为历史兼容字段，当前规则匹配忽略它；插件运行时不包含旧 schema 自动迁移逻辑。
 
-当前版本起，`data.json` 还保存基础货币、金额格式、平账容差和大额支出阈值；v1.5.0
+当前版本起，`data.json` 还保存基础货币、金额格式、平账容差和大额支出阈值；v1.6.0
 不改变这些设置的兼容方式。
 这些字段只影响展示与分析，不改变 schema 9 或备份格式。月度草稿使用 reducer
 动作标记 dirty，保存后以 canonical workspace 和新 revision 重置。账单文件以
@@ -88,8 +88,8 @@ schema 9 在流水和自动规则中分别保存 `counterparty`；插件运行�
 
 当前仍保留的技术债：
 
-- UI 已完成一轮按职责拆分：`AnalysisView.tsx` 只负责分析导航，首页、商品、年度和月度分析
-  分别位于独立模块；流水表、月内借款区块、固定资产表、规则工作台和共享编辑原语也已独立。
+- UI 已完成一轮按职责拆分：`AnalysisView.tsx` 只负责分析导航，年度和月度分析分别位于独立模块；
+  流水表、月内借款区块、固定资产表、规则工作台和共享编辑原语也已独立。
   `AssetTrackEditorApp.tsx` 仍保留 ItemView 路由、草稿 reducer 和 `MonthEditor`，后续只继续
   拆出边界清晰且不改变草稿/事务契约的部分；
 - `RuleHistoryModal.tsx` 现在只负责历史回溯与分类迁移，商品统一和规则创建分别位于
@@ -115,16 +115,12 @@ schema 9 在流水和自动规则中分别保存 `counterparty`；插件运行�
 - 月份、月内借款、规则、分类和账户保存均携带 revision。
 - 月份校验、revision 检查、所有月度表更新和 revision 增加位于同一
   `BEGIN IMMEDIATE` 事务。
-- 规则工作台首次使用 `ruleWorkspaceShell()` 读取轻量分类、规则和 revision，历史分析在首次绘制后
-  通过 `ruleWorkspaceAnalytics()` 加载；冲突工作区默认使用分类冲突条件调用 `productHistoryIndex()`，
-  商品搜索和其他筛选条件变化后自动刷新，具体商品详情才打开回溯 Modal。商品统一通过
-  `previewProductRename()` / `applyProductRename()` 只修改商品字段；分类迁移 Modal 直接使用
-  `category_key` 加载源分类商品。商品编辑默认按同一收支类型和主要分类加载，可切换分类并
-  通过商品搜索自动刷新；选择全部分类时必须带搜索条件。所有商品历史只读取
-  `month_status.status='saved'` 的月份。
-  分析页商品总览使用独立的 `productOverview()` 读取全历史商品统计，不改变规则冲突处理接口的“必须带筛选条件”约束。
-  规则解析共享 `src/domain/rules.ts`，按精确、商品、交易对方三层优先级处理，同层不同分类返回冲突；
-  `RuleConflictGroup` 由现有规则和已保存流水派生，不新增数据库结构。
+- 规则工作台首次使用 `ruleWorkspaceShell()` 读取轻量分类、规则和 revision，数据健康和商品总览按需要
+  通过 `productHistoryIndex()` / `productOverview()` 加载；筛选变化后自动刷新，具体商品详情才打开回溯 Modal。
+  商品编辑通过 `previewProductRename()` / `applyProductRename()` 只修改商品字段；分类迁移 Modal 直接使用
+  `category_key` 加载源分类商品。所有商品历史只读取 `month_status.status='saved'` 的月份。
+  规则解析共享 `src/domain/rules.ts`，只按收支类型和商品索引；旧 `RuleConflictGroup` 和规则覆盖诊断仍由
+  后端兼容接口派生，不新增数据库结构，也不作为当前数据健康页面的独立问题类型。
 - 商品历史把规则审计与实际覆盖范围分开派生：`rule_coverage` 为 `none`、`partial` 或
   `full`，同时记录命中、未命中和冲突次数。无规则筛选包含完全未覆盖和部分覆盖商品；
   建议只使用未覆盖且没有未解决规则冲突的流水计算。

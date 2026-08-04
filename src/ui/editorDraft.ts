@@ -1,6 +1,7 @@
 import type {
   CategoryDefinition,
   MonthWorkspace,
+  MonthSection,
   RuleWorkspace
 } from "../types";
 
@@ -10,6 +11,8 @@ export interface MonthEditorDraftSnapshot {
   workspace: MonthWorkspace;
   categories: CategoryDefinition[];
   issues: Array<Record<string, unknown>>;
+  active_section?: MonthSection;
+  dirty_sections?: MonthSection[];
 }
 
 export interface RulesEditorDraftSnapshot {

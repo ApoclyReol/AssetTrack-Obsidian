@@ -12,8 +12,10 @@ describe("money formatting", () => {
       currency: "USD",
       currencyFormat: "standard" as const
     };
+    expect(formatMoney(12, options)).toBe("$12.0");
     expect(formatMoney(12.34, options, "收入")).toBe("$12.3");
     expect(formatMoney(12.34, options, "支出")).toBe("-$12.3");
+    expect(formatMoney(-0.04, options)).toBe("$0.0");
     expect(signedMoneyValue(12, "提现")).toBe(12);
     expect(signedMoneyValue(12, "加仓")).toBe(-12);
   });

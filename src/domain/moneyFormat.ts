@@ -45,12 +45,16 @@ export function formatMoney(
   const displayValue = direction === "neutral"
     ? parsed
     : signedMoneyValue(parsed, direction);
+  const normalizedDisplayValue = Math.abs(displayValue) < 0.05
+    ? 0
+    : displayValue;
   return new Intl.NumberFormat(options.locale, {
     style: "currency",
     currency: options.currency,
     currencySign: options.currencyFormat,
+    minimumFractionDigits: 1,
     maximumFractionDigits: 1
-  }).format(displayValue);
+  }).format(normalizedDisplayValue);
 }
 
 export function isCurrencyCode(value: string): boolean {

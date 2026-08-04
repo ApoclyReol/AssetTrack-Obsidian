@@ -157,13 +157,13 @@ export function Section({
   children,
   sectionRef
 }: {
-  title: string;
+  title?: string;
   children: ReactNode;
   sectionRef?: { current: HTMLElement | null };
 }) {
   return (
     <section ref={sectionRef} className="asset-track-section">
-      <h3>{title}</h3>
+      {title && <h3>{title}</h3>}
       {children}
     </section>
   );

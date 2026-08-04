@@ -15,6 +15,7 @@ import type { AssetTrackService } from "../services/AssetTrackService";
 import {
   buildAnomalyDisplayRows,
   changeTone,
+  reconciliationTone,
   reconciliationStatus
 } from "./analysisModel";
 import { businessLabel, displayError, t } from "../i18n";
@@ -78,6 +79,10 @@ export function MonthlyAnalysis({
   const categories = overview.category_summary ?? [];
   const comparison = overview.category_comparison;
   const comparisonRows = comparison?.rows ?? [];
+  const discrepancy = overview.reconciliation?.available
+    ? overview.reconciliation.discrepancy
+    : null;
+  const discrepancyStatus = reconciliationStatus(discrepancy, reconciliationTolerance);
   return (
     <>
       <div className="asset-track-analysis-heading">
@@ -91,7 +96,18 @@ export function MonthlyAnalysis({
           value: money(overview.metrics.surplus),
           tone: overview.metrics.surplus >= 0 ? "inflow" : "outflow"
         },
-        { label: t("资金投入资产", "Cost assets"), value: money(overview.metrics.cost_assets) },
+        {
+          label: t("储蓄率", "Savings rate"),
+          value: overview.metrics.savings_rate === null
+            ? t("不可计算", "Unavailable")
+            : percent(overview.metrics.savings_rate),
+          tone: overview.metrics.savings_rate === null
+            ? undefined
+            : overview.metrics.savings_rate >= 0
+              ? "inflow"
+              : "outflow"
+        },
+        { label: t("总资产", "Total assets"), value: money(overview.metrics.total_assets) },
         { label: t("市场净资产", "Market net assets"), value: money(overview.metrics.market_net_assets) },
         {
           label: t("资产环比", "Asset change"),
@@ -105,15 +121,8 @@ export function MonthlyAnalysis({
           value: overview.reconciliation?.available
             ? money(overview.reconciliation.discrepancy)
             : t("不可比较", "Unavailable"),
-          tone: overview.reconciliation?.available
-            ? changeTone(overview.reconciliation.discrepancy)
-            : undefined,
-          suffix: overview.reconciliation?.available
-            ? businessLabel(reconciliationStatus(
-              overview.reconciliation.discrepancy,
-              reconciliationTolerance
-            ))
-            : undefined
+          tone: reconciliationTone(discrepancy, reconciliationTolerance),
+          suffix: discrepancyStatus ? businessLabel(discrepancyStatus) : undefined
         }
       ]} />
       <div className="asset-track-analysis-grid">

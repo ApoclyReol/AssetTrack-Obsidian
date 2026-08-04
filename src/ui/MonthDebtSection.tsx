@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { DebtRecord } from "../types";
 import { t } from "../i18n";
 import { monthEnd } from "../domain/dates";
@@ -8,6 +9,18 @@ import {
   Section
 } from "./editorPrimitives";
 import { ActionTableHeader, StaticTableHeader } from "./TablePrimitives";
+
+export function debtSummary(rows: DebtRecord[]): {
+  openAmount: number;
+  paidCount: number;
+} {
+  return {
+    openAmount: rows
+      .filter((row) => !row.is_paid)
+      .reduce((total, row) => total + (Number(row.amount) || 0), 0),
+    paidCount: rows.filter((row) => row.is_paid).length
+  };
+}
 
 function startsInMonth(row: DebtRecord, month: string): boolean {
   return row.start_date.slice(0, 7) === month;
@@ -39,17 +52,37 @@ export function MonthDebtSection({
   month,
   rows,
   onChange,
-  onBlocked
+  onBlocked,
+  hideHeader = false
 }: {
   month: string;
   rows: DebtRecord[];
   onChange: (rows: DebtRecord[]) => void;
   onBlocked: (message: string) => void;
+  hideHeader?: boolean;
 }) {
-  const openAmount = rows
-    .filter((row) => !row.is_paid)
-    .reduce((total, row) => total + (Number(row.amount) || 0), 0);
-  const paidCount = rows.filter((row) => row.is_paid).length;
+  const { openAmount, paidCount } = debtSummary(rows);
+  const tableScrollRef = useRef<HTMLDivElement | null>(null);
+  const previousRowCount = useRef(rows.length);
+  const pendingFocusKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (rows.length > previousRowCount.current) {
+      const newIndex = rows.length - 1;
+      pendingFocusKey.current = String(rows[newIndex]?.id ?? `new-${newIndex}`);
+      const tableScroll = tableScrollRef.current;
+      if (tableScroll) tableScroll.scrollTop = tableScroll.scrollHeight;
+    }
+    previousRowCount.current = rows.length;
+  }, [rows, month]);
+  useEffect(() => {
+    if (!pendingFocusKey.current) return;
+    const target = Array.from(tableScrollRef.current?.querySelectorAll("[data-asset-track-row-key]") ?? [])
+      .find((element) => element.getAttribute("data-asset-track-row-key") === pendingFocusKey.current);
+    const input = target?.querySelector("input:not(:disabled)") as HTMLInputElement | null;
+    if (!input) return;
+    input.focus();
+    pendingFocusKey.current = null;
+  }, [rows]);
   const update = (
     index: number,
     field: keyof Pick<DebtRecord, "description" | "counterparty" | "amount" | "is_paid">,
@@ -86,16 +119,16 @@ export function MonthDebtSection({
     ));
   };
   return (
-    <Section title={t("借款", "Debts")}>
-      <div className="asset-track-debt-summary" role="status">
+    <Section title={hideHeader ? undefined : t("借款", "Debts")}>
+      {!hideHeader && <div className="asset-track-debt-summary" role="status">
         <span>{t(`本月相关 ${rows.length} 笔`, `${rows.length} related debts`)}</span>
         <span>{t(`本月未还 ${money(openAmount)}`, `Unpaid this month ${money(openAmount)}`)}</span>
         <span>{t(`本月还清 ${paidCount} 笔`, `${paidCount} paid this month`)}</span>
-      </div>
+      </div>}
       {rows.length === 0 ? (
         <EmptyState text={t("本月没有相关借款。", "No debts are related to this month.")} />
       ) : (
-        <div className="asset-track-table-scroll">
+        <div ref={tableScrollRef} className="asset-track-table-scroll">
           <table className="asset-track-debt-table">
             <thead>
               <tr>
@@ -114,7 +147,7 @@ export function MonthDebtSection({
                 const editable = currentMonth && !locked;
                 const rowNumber = index + 1;
                 return (
-                  <tr key={row.id ?? `new-${index}`}>
+                  <tr data-asset-track-row-key={String(row.id ?? `new-${index}`)} key={row.id ?? `new-${index}`}>
                     <td className="asset-track-date-cell">{row.start_date.slice(0, 7)}</td>
                     <td>
                       <input

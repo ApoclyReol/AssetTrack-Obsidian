@@ -74,13 +74,13 @@ export default class AssetTrackPlugin extends Plugin {
     );
     this.addSettingTab(new AssetTrackSettingTab(this.app, this));
     this.addRibbonIcon("landmark", t("打开资产追踪", "Open Asset Track"), () => {
-      void this.openEditor("analysis", undefined, "home");
+      void this.openEditor("analysis", undefined, "annual");
     });
 
     this.addCommand({
       id: "open-editor",
       name: t("打开编辑器", "Open editor"),
-      callback: () => void this.openEditor("analysis", undefined, "home")
+      callback: () => void this.openEditor("analysis", undefined, "annual")
     });
   }
 
@@ -92,7 +92,7 @@ export default class AssetTrackPlugin extends Plugin {
   async openEditor(
     mode: EditorMode = "analysis",
     month?: string,
-    analysisMode: AnalysisMode = "home"
+    analysisMode: AnalysisMode = "annual"
   ): Promise<void> {
     let leaf = this.app.workspace
       .getLeavesOfType(VIEW_TYPE_ASSET_TRACK)

@@ -5,6 +5,13 @@ import {
 } from "obsidian";
 import { t } from "../i18n";
 
+export interface ChoiceAction<T extends string = string> {
+  value: T;
+  text: string;
+  className?: string;
+  cta?: boolean;
+}
+
 class ConfirmationModal extends Modal {
   private settled = false;
 
@@ -87,6 +94,47 @@ class InformationModal extends Modal {
   }
 }
 
+class ChoiceModal<T extends string> extends Modal {
+  private settled = false;
+
+  constructor(
+    app: App,
+    private readonly title: string,
+    private readonly message: string,
+    private readonly actions: Array<ChoiceAction<T>>,
+    private readonly resolveResult: (choice: T | null) => void
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.modalEl.addClass("asset-track-confirmation-modal");
+    this.setTitle(this.title);
+    this.contentEl.createEl("p", { text: this.message });
+    const setting = new Setting(this.contentEl);
+    this.actions.forEach((action, index) => {
+      setting.addButton((button) => {
+        if (action.className) button.buttonEl.addClass(action.className);
+        if (action.cta) button.setCta();
+        button.setButtonText(action.text).onClick(() => this.finish(action.value));
+        if (index === 0) button.buttonEl.focus();
+      });
+    });
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+    if (!this.settled) this.resolveResult(null);
+  }
+
+  private finish(choice: T): void {
+    if (this.settled) return;
+    this.settled = true;
+    this.resolveResult(choice);
+    this.close();
+  }
+}
+
 export function confirmAction(
   app: App,
   title: string,
@@ -101,6 +149,17 @@ export function confirmAction(
       confirmText,
       resolve
     ).open();
+  });
+}
+
+export function chooseAction<T extends string>(
+  app: App,
+  title: string,
+  message: string,
+  actions: Array<ChoiceAction<T>>
+): Promise<T | null> {
+  return new Promise((resolve) => {
+    new ChoiceModal(app, title, message, actions, resolve).open();
   });
 }
 

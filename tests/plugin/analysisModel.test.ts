@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AnnualRow, CategoryDefinition } from "../../src/types";
 import { ANALYSIS_MODES, EDITOR_MODES } from "../../src/constants";
+import { explainReconciliation } from "../../src/domain/calculator";
 import {
   buildAnomalyDisplayRows,
   changeTone,
@@ -8,6 +9,7 @@ import {
   INFLOW_COLOR,
   OUTFLOW_COLOR,
   reconciliationStatus,
+  reconciliationTone,
   sampleAnnualRows,
   savingsColor,
   transactionBlockNumber,
@@ -48,7 +50,7 @@ function annualRow(index: number): AnnualRow {
 describe("real-time analysis model", () => {
   it("keeps the editor, analysis, and transaction sections stable", () => {
     expect(EDITOR_MODES).toEqual(["analysis", "transactions", "rules"]);
-    expect(ANALYSIS_MODES).toEqual(["home", "annual", "monthly", "products"]);
+    expect(ANALYSIS_MODES).toEqual(["annual", "monthly"]);
     expect(TRANSACTION_SECTIONS).toEqual(["支出", "收入", "代付", "加仓", "提现"]);
   });
 
@@ -113,10 +115,22 @@ describe("real-time analysis model", () => {
     expect(reconciliationStatus(-99.99)).toBe("平账");
     expect(reconciliationStatus(100)).toBe("平账");
     expect(reconciliationStatus(-100)).toBe("平账");
-    expect(reconciliationStatus(100.01)).toBe("多消费少收入");
-    expect(reconciliationStatus(-100.01)).toBe("少收入多支出");
+    expect(reconciliationStatus(100.01)).toBe("少收入");
+    expect(reconciliationStatus(-100.01)).toBe("少支出");
     expect(reconciliationStatus(0)).toBe("平账");
     expect(reconciliationStatus(null)).toBe("");
+    expect(reconciliationTone(-40)).toBeUndefined();
+    expect(reconciliationTone(248)).toBe("inflow");
+    expect(reconciliationTone(-248)).toBe("outflow");
+  });
+
+  it("keeps reconciliation explanations aligned with the difference sign", () => {
+    const positive = explainReconciliation(100.01);
+    const negative = explainReconciliation(-100.01);
+    expect(positive.causes[1]).toContain("现金快照偏高");
+    expect(positive.suggestions[2]).toContain("多填了");
+    expect(negative.causes[1]).toContain("现金快照偏低");
+    expect(negative.suggestions[2]).toContain("少填了");
   });
 
   it("samples full history deterministically and preserves endpoints", () => {

@@ -17,10 +17,6 @@ export function ruleIndexKey(type: string, value: string): string {
   return `${type}\u0000${value}`;
 }
 
-export function exactRuleIndexKey(type: string, counterparty: string, product: string): string {
-  return `${type}\u0000${counterparty}\u0000${product}`;
-}
-
 export class RevisionConflictError extends AssetTrackError {
   constructor(expected: number, actual: number) {
     super(

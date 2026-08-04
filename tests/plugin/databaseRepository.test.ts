@@ -111,6 +111,93 @@ describe("node:sqlite schema 9 repository", () => {
     expect((await repository.getMonth("2026-01")).cash_accounts[0].balance).toBe(1020);
   });
 
+  it("saves month sections independently while preserving other sections", async () => {
+    const { repository } = fixture();
+    const category = categoryKey("餐饮基础");
+    const initial = await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 1000 }],
+      [{ account_key: "investment-default", principal: 200, market_value: 210, cash_balance: 5 }],
+      [{
+        client_id: "tx-1",
+        transaction_date: "2026-01-01",
+        type: "支出",
+        category_key: category,
+        category: "餐饮基础",
+        product: "午餐",
+        amount: 20
+      }],
+      [{
+        client_id: "asset-1",
+        asset_key: "phone",
+        asset_name: "手机",
+        category: "电子设备",
+        purchase_price: 3000,
+        status: "在用",
+        note: ""
+      }]
+    );
+
+    const assets = await repository.saveMonthSection("2026-01", {
+      expected_revision: initial.revision,
+      section: "assets",
+      cash_accounts: [{ account_key: "cash-default", balance: 800 }],
+      investment_accounts: initial.investment_accounts
+    });
+    expect(assets.cash_accounts[0].balance).toBe(800);
+    expect(assets.transactions[0].amount).toBe(20);
+    expect(assets.fixed_assets[0].asset_name).toBe("手机");
+
+    const transactions = await repository.saveMonthSection("2026-01", {
+      expected_revision: assets.revision,
+      section: "transactions",
+      transactions: [{
+        ...assets.transactions[0],
+        amount: 35
+      }]
+    });
+    expect(transactions.transactions[0].amount).toBe(35);
+    expect(transactions.cash_accounts[0].balance).toBe(800);
+    expect(transactions.fixed_assets[0].asset_name).toBe("手机");
+
+    const fixedAssets = await repository.saveMonthSection("2026-01", {
+      expected_revision: transactions.revision,
+      section: "fixed_assets",
+      fixed_assets: [{
+        ...transactions.fixed_assets[0],
+        asset_name: "新手机"
+      }]
+    });
+    expect(fixedAssets.fixed_assets[0].asset_name).toBe("新手机");
+    expect(fixedAssets.transactions[0].amount).toBe(35);
+
+    const debtRevision = fixedAssets.debt_revision;
+    const debts = await repository.saveMonthSection("2026-01", {
+      expected_revision: fixedAssets.revision,
+      section: "debts",
+      debt_revision: debtRevision,
+      debts: [{
+        description: "临时借款",
+        counterparty: "朋友",
+        amount: 100,
+        start_date: "2026-01-01",
+        is_paid: false,
+        paid_date: null
+      }]
+    });
+    expect(debts.debts[0].description).toBe("临时借款");
+    expect(debts.cash_accounts[0].balance).toBe(800);
+    expect(debts.transactions[0].amount).toBe(35);
+
+    await expect(repository.saveMonthSection("2026-01", {
+      expected_revision: assets.revision,
+      section: "assets",
+      cash_accounts: assets.cash_accounts,
+      investment_accounts: assets.investment_accounts
+    })).rejects.toMatchObject({ status: 409 });
+  });
+
   it("projects inherited debts into the month and repays them as fact rows", async () => {
     const { manager, repository } = fixture();
     await repository.saveMonth(
@@ -238,6 +325,72 @@ describe("node:sqlite schema 9 repository", () => {
     });
     expect(saved.overview.reconciliation?.theoretical.debt_change).toBe(0);
     expect(saved.overview.reconciliation?.discrepancy).toBe(0);
+  });
+
+  it("lists every fixed asset seen during the annual period with its last status", async () => {
+    const { repository } = fixture();
+    const accounts = [{ account_key: "cash-default", balance: 1000 }];
+    const investments = [{
+      account_key: "investment-default",
+      principal: 0,
+      market_value: 0,
+      cash_balance: 0
+    }];
+    await repository.saveMonth(
+      "2026-01",
+      0,
+      accounts,
+      investments,
+      [],
+      [{
+        asset_key: "phone",
+        asset_name: "手机",
+        category: "电子设备",
+        purchase_price: 3000,
+        status: "在用",
+        note: ""
+      }]
+    );
+    await repository.saveMonth(
+      "2026-02",
+      0,
+      [{ account_key: "cash-default", balance: 900 }],
+      investments,
+      [],
+      [
+        {
+          asset_key: "phone",
+          asset_name: "手机",
+          category: "电子设备",
+          purchase_price: 3000,
+          status: "已出售",
+          note: ""
+        },
+        {
+          asset_key: "desk",
+          asset_name: "书桌",
+          category: "家具",
+          purchase_price: 800,
+          status: "已报废",
+          note: ""
+        }
+      ]
+    );
+
+    expect(repository.annual("2026").fixed_assets).toEqual([
+      expect.objectContaining({
+        asset_key: "desk",
+        asset_name: "书桌",
+        status: "已报废",
+        last_seen_month: "2026-02"
+      }),
+      expect.objectContaining({
+        asset_key: "phone",
+        asset_name: "手机",
+        status: "已出售",
+        last_seen_month: "2026-02"
+      })
+    ]);
   });
 
   it("rolls back all month tables when transaction validation fails", async () => {
@@ -725,7 +878,7 @@ describe("node:sqlite schema 9 repository", () => {
     });
   });
 
-  it("uses counterparty in rule candidates, persistence and application", async () => {
+  it("uses product-only rule candidates, persistence and application", async () => {
     const { repository } = fixture();
     const food = categoryKey("餐饮基础");
     await repository.saveMonth(
@@ -755,7 +908,6 @@ describe("node:sqlite schema 9 repository", () => {
       2
     );
     expect(candidates.rows[0]).toMatchObject({
-      counterparty: "示例商户",
       product: "午餐",
       occurrences: 2
     });
@@ -768,7 +920,7 @@ describe("node:sqlite schema 9 repository", () => {
       category: "餐饮基础"
     }]);
     expect(saved.rows[0]).toMatchObject({
-      counterparty: "示例商户",
+      counterparty: "",
       occurrences: 2
     });
     expect(repository.rulesPreview("2026-02", [{
@@ -837,13 +989,6 @@ describe("node:sqlite schema 9 repository", () => {
         product: "咖啡",
         category_key: food,
         category: "餐饮基础"
-      },
-      {
-        transaction_type: "支出",
-        counterparty: "商户甲",
-        product: "",
-        category_key: quality,
-        category: "餐饮改善"
       }
     ]);
 
@@ -863,8 +1008,9 @@ describe("node:sqlite schema 9 repository", () => {
       latest_amount: 30,
       last_date: "2026-02-01",
       has_category_conflict: true,
-      rule_status: "冲突",
-      matching_rule_count: 2
+      rule_status: "已覆盖",
+      matching_rule_count: 1,
+      history_rule_mismatch: true
     });
     expect(fruit).toMatchObject({
       occurrences: 2,
@@ -874,7 +1020,6 @@ describe("node:sqlite schema 9 repository", () => {
     });
     expect(insights.recommendations).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        counterparty: "超市",
         product: "水果",
         occurrences: 2,
         category: "餐饮基础",
@@ -883,21 +1028,15 @@ describe("node:sqlite schema 9 repository", () => {
       })
     ]));
     expect(repository.rules().rows).toEqual(expect.arrayContaining([
-      expect.objectContaining({ rule_status: "冲突" })
+      expect.objectContaining({ rule_status: "正常", counterparty: "" })
     ]));
-    expect(insights.rule_conflicts).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        kind: "overlap",
-        affected_transaction_count: 3,
-        affected_months: ["2026-01", "2026-02"]
-      })
-    ]));
+    expect(insights.rule_conflicts).toEqual([]);
     const detail = repository.productHistory({
       transaction_type: "支出",
       product_key: " 咖啡 "
     });
     expect(detail.rows[0]?.id).toBeTypeOf("number");
-    expect(detail.rows[0]?.rule_match).toMatchObject({ status: "matched", level: "exact" });
+    expect(detail.rows[0]?.rule_match).toMatchObject({ status: "matched", level: "product" });
     expect(repository.ruleWorkspace().categories.find((row) => row.category_key === food)).toMatchObject({
       transaction_count: 4,
       impact_months: ["2026-01", "2026-02"],
@@ -993,13 +1132,13 @@ describe("node:sqlite schema 9 repository", () => {
     expect(empty).toMatchObject({ occurrences: 1, product: "" });
     expect(insights.historical_products.some((row) => row.product === "草稿商品")).toBe(false);
     expect(insights.recommendations).toEqual(expect.arrayContaining([
-      expect.objectContaining({ product: "水果", match_level: "product", counterparty: "" })
+      expect.objectContaining({ product: "水果", match_level: "product" })
     ]));
     expect(insights.recommendations.some((row) => row.product === "拿铁")).toBe(false);
     expect(insights.recommendations.some((row) => row.product === "拿铁" && row.match_level === "product")).toBe(false);
   });
 
-  it("tracks partial rule coverage across counterparties", async () => {
+  it("covers every transaction for a product regardless of counterparty", async () => {
     const { repository } = fixture();
     const food = categoryKey("餐饮基础");
     await repository.saveMonth(
@@ -1045,44 +1184,17 @@ describe("node:sqlite schema 9 repository", () => {
       (row) => row.product === "咖啡"
     );
     expect(coffee).toMatchObject({
-      rule_coverage: "partial",
-      matched_occurrences: 1,
-      unmatched_occurrences: 1,
+      rule_coverage: "full",
+      matched_occurrences: 2,
+      unmatched_occurrences: 0,
       conflicted_occurrences: 0,
-      rule_suggestion: {
-        transaction_type: "支出",
-        counterparty: "商户乙",
-        product: "咖啡",
-        category_key: food,
-        category: "餐饮基础",
-        occurrences: 1,
-        months_count: 1,
-        last_month: "2026-01"
-      }
+      rule_suggestion: undefined
     });
-    expect(insights.summary.stable_products_without_rule).toBe(1);
+    expect(insights.summary.stable_products_without_rule).toBe(0);
     expect(repository.productHistoryIndex({
       issue_filter: "no-rule"
-    }).groups).toEqual([
-      expect.objectContaining({
-        product: "咖啡",
-        rule_coverage: "partial",
-        unmatched_occurrences: 1
-      })
-    ]);
-    expect(insights.recommendations).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        counterparty: "商户乙",
-        product: "咖啡",
-        category_key: food
-      })
-    ]));
-    expect(insights.recommendations).not.toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        counterparty: "",
-        product: "咖啡"
-      })
-    ]));
+    }).groups).toEqual([]);
+    expect(insights.recommendations.some((row) => row.product === "咖啡")).toBe(false);
   });
 
   it("derives partial-coverage suggestions only from unmatched transactions", async () => {
@@ -1133,32 +1245,15 @@ describe("node:sqlite schema 9 repository", () => {
     );
     expect(coffee).toMatchObject({
       has_category_conflict: true,
-      rule_coverage: "partial",
-      rule_suggestion: {
-        counterparty: "商户乙",
-        product: "咖啡",
-        category_key: quality,
-        category: "餐饮改善",
-        occurrences: 1
-      }
+      rule_coverage: "full",
+      matched_occurrences: 2,
+      unmatched_occurrences: 0,
+      rule_suggestion: undefined
     });
-    expect(insights.recommendations).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        counterparty: "商户乙",
-        product: "咖啡",
-        category_key: quality,
-        occurrences: 1
-      })
-    ]));
-    expect(insights.recommendations).not.toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        counterparty: "",
-        product: "咖啡"
-      })
-    ]));
+    expect(insights.recommendations.some((row) => row.product === "咖啡")).toBe(false);
   });
 
-  it("groups duplicate, same-condition and overlapping rule conflicts", async () => {
+  it("groups duplicate and rule-category conflicts without counterparty overlap", async () => {
     const { manager, repository } = fixture();
     const food = categoryKey("餐饮基础");
     const quality = categoryKey("餐饮改善");
@@ -1201,19 +1296,19 @@ describe("node:sqlite schema 9 repository", () => {
     insert.run("支出", "商户甲", "拿铁", food, "餐饮基础");
     insert.run("支出", "商户甲", "拿铁", quality, "餐饮改善");
     insert.run("支出", "商户乙", "水果", food, "餐饮基础");
-    insert.run("支出", "", "水果", quality, "餐饮改善");
+    insert.run("支出", "", "水果", food, "餐饮基础");
     const insights = repository.ruleInsights();
     const groups = new Map(insights.rule_conflicts.map((group) => [group.kind, group]));
     expect(insights.rule_conflicts).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: "duplicate", affected_transaction_count: 1 }),
-      expect.objectContaining({ kind: "same-condition", affected_transaction_count: 1 }),
-      expect.objectContaining({ kind: "overlap", affected_transaction_count: 1 })
+      expect.objectContaining({ kind: "same-condition", affected_transaction_count: 1 })
     ]));
     expect(groups.get("duplicate")?.rules).toHaveLength(2);
-    expect(groups.get("same-condition")?.description).toBe("规则条件相同但分类不同");
-    expect(groups.get("overlap")?.affected_months).toEqual(["2026-01"]);
+    expect(groups.get("same-condition")?.rules).toHaveLength(3);
+    expect(groups.get("same-condition")?.description).toBe("同一商品对应多个分类规则");
+    expect(groups.get("same-condition")?.affected_months).toEqual(["2026-01"]);
     expect(insights.summary).toMatchObject({
-      rule_conflict_groups: 2,
+      rule_conflict_groups: 1,
       duplicate_rule_groups: 1
     });
   });
@@ -1442,8 +1537,11 @@ describe("node:sqlite schema 9 repository", () => {
       id: ids[0], product: "拿铁", category_key: food, amount: 20
     });
     expect(repository.rules().rows).toEqual(expect.arrayContaining([
-      expect.objectContaining({ counterparty: "商户甲", product: "拿铁大杯", category_key: food })
+      expect.objectContaining({ counterparty: "", product: "拿铁大杯", category_key: food })
     ]));
+    expect(manager.connection().prepare(
+      "SELECT counterparty FROM auto_rules WHERE product=?"
+    ).get("拿铁大杯")).toMatchObject({ counterparty: "商户甲" });
     await expect(repository.applyProductRename({
       transaction_ids: ids,
       target_product: "咖啡",

@@ -47,6 +47,16 @@ describe("locale selection", () => {
     ))).toBe(
       "Category “餐饮” still has 2 historical transactions and 1 rule reference, so it cannot be deleted."
     );
+    expect(displayError(new Error(
+      "同一收支类型和商品下不能存在重复规则"
+    ))).toBe(
+      "Duplicate rules are not allowed for the same transaction type and item."
+    );
+    expect(displayError(new Error(
+      "借款未来 2026-08-15 已还清，不可修改此月借款。"
+    ))).toBe(
+      "This debt was already paid on 2026-08-15; it cannot be changed from this month."
+    );
   });
 
   it("does not leak unmapped Chinese system errors in English", () => {
@@ -78,5 +88,8 @@ describe("locale selection", () => {
     expect(businessLabel("警告")).toBe("Warning");
     expect(businessLabel("错误")).toBe("Error");
     expect(businessLabel("空")).toBe("(empty)");
+    expect(businessLabel("少收入")).toBe("Income under-recorded");
+    expect(businessLabel("少支出")).toBe("Expense under-recorded");
+    expect(businessLabel("平账")).toBe("Reconciled");
   });
 });

@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type {
   AccountDefinition,
+  AnnualFixedAsset,
   AnnualCostAudit,
   AnnualOverview,
   CashAccountBalance,
@@ -15,6 +16,7 @@ import type {
   HistoricalProductStat,
   InvestmentAccountBalance,
   MonthCreationPolicy,
+  MonthSectionSaveRequest,
   MonthOverview,
   MonthWorkspace,
   ProductRenamePreview,
@@ -60,8 +62,6 @@ import {
   normalizeProductKey,
   RuleMatcher,
   ruleMatchLevel,
-  rulesEquivalent,
-  rulesOverlap,
   RULE_TYPES,
   type RuleRow
 } from "../domain/rules";
@@ -75,12 +75,10 @@ import {
   boolean,
   contentRevision,
   debtFromRow,
-  exactRuleIndexKey,
   fixedAssetFromRow,
   normalizeAsset,
   RepositoryValidationError,
   RevisionConflictError,
-  ruleIndexKey,
   rows,
   text,
   transactionFromRow,
@@ -751,6 +749,103 @@ export class AssetTrackRepository {
     return result;
   }
 
+  async saveMonthSection(
+    month: string,
+    payload: MonthSectionSaveRequest
+  ): Promise<MonthWorkspace> {
+    const revision = await this.manager.write((db) => {
+      const current = this.checkMonthRevision(db, month, payload.expected_revision);
+      switch (payload.section) {
+        case "assets": {
+          const definitions = new Map(rows(db.prepare(
+            "SELECT account_key,account_type FROM account_definitions"
+          ).all()).map((row) => [text(row.account_key), text(row.account_type)]));
+          db.prepare("DELETE FROM cash_account_balances WHERE month=?").run(month);
+          const seenCash = new Set<string>();
+          const cashInsert = db.prepare(
+            "INSERT INTO cash_account_balances(month,account_key,balance) VALUES (?,?,?)"
+          );
+          payload.cash_accounts.forEach((row) => {
+            const key = text(row.account_key);
+            if (definitions.get(key) !== "cash" || seenCash.has(key)) {
+              throw new RepositoryValidationError("现金账户无效或重复");
+            }
+            seenCash.add(key);
+            cashInsert.run(month, key, finiteNumber(row.balance, { nonNegative: true }));
+          });
+
+          db.prepare("DELETE FROM investment_account_balances WHERE month=?").run(month);
+          const seenInvestment = new Set<string>();
+          const investmentInsert = db.prepare(`
+            INSERT INTO investment_account_balances
+              (month,account_key,principal,market_value,cash_balance)
+            VALUES (?,?,?,?,?)
+          `);
+          payload.investment_accounts.forEach((row) => {
+            const key = text(row.account_key);
+            if (definitions.get(key) !== "investment" || seenInvestment.has(key)) {
+              throw new RepositoryValidationError("理财账户无效或重复");
+            }
+            seenInvestment.add(key);
+            investmentInsert.run(
+              month, key,
+              finiteNumber(row.principal, { nonNegative: true }),
+              finiteNumber(row.market_value, { nonNegative: true }),
+              finiteNumber(row.cash_balance, { nonNegative: true })
+            );
+          });
+          break;
+        }
+        case "transactions":
+          this.saveTransactionRows(db, month, payload.transactions);
+          break;
+        case "debts":
+          this.saveMonthDebtRows(db, month, payload.debt_revision, payload.debts);
+          break;
+        case "fixed_assets": {
+          const existingAssets = new Map(rows(db.prepare(
+            "SELECT id,asset_key FROM fixed_assets WHERE month=?"
+          ).all(month)).map((row) => [text(row.asset_key), Number(row.id)]));
+          const submittedAssets = new Set<string>();
+          const insertAsset = db.prepare(`
+            INSERT INTO fixed_assets
+              (month,asset_key,asset_name,category,purchase_date,purchase_price,status,note)
+            VALUES (?,?,?,?,?,?,?,?)
+          `);
+          const updateAsset = db.prepare(`
+            UPDATE fixed_assets SET
+              asset_name=?,category=?,purchase_date=?,purchase_price=?,status=?,note=?
+            WHERE id=? AND month=?
+          `);
+          payload.fixed_assets.forEach((source, index) => {
+            const row = normalizeAsset(source, index);
+            if (submittedAssets.has(row.asset_key)) {
+              throw new RepositoryValidationError("固定资产 asset_key 重复");
+            }
+            submittedAssets.add(row.asset_key);
+            const id = existingAssets.get(row.asset_key);
+            const values = [
+              row.asset_name, row.category, row.purchase_date ?? null,
+              row.purchase_price, row.status, row.note
+            ] as const;
+            if (id) updateAsset.run(...values, id, month);
+            else insertAsset.run(month, row.asset_key, ...values);
+          });
+          for (const [key, id] of existingAssets) {
+            if (!submittedAssets.has(key)) {
+              db.prepare("DELETE FROM fixed_assets WHERE id=?").run(id);
+            }
+          }
+          break;
+        }
+      }
+      return this.touchMonth(db, month, current, 1);
+    });
+    const result = await this.getMonth(month);
+    result.revision = revision;
+    return result;
+  }
+
   private monthlyByMonth(
     db: DatabaseSync,
     categories: CategoryDefinition[]
@@ -1305,9 +1400,13 @@ export class AssetTrackRepository {
     const categories = this.categoryRows(db);
     const byKey = new Map(categories.map((row) => [row.category_key, row]));
     const byName = new Map(categories.map((row) => [row.name, row]));
-    const existing = new Set(rows(db.prepare(
-      "SELECT id FROM auto_rules"
-    ).all()).map((row) => Number(row.id)));
+    const existingRows = rows(db.prepare(
+      "SELECT id,counterparty FROM auto_rules"
+    ).all());
+    const existing = new Set(existingRows.map((row) => Number(row.id)));
+    const legacyCounterpartyById = new Map(
+      existingRows.map((row) => [Number(row.id), text(row.counterparty)])
+    );
     const submitted = new Set<number>();
     const keys = new Set<string>();
     const insert = db.prepare(`
@@ -1321,14 +1420,13 @@ export class AssetTrackRepository {
       WHERE id=?
     `);
     for (const source of input) {
-      const counterparty = text(source.counterparty);
       const product = text(source.product);
       const category = byKey.get(text(source.category_key))
         ?? byName.get(text(source.category));
       const type = text(source.transaction_type) || category?.transaction_type || "";
-      if ((!counterparty && !product) || !category) {
+      if (!product || !category) {
         throw new RepositoryValidationError(
-          "自动规则必须填写交易对方或商品，并选择分类"
+          "自动规则必须填写商品，并选择分类"
         );
       }
       if (!category.is_active && (source.id === undefined || source.id === null)) {
@@ -1342,19 +1440,18 @@ export class AssetTrackRepository {
       }
       const key = [
         type,
-        normalizeProductKey(counterparty),
         normalizeProductKey(product)
       ].join("\u0000");
       if (keys.has(key)) {
         throw new RepositoryValidationError(
-          "同一收支类型下不能存在重复或等价交易规则"
+          "同一收支类型和商品下不能存在重复规则"
         );
       }
       keys.add(key);
       if (source.id === undefined || source.id === null) {
         insert.run(
           type,
-          counterparty,
+          "",
           product,
           category.category_key,
           category.name
@@ -1367,7 +1464,7 @@ export class AssetTrackRepository {
         submitted.add(id);
         update.run(
           type,
-          counterparty,
+          legacyCounterpartyById.get(id) ?? "",
           product,
           category.category_key,
           category.name,
@@ -1599,12 +1696,6 @@ export class AssetTrackRepository {
     const stableUnmatchedCategory = unmatchedAssigned.length === 1
       && unmatchedAssigned[0].occurrences === unmatchedRows.length
       && Boolean(unmatchedRecommended?.category_key);
-    const unmatchedCounterparties = this.frequency(
-      unmatchedRows.map((row) => text(row.counterparty)).filter(Boolean)
-    ).map(([value]) => value);
-    const suggestedCounterparty = unmatchedCounterparties.length === 1
-      ? unmatchedCounterparties[0]
-      : "";
     const unmatchedVariants = this.frequency(
       unmatchedRows.map((row) => text(row.product))
     ).map(([value]) => value).filter(Boolean);
@@ -1612,10 +1703,9 @@ export class AssetTrackRepository {
     const ruleSuggestion = !hasRuleConflict
       && unmatchedOccurrences > 0
       && stableUnmatchedCategory
-      && (suggestedCounterparty || suggestedProduct)
+      && suggestedProduct
       ? {
           transaction_type: text(representative.type) as "支出" | "收入",
-          counterparty: suggestedCounterparty,
           product: suggestedProduct,
           category_key: unmatchedRecommended?.category_key ?? "",
           category: unmatchedRecommended?.category ?? "",
@@ -1679,7 +1769,7 @@ export class AssetTrackRepository {
     const rows = data.rows.map((row) => ({
       id: Number(row.id),
       transaction_type: text(row.transaction_type),
-      counterparty: text(row.counterparty),
+      counterparty: "",
       product: text(row.product),
       category_key: text(row.category_key),
       category: text(row.category)
@@ -1696,88 +1786,46 @@ export class AssetTrackRepository {
     ruleData: ReturnType<AssetTrackRepository["normalizedRuleRows"]>,
     history: Row[]
   ): RuleConflictGroup[] {
-    type Edge = { kind: RuleConflictGroup["kind"]; left: number; right: number };
-    const edges: Edge[] = [];
-    for (let leftIndex = 0; leftIndex < ruleData.rows.length; leftIndex += 1) {
-      for (let rightIndex = leftIndex + 1; rightIndex < ruleData.rows.length; rightIndex += 1) {
-        const left = ruleData.rows[leftIndex];
-        const right = ruleData.rows[rightIndex];
-        const leftCategory = normalizeProductKey(left.category_key) || normalizeProductKey(left.category);
-        const rightCategory = normalizeProductKey(right.category_key) || normalizeProductKey(right.category);
-        if (rulesEquivalent(left, right)) {
-          edges.push({
-            kind: leftCategory === rightCategory ? "duplicate" : "same-condition",
-            left: Number(left.id),
-            right: Number(right.id)
-          });
-          continue;
-        }
-        const leftLevel = ruleMatchLevel(left);
-        const rightLevel = ruleMatchLevel(right);
-        const samePrecision = leftLevel !== null && leftLevel === rightLevel;
-        const exactOverBroad =
-          (leftLevel === "exact" && rightLevel !== null && rightLevel !== "exact")
-          || (rightLevel === "exact" && leftLevel !== null && leftLevel !== "exact");
-        if (
-          rulesOverlap(left, right)
-          && (samePrecision || exactOverBroad)
-          && leftCategory !== rightCategory
-        ) {
-          edges.push({ kind: "overlap", left: Number(left.id), right: Number(right.id) });
-        }
-      }
-    }
     const savedRules = ruleData.data.rows as unknown as SavedRule[];
     const savedById = new Map(savedRules.map((rule) => [Number(rule.id), rule]));
     const groups: RuleConflictGroup[] = [];
-    for (const kind of ["duplicate", "same-condition", "overlap"] as const) {
-      const kindEdges = edges.filter((edge) => edge.kind === kind);
-      const adjacency = new Map<number, Set<number>>();
-      for (const edge of kindEdges) {
-        const left = adjacency.get(edge.left) ?? new Set<number>();
-        const right = adjacency.get(edge.right) ?? new Set<number>();
-        left.add(edge.right);
-        right.add(edge.left);
-        adjacency.set(edge.left, left);
-        adjacency.set(edge.right, right);
-      }
-      const visited = new Set<number>();
-      for (const start of adjacency.keys()) {
-        if (visited.has(start)) continue;
-        const component: number[] = [];
-        const queue = [start];
-        visited.add(start);
-        while (queue.length) {
-          const current = queue.shift()!;
-          component.push(current);
-          for (const neighbor of adjacency.get(current) ?? []) {
-            if (visited.has(neighbor)) continue;
-            visited.add(neighbor);
-            queue.push(neighbor);
-          }
-        }
-        component.sort((left, right) => left - right);
-        const componentRules = component
-          .map((id) => savedById.get(id))
-          .filter((rule): rule is SavedRule => Boolean(rule));
-        const componentRuleIds = new Set(componentRules.map((rule) => Number(rule.id)));
-        const affected = history.filter((row) => ruleData.matcher.matchingRules(
-          transactionFromRow(row)
-        ).some((rule) => componentRuleIds.has(Number(rule.id))));
-        groups.push({
-          conflict_key: `${kind}:${component.join(",")}`,
-          kind,
-          rule_ids: component,
-          rules: componentRules,
-          affected_transaction_count: affected.length,
-          affected_months: [...new Set(affected.map((row) => text(row.month)))].sort(),
-          description: kind === "duplicate"
-            ? "规则条件和分类完全相同"
-            : kind === "same-condition"
-              ? "规则条件相同但分类不同"
-              : "规则条件重叠且分类不同"
-        });
-      }
+    const conditions = new Map<string, RuleRow[]>();
+    for (const rule of ruleData.rows) {
+      const product = normalizeProductKey(rule.product);
+      if (!product) continue;
+      const key = `${rule.transaction_type}\u0000${product}`;
+      conditions.set(key, [...(conditions.get(key) ?? []), rule]);
+    }
+    for (const componentRows of conditions.values()) {
+      if (componentRows.length < 2) continue;
+      const categoryKeys = new Set(componentRows.map((rule) =>
+        normalizeProductKey(rule.category_key) || normalizeProductKey(rule.category)
+      ));
+      const kind: RuleConflictGroup["kind"] = categoryKeys.size > 1
+        ? "same-condition"
+        : "duplicate";
+      const component = componentRows
+        .map((rule) => Number(rule.id))
+        .filter((id) => Number.isFinite(id) && id > 0)
+        .sort((left, right) => left - right);
+      const componentRules = component
+        .map((id) => savedById.get(id))
+        .filter((rule): rule is SavedRule => Boolean(rule));
+      const componentRuleIds = new Set(component);
+      const affected = history.filter((row) => ruleData.matcher.matchingRules(
+        transactionFromRow(row)
+      ).some((rule) => componentRuleIds.has(Number(rule.id))));
+      groups.push({
+        conflict_key: `${kind}:${component.join(",")}`,
+        kind,
+        rule_ids: component,
+        rules: componentRules,
+        affected_transaction_count: affected.length,
+        affected_months: [...new Set(affected.map((row) => text(row.month)))].sort(),
+        description: kind === "duplicate"
+          ? "同一商品存在多个相同分类的规则"
+          : "同一商品对应多个分类规则"
+      });
     }
     return groups.sort((left, right) =>
       left.kind.localeCompare(right.kind)
@@ -1807,21 +1855,12 @@ export class AssetTrackRepository {
     const history = this.savedHistoryRows(db);
     const ruleConflicts = this.buildRuleConflictGroups(ruleData, history);
     const productGroups = new Map<string, Row[]>();
-    const exactGroups = new Map<string, Row[]>();
     for (const row of history) {
       const productKey = normalizeProductKey(row.product);
       const productGroupKey = [text(row.type), productKey].join("\u0000");
-      const exactGroupKey = [
-        text(row.type),
-        normalizeProductKey(row.counterparty),
-        productKey
-      ].join("\u0000");
       const productGroup = productGroups.get(productGroupKey) ?? [];
       productGroup.push(row);
       productGroups.set(productGroupKey, productGroup);
-      const exactGroup = exactGroups.get(exactGroupKey) ?? [];
-      exactGroup.push(row);
-      exactGroups.set(exactGroupKey, exactGroup);
     }
     const historicalProducts = [...productGroups.values()]
       .map((group) => this.productStat(
@@ -1835,78 +1874,28 @@ export class AssetTrackRepository {
         || left.transaction_type.localeCompare(right.transaction_type)
         || left.product.localeCompare(right.product)
       );
-    const productRuleKeys = new Set<string>();
-    const exactRuleKeys = new Set<string>();
-    for (const rule of ruleData.rows) {
-      const level = ruleMatchLevel(rule);
-      const counterpartyKey = normalizeProductKey(rule.counterparty);
-      const productKey = normalizeProductKey(rule.product);
-      if (level === "product") {
-        productRuleKeys.add(ruleIndexKey(rule.transaction_type, productKey));
-      }
-      if (level === "exact" || level === "counterparty") {
-        exactRuleKeys.add(exactRuleIndexKey(rule.transaction_type, counterpartyKey, productKey));
-      }
-    }
-    const productRuleExists = (type: string, productKey: string): boolean =>
-      productRuleKeys.has(ruleIndexKey(type, productKey));
-    const exactRuleExists = (type: string, counterpartyKey: string, productKey: string): boolean =>
-      exactRuleKeys.has(exactRuleIndexKey(type, counterpartyKey, productKey));
     const recommendations: RuleCandidate[] = [];
-    for (const group of exactGroups.values()) {
-      if (group.length < threshold) continue;
-      const representative = group[0];
-      const type = text(representative.type);
-      const productKey = normalizeProductKey(representative.product);
-      const counterpartyKey = normalizeProductKey(representative.counterparty);
-      const level = productKey ? (counterpartyKey ? "exact" : "product") : (counterpartyKey ? "counterparty" : null);
-      if (!level || exactRuleExists(type, counterpartyKey, productKey)) continue;
-      const stat = this.productStat(group, ruleData.matcher, ruleData.statusById, categories);
+    for (const stat of historicalProducts) {
+      const suggestion = stat.rule_suggestion;
       if (
-        stat.has_category_conflict
+        !suggestion
+        || !stat.product_key
+        || stat.occurrences < threshold
+        || stat.has_category_conflict
         || stat.rule_coverage !== "none"
         || stat.conflicted_occurrences > 0
         || stat.history_rule_mismatch
       ) continue;
       recommendations.push({
         transaction_type: stat.transaction_type,
-        product: stat.product,
-        product_key: stat.product_key,
-        counterparty: stat.counterparty,
-        variants: stat.variants,
-        category: stat.recommended_category,
-        category_key: stat.recommended_category_key,
-        category_counts: stat.category_counts,
-        category_confidence: stat.category_confidence,
-        has_category_conflict: stat.has_category_conflict,
-        occurrences: stat.occurrences,
-        months_count: stat.months_count,
-        last_month: stat.last_month,
-        match_level: level
-      });
-    }
-    for (const stat of historicalProducts) {
-      const productKey = stat.product_key;
-      const suggestion = stat.rule_suggestion;
-      if (
-        !productKey
-        || !suggestion
-        || suggestion.counterparty
-        || suggestion.occurrences < threshold
-        || stat.conflicted_occurrences > 0
-        || productRuleExists(stat.transaction_type, productKey)
-      ) continue;
-      recommendations.push({
-        transaction_type: suggestion.transaction_type,
         product: suggestion.product,
-        product_key: normalizeProductKey(suggestion.product),
-        counterparty: "",
-        variants: suggestion.variants,
+        product_key: stat.product_key,
+        variants: stat.variants,
         category: suggestion.category,
         category_key: suggestion.category_key,
         category_counts: suggestion.category_counts,
         category_confidence: suggestion.category_confidence,
-        has_category_conflict: false,
+        has_category_conflict: stat.has_category_conflict,
         occurrences: suggestion.occurrences,
         months_count: suggestion.months_count,
         last_month: suggestion.last_month,
@@ -1917,7 +1906,6 @@ export class AssetTrackRepository {
       right.occurrences - left.occurrences
       || left.transaction_type.localeCompare(right.transaction_type)
       || left.product.localeCompare(right.product)
-      || left.counterparty.localeCompare(right.counterparty)
     );
     const conflictProducts = new Map<string, number>();
     for (const stat of historicalProducts) {
@@ -2013,7 +2001,6 @@ export class AssetTrackRepository {
     return rows(db.prepare("SELECT * FROM auto_rules ORDER BY id").all()).map((row) => ({
       id: Number(row.id),
       transaction_type: text(row.transaction_type) as "支出" | "收入",
-      counterparty: text(row.counterparty),
       product: text(row.product),
       category_key: text(row.category_key),
       category: text(row.category)
@@ -2426,24 +2413,20 @@ export class AssetTrackRepository {
     const ruleData = this.rules(db);
     const combined = [
       ...rows(db.prepare(`
-        SELECT month,type,category,counterparty,product FROM transactions
+        SELECT month,type,category,product FROM transactions
         WHERE month<>? AND type IN ('支出','收入')
-          AND (
-            TRIM(COALESCE(counterparty,''))<>''
-            OR TRIM(COALESCE(product,''))<>''
-          )
+          AND TRIM(COALESCE(product,''))<>''
       `).all(month)),
       ...draftRows.filter(
         (row) =>
           RULE_TYPES.has(row.type)
-          && (text(row.counterparty) || text(row.product))
+          && text(row.product)
       ).map((row) => ({ month, ...row }))
     ];
     const grouped = new Map<string, Row[]>();
     combined.forEach((row) => {
       const key = [
         text(row.type),
-        normalizeProductKey(row.counterparty),
         normalizeProductKey(row.product)
       ].join("\u0000");
       const group = grouped.get(key) ?? [];
@@ -2458,22 +2441,11 @@ export class AssetTrackRepository {
       const representative = group[0];
       if (ruleData.rows.some((rule) =>
         text(rule.transaction_type) === type
-        && (
-          !text(rule.counterparty)
-          || normalizeProductKey(rule.counterparty)
-            === normalizeProductKey(representative.counterparty)
-        )
-        && (
-          !text(rule.product)
-          || normalizeProductKey(rule.product)
-            === normalizeProductKey(representative.product)
-        )
+        && normalizeProductKey(rule.product)
+          === normalizeProductKey(representative.product)
       )) {
         continue;
       }
-      const counterparties = this.frequency(
-        group.map((row) => text(row.counterparty)).filter(Boolean)
-      );
       const variants = this.frequency(group.map((row) => text(row.product)));
       const categoryValues = group.map((row) => text(row.category)).filter(
         (category) => metadata.get(category)?.transaction_type === type
@@ -2483,7 +2455,6 @@ export class AssetTrackRepository {
       result.push({
         transaction_type: type,
         product: variants[0]?.[0] ?? "",
-        counterparty: counterparties[0]?.[0] ?? "",
         variants: variants.map(([value]) => value).filter(Boolean),
         category,
         category_confidence: category ? roundHalfEven(
@@ -2698,6 +2669,7 @@ export class AssetTrackRepository {
         latest: null,
         rolling_rows: [],
         recurring_expenses: [],
+        fixed_assets: [],
         all_trend_rows: [],
         cost_audit: {
           months_count: 1,
@@ -2719,6 +2691,20 @@ export class AssetTrackRepository {
     const savings = roundHalfEven(totalIncome - totalExpense);
     const latest = annual.at(-1)!;
     const rollingStart = shiftMonth(latest.month, -11);
+    const annualFixedAssets = new Map<string, AnnualFixedAsset>();
+    for (const row of rows(db.prepare(`
+      SELECT * FROM fixed_assets
+      WHERE month LIKE ?
+      ORDER BY month DESC, id DESC
+    `).all(`${year}-%`))) {
+      const assetKey = text(row.asset_key);
+      if (!annualFixedAssets.has(assetKey)) {
+        annualFixedAssets.set(assetKey, {
+          ...fixedAssetFromRow(row),
+          last_seen_month: text(row.month)
+        });
+      }
+    }
     return {
       year,
       months: annual.map((row) => row.month),
@@ -2735,6 +2721,10 @@ export class AssetTrackRepository {
         (row) => row.month >= rollingStart && row.month <= latest.month
       ),
       recurring_expenses: this.recurringExpenses(db, latest.month),
+      fixed_assets: [...annualFixedAssets.values()].sort((left, right) =>
+        left.asset_name.localeCompare(right.asset_name)
+        || left.last_seen_month.localeCompare(right.last_seen_month)
+      ),
       all_trend_rows: full,
       cost_audit: this.annualCostAudit(db, year, annual, this.categoryRows(db))
     };

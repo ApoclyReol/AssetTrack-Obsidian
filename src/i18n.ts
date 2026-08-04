@@ -44,8 +44,8 @@ export const BUSINESS_VALUE_EN: Readonly<Record<string, string>> = {
   "已报废": "Retired",
   "草稿": "Draft",
   "已保存": "Saved",
-  "多消费少收入": "More consumption, less income",
-  "少收入多支出": "Less income, more spending",
+  "少收入": "Income under-recorded",
+  "少支出": "Expense under-recorded",
   "平账": "Reconciled",
   "警告": "Warning",
   "错误": "Error",
@@ -111,12 +111,14 @@ function englishError(raw: string): string {
     "现金账户无效或重复": "A cash account is invalid or duplicated.",
     "理财账户无效或重复": "An investment account is invalid or duplicated.",
     "固定资产 asset_key 重复": "A fixed asset key is duplicated.",
-    "自动规则必须填写交易对方或商品，并选择分类":
-      "An automatic rule requires a counterparty or item and a category.",
+    "自动规则必须填写商品，并选择分类":
+      "An automatic rule requires an item and a category.",
     "自动规则的收支类型只能是支出或收入":
       "An automatic rule type must be Expense or Income.",
     "同一收支类型下不能存在重复或等价交易规则":
       "Duplicate or equivalent rules are not allowed for the same transaction type.",
+    "同一收支类型和商品下不能存在重复规则":
+      "Duplicate rules are not allowed for the same transaction type and item.",
     "自动规则 id 无效或重复": "An automatic rule ID is invalid or duplicated.",
     "借款发生日期必须是 YYYY-MM-DD、YYYY/MM/DD 或 YYYY-MM":
       "A debt start date must be YYYY-MM-DD, YYYY/MM/DD, or YYYY-MM.",
@@ -214,6 +216,8 @@ function englishError(raw: string): string {
   if (nextMonthOrder) return `The next month must be created in calendar order: ${nextMonthOrder[1]}.`;
   const maxMonth = /^当前最多只能创建到 (.+)$/.exec(raw);
   if (maxMonth) return `The latest available month is ${maxMonth[1]}.`;
+  const futureDebt = /^借款未来 (.+) 已还清，不可修改此月借款。$/.exec(raw);
+  if (futureDebt) return `This debt was already paid on ${futureDebt[1]}; it cannot be changed from this month.`;
   const draftMonth = /^请先保存或删除草稿月份 (.+)$/.exec(raw);
   if (draftMonth) return `Save or delete draft month ${draftMonth[1]} first.`;
   const precreateMonth = /^最多只能预建到 (.+)$/.exec(raw);

@@ -14,7 +14,6 @@ import {
 } from "../../src/ui/RuleHistoryModal";
 import type { AssetTrackService } from "../../src/services/AssetTrackService";
 import type {
-  CategoryDefinition,
   HistoricalProductStat
 } from "../../src/types";
 
@@ -50,6 +49,8 @@ describe("rule history workspace loading", () => {
     await waitFor(() => expect(loadStats).toHaveBeenCalledWith({
       issue_filter: "conflict"
     }));
+    expect(screen.getByText("暂无商品-分类冲突。")).toBeTruthy();
+    expect(screen.queryByText(/已加载/)).toBeNull();
   });
 
   it("loads category migration items directly without the generic filter panel", async () => {
@@ -137,24 +138,44 @@ describe("rule history workspace loading", () => {
     expect(loadStats).toHaveBeenCalledTimes(1);
   });
 
-  it("loads rename candidates by type and category without fixing the product key", async () => {
-    const food: CategoryDefinition = {
-      category_key: "food",
-      name: "餐饮",
-      transaction_type: "支出",
-      necessity: "必要",
-      pattern: "日常",
-      is_big_ticket: false,
-      color: "#ffffff",
-      is_active: true,
-      sort_order: 0
-    };
-    const other: CategoryDefinition = {
-      ...food,
-      category_key: "other",
-      name: "其他",
-      sort_order: 1
-    };
+  it("loads the unfiltered product overview through the dedicated overview API", async () => {
+    const loadOverview = vi.fn().mockResolvedValue({
+      categories_revision: 1,
+      rules_revision: 1,
+      groups: []
+    });
+    const loadIndex = vi.fn();
+    const api = {
+      productOverview: loadOverview,
+      productHistoryIndex: loadIndex,
+      productHistory: vi.fn(),
+      previewCategoryBackfill: vi.fn(),
+      applyCategoryBackfill: vi.fn()
+    } as unknown as AssetTrackService;
+    render(
+      <HistoryBackfillContent
+        api={api}
+        categories={[]}
+        mode="product"
+        overview
+        embedded
+        hostWindow={window}
+        initialQuery={{}}
+        confirmAction={vi.fn()}
+        onSaved={vi.fn()}
+        onDataChanged={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(loadOverview).toHaveBeenCalledTimes(1));
+    expect(loadIndex).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("商品搜索")).toBeTruthy();
+    expect(screen.queryByLabelText("问题类型")).toBeNull();
+    expect(screen.getByText("暂无商品记录。")).toBeTruthy();
+  });
+
+  it("loads the current product-name transaction list and confirms a compact edit", async () => {
     const group = {
       transaction_type: "支出",
       product_key: "拿铁大杯",
@@ -221,50 +242,75 @@ describe("rule history workspace loading", () => {
         rule_match: { status: "none", rule_ids: [], reason: "none" }
       }]
       });
+    const previewProductRename = vi.fn().mockResolvedValue({
+      transaction_ids: [1, 2],
+      target_product: "咖啡",
+      transaction_count: 2,
+      month_count: 2,
+      months: [
+        { month: "2026-01", revision: 3, count: 1 },
+        { month: "2026-02", revision: 4, count: 1 }
+      ],
+      variants: [
+        { product: "拿铁大杯", occurrences: 1, months_count: 1 },
+        { product: "拿铁（大杯）", occurrences: 1, months_count: 1 }
+      ]
+    });
+    const applyProductRename = vi.fn().mockResolvedValue({
+      transaction_ids: [1, 2],
+      target_product: "咖啡",
+      transaction_count: 2,
+      month_count: 2,
+      months: [
+        { month: "2026-01", revision: 3, count: 1 },
+        { month: "2026-02", revision: 4, count: 1 }
+      ],
+      variants: [],
+      updated_count: 2,
+      revisions: { "2026-01": 5, "2026-02": 6 }
+    });
     const api = {
       productHistory: loadCandidates,
-      previewProductRename: vi.fn(),
-      applyProductRename: vi.fn()
+      previewProductRename,
+      applyProductRename
     } as unknown as AssetTrackService;
+    const onClose = vi.fn();
 
     render(
       <ProductRenameContent
         api={api}
-        categories={[food, other]}
         group={group}
         hostWindow={window}
-        confirmAction={vi.fn()}
         onSaved={vi.fn()}
         onDataChanged={vi.fn()}
-        onClose={vi.fn()}
+        onClose={onClose}
       />
     );
 
     await waitFor(() => expect(loadCandidates).toHaveBeenCalledTimes(1));
     expect(loadCandidates.mock.calls[0][0]).toMatchObject({
       transaction_type: "支出",
-      category_key: "food"
+      product_key: "拿铁大杯"
     });
-    expect(loadCandidates.mock.calls[0][0]).not.toHaveProperty("product_key");
     expect(screen.getByText("拿铁大杯")).toBeTruthy();
     expect(screen.getByText("拿铁（大杯）")).toBeTruthy();
 
-    fireEvent.change(screen.getByLabelText("分类范围"), {
-      target: { value: "__all__" }
+    fireEvent.click(screen.getByRole("button", { name: "全选流水" }));
+    fireEvent.change(screen.getByLabelText("修改为商品名称"), {
+      target: { value: "咖啡" }
     });
-    await waitFor(() => expect(
-      screen.getByText("查看全部分类时，请先输入商品搜索条件。")
-    ).toBeTruthy());
-    expect(loadCandidates).toHaveBeenCalledTimes(1);
-
-    fireEvent.change(screen.getByLabelText("商品搜索"), {
-      target: { value: "拿铁" }
-    });
-    await waitFor(() => expect(loadCandidates).toHaveBeenCalledTimes(2));
-    expect(loadCandidates.mock.calls[1][0]).toMatchObject({
-      transaction_type: "支出",
-      product_search: "拿铁"
-    });
-    expect(loadCandidates.mock.calls[1][0].category_key).toBeUndefined();
+    fireEvent.click(screen.getByRole("button", { name: "修改商品" }));
+    await waitFor(() => expect(previewProductRename).toHaveBeenCalledWith({
+      transaction_ids: [1, 2],
+      target_product: "咖啡"
+    }));
+    expect(screen.queryByText(/已准备修改/)).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "确认修改 2 条" }));
+    await waitFor(() => expect(applyProductRename).toHaveBeenCalledWith({
+      transaction_ids: [1, 2],
+      target_product: "咖啡",
+      expected_month_revisions: { "2026-01": 3, "2026-02": 4 }
+    }));
+    expect(onClose).toHaveBeenCalled();
   });
 });

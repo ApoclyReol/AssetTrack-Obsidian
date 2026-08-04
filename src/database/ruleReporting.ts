@@ -1,7 +1,6 @@
-import { normalizeProductKey, ruleMatchLevel, rulesEquivalent, rulesOverlap, type RuleRow } from "../domain/rules";
+import { normalizeProductKey, ruleMatchLevel, rulesEquivalent, type RuleRow } from "../domain/rules";
 import {
   contentRevision,
-  exactRuleIndexKey,
   ruleIndexKey,
   text,
   type Row
@@ -15,7 +14,7 @@ export function buildRuleReport(
   const definitions = raw.map((row) => ({
     id: Number(row.id),
     transaction_type: text(row.transaction_type),
-    counterparty: text(row.counterparty),
+    counterparty: "",
     product: text(row.product),
     category_key: text(row.category_key),
     category: text(row.category)
@@ -32,17 +31,7 @@ export function buildRuleReport(
         duplicateIds.set(left.id, [...(duplicateIds.get(left.id) ?? []), right.id]);
         duplicateIds.set(right.id, [...(duplicateIds.get(right.id) ?? []), left.id]);
       }
-      const leftLevel = ruleMatchLevel(left);
-      const rightLevel = ruleMatchLevel(right);
-      const samePrecision = leftLevel !== null && leftLevel === rightLevel;
-      const exactOverBroad =
-        (leftLevel === "exact" && rightLevel !== null && rightLevel !== "exact")
-        || (rightLevel === "exact" && leftLevel !== null && leftLevel !== "exact");
-      if (
-        rulesOverlap(left, right)
-        && (samePrecision || exactOverBroad)
-        && leftCategory !== rightCategory
-      ) {
+      if (rulesEquivalent(left, right) && leftCategory !== rightCategory) {
         conflictIds.set(left.id, [...(conflictIds.get(left.id) ?? []), right.id]);
         conflictIds.set(right.id, [...(conflictIds.get(right.id) ?? []), left.id]);
       }
@@ -54,10 +43,7 @@ export function buildRuleReport(
     months: Set<string>;
     lastMonth: string;
   };
-  const byType = new Map<string, RuleOccurrenceSummary>();
-  const byCounterparty = new Map<string, RuleOccurrenceSummary>();
   const byProduct = new Map<string, RuleOccurrenceSummary>();
-  const byExact = new Map<string, RuleOccurrenceSummary>();
   const addOccurrence = (
     target: Map<string, RuleOccurrenceSummary>,
     key: string,
@@ -71,25 +57,13 @@ export function buildRuleReport(
   };
   for (const transaction of transactions) {
     const type = text(transaction.type);
-    const counterparty = normalizeProductKey(transaction.counterparty);
     const product = normalizeProductKey(transaction.product);
     const month = text(transaction.month);
-    addOccurrence(byType, type, month);
-    if (counterparty) addOccurrence(byCounterparty, ruleIndexKey(type, counterparty), month);
     if (product) addOccurrence(byProduct, ruleIndexKey(type, product), month);
-    if (counterparty && product) addOccurrence(byExact, exactRuleIndexKey(type, counterparty, product), month);
   }
   const summaryFor = (rule: RuleRow): RuleOccurrenceSummary => {
-    const level = ruleMatchLevel(rule);
-    const counterparty = normalizeProductKey(rule.counterparty);
     const product = normalizeProductKey(rule.product);
-    const summary = level === "exact"
-      ? byExact.get(exactRuleIndexKey(rule.transaction_type, counterparty, product))
-      : level === "product"
-        ? byProduct.get(ruleIndexKey(rule.transaction_type, product))
-        : level === "counterparty"
-          ? byCounterparty.get(ruleIndexKey(rule.transaction_type, counterparty))
-          : byType.get(rule.transaction_type);
+    const summary = byProduct.get(ruleIndexKey(rule.transaction_type, product));
     return summary ?? { occurrences: 0, months: new Set<string>(), lastMonth: "" };
   };
   return {
@@ -98,6 +72,7 @@ export function buildRuleReport(
       const summary = summaryFor(row as unknown as RuleRow);
       return {
         ...row,
+        counterparty: "",
         match_level: ruleMatchLevel(row as unknown as RuleRow),
         occurrences: summary.occurrences,
         months_count: summary.months.size,

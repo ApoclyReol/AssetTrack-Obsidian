@@ -13,7 +13,7 @@ import {
 } from "recharts";
 import type { AnnualOverview } from "../types";
 import type { AssetTrackService } from "../services/AssetTrackService";
-import { displayError, getLocale, t } from "../i18n";
+import { businessLabel, displayError, getLocale, t } from "../i18n";
 import { money } from "../domain/moneyFormat";
 import { sampleAnnualRows } from "./analysisModel";
 import { StaticTableHeader } from "./TablePrimitives";
@@ -89,15 +89,19 @@ export function AnnualAnalysis({
           label: t("年度储蓄率", "Annual savings rate"),
           value: data.metrics.savings_rate === null
             ? t("不可计算", "Unavailable")
-            : percent(data.metrics.savings_rate)
+            : percent(data.metrics.savings_rate),
+          tone: data.metrics.savings_rate === null
+            ? undefined
+            : data.metrics.savings_rate >= 0
+              ? "inflow"
+              : "outflow"
         }
       ]} />
       <Cards items={[
+        { label: t("年末总资产", "Year-end total assets"), value: money(latest?.total_assets) },
+        { label: t("年末净资产", "Year-end net assets"), value: money(latest?.market_net_assets) },
         { label: t("年末现金", "Year-end cash"), value: money(latest?.cash) },
-        { label: t("年末理财本金", "Year-end investment principal"), value: money(latest?.principal) },
-        { label: t("年末借款", "Year-end debt"), value: money(latest?.debt) },
-        { label: t("年末资金投入资产", "Year-end cost assets"), value: money(latest?.cost_assets) },
-        { label: t("年末市场净资产", "Year-end market net assets"), value: money(latest?.market_net_assets) }
+        { label: t("年末借款", "Year-end debt"), value: money(latest?.debt) }
       ]} />
       <ChartPanel title={t("近 12 个月综合趋势", "Combined 12-month trend")} className="is-wide">
         <ResponsiveContainer width="100%" height={340}>
@@ -111,7 +115,6 @@ export function AnnualAnalysis({
             <Bar yAxisId="flow" dataKey="total_income" name={t("收入", "Income")} fill={INFLOW} />
             <Bar yAxisId="flow" dataKey="total_expense" name={t("支出", "Expense")} fill={OUTFLOW} />
             <Line yAxisId="asset" type="monotone" dataKey="cash" name={t("现金", "Cash")} stroke={GOLD} strokeWidth={2} dot={false} />
-            <Line yAxisId="asset" type="monotone" dataKey="principal" name={t("理财本金", "Investment principal")} stroke={BLUE} strokeWidth={2} dot={false} />
             <Line yAxisId="asset" type="monotone" dataKey="market_net_assets" name={t("市场净资产", "Market net assets")} stroke={PURPLE} strokeWidth={3} dot={false} />
             <Line yAxisId="asset" type="monotone" dataKey="cost_assets" name={t("资金投入资产", "Cost assets")} stroke={BLUE} strokeWidth={2} dot={false} />
           </ComposedChart>
@@ -144,6 +147,33 @@ export function AnnualAnalysis({
             </table>
           </div>
         ) : <Empty text={t("最近 12 个有数据月份没有周期消费。", "No recurring expenses were found in the latest 12 data months.")} />}
+      </ChartPanel>
+      <ChartPanel title={t(`固定资产（${data.fixed_assets.length} 项）`, `Fixed assets (${data.fixed_assets.length})`)} className="is-wide">
+        <p className="asset-track-analysis-note">
+          {t("显示当年出现过的固定资产，并保留年度内最后状态；固定资产不计入总资产。", "Shows fixed assets that appeared during the year with their last status; fixed assets are excluded from total assets.")}
+        </p>
+        {data.fixed_assets.length ? (
+          <div className="asset-track-table-scroll">
+            <table className="asset-track-analysis-fixed-assets-table">
+              <thead><tr>
+                <StaticTableHeader label={t("名称", "Name")} />
+                <StaticTableHeader label={t("类别", "Category")} />
+                <StaticTableHeader label={t("状态", "Status")} className="asset-track-status-column" />
+                <StaticTableHeader label={t("购买价格", "Purchase price")} className="asset-track-amount-column" />
+                <StaticTableHeader label={t("最后出现月", "Last seen month")} className="asset-track-date-column" />
+              </tr></thead>
+              <tbody>{data.fixed_assets.map((row) => (
+                <tr key={row.asset_key ?? row.id}>
+                  <td>{row.asset_name}</td>
+                  <td>{row.category}</td>
+                  <td className="asset-track-status-cell">{businessLabel(row.status)}</td>
+                  <td className="asset-track-amount-cell">{money(row.purchase_price)}</td>
+                  <td className="asset-track-date-cell">{row.last_seen_month}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        ) : <Empty text={t("该年度没有出现固定资产。", "No fixed assets appeared during this year.")} />}
       </ChartPanel>
       <ChartPanel title={t("近 12 月逐月储蓄率", "Monthly savings rate over 12 months")} className="is-wide">
         {monthlySavings.length ? (
@@ -210,7 +240,6 @@ export function AnnualAnalysis({
             <Bar yAxisId="flow" dataKey="total_income" name={t("收入", "Income")} fill={INFLOW} />
             <Bar yAxisId="flow" dataKey="total_expense" name={t("支出", "Expense")} fill={OUTFLOW} />
             <Line yAxisId="asset" type="monotone" dataKey="cash" name={t("现金", "Cash")} stroke={GOLD} dot={false} />
-            <Line yAxisId="asset" type="monotone" dataKey="principal" name={t("理财本金", "Investment principal")} stroke={BLUE} dot={false} />
             <Line yAxisId="asset" type="monotone" dataKey="market_net_assets" name={t("市场净资产", "Market net assets")} stroke={PURPLE} strokeWidth={2.5} dot={false} />
             <Line yAxisId="asset" type="monotone" dataKey="cost_assets" name={t("资金投入资产", "Cost assets")} stroke={BLUE} strokeWidth={2} dot={false} />
           </ComposedChart>
