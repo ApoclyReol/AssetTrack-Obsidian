@@ -88,15 +88,19 @@ schema 9 在流水和自动规则中分别保存 `counterparty`；流水字段�
 
 当前仍保留的技术债：
 
-- UI 已完成一轮按职责拆分：`AnalysisView.tsx` 只负责分析导航，年度和月度分析分别位于独立模块；
-  流水表、月内借款区块、固定资产表、规则工作台和共享编辑原语也已独立。
-  `AssetTrackEditorApp.tsx` 仍保留 ItemView 路由、草稿 reducer 和 `MonthEditor`，后续只继续
-  拆出边界清晰且不改变草稿/事务契约的部分；
-- `RuleHistoryModal.tsx` 现在只负责历史回溯与分类迁移，商品统一和规则创建分别位于
-  `ProductRenameModal.tsx`、`RuleCreationModal.tsx`，旧导出入口仅作为兼容层保留；
-- `AssetTrackRepository.ts` 仍是事务与 SQL 的主 facade，纯行转换和规则报告已抽到
-  `repositoryPrimitives.ts`、`ruleReporting.ts`。继续拆分时必须保持同一 `DatabaseSync`
-  事务内的 revision、校验和写入边界；
+- UI 已完成第二轮按职责拆分：`AnalysisView.tsx` 负责分析导航，年度和月度分析位于独立模块；
+  `AssetTrackEditorApp.tsx` 负责 ItemView 路由和页面级导航，`MonthEditor.tsx` 保留草稿、dirty、
+  revision、保存和重载协调，纯计算与导入模型位于 `monthEditorModel.ts`，资产、流水、借款和
+  固定资产区块位于 `src/ui/month/`；
+- `RulesEditor.tsx` 保留分类/规则 workspace、dirty、revision、保存和数据健康协调，分类定义表与
+  匹配规则表位于 `src/ui/rules/`。数据健康、商品总览和历史迁移位于
+  `src/ui/configuration/`；`RuleHistoryModal.tsx` 只保留 Modal 生命周期和旧导出兼容层；
+- `AssetTrackRepository.ts` 现在是兼容 facade、读取协调和事务上下文入口。月份、账户余额、流水、借款、
+  固定资产写入位于 `monthWriteRepository.ts`，分类、规则和账户定义写入位于
+  `configurationWriteRepository.ts`，分类回溯和商品名称统一位于 `historyWriteRepository.ts`。
+  规则读取进一步拆为 `ruleReportReadModel.ts` 和 `productHistoryReadModel.ts`，由
+  `ruleHistoryReadModel.ts` 兼容 facade 协调。所有写侧模块都接收 facade 传入的同一个
+  `DatabaseSync` 上下文；每个公开写入入口仍只调用一次 `manager.write()`，不得让子模块自行打开连接；
 - 账单解析仍在主线程执行，尚未迁入 Worker；
 - 国际化仍以双参数 `t()` 为主，部分历史错误仍依赖中文文本映射，尚未全面切换
   到消息键和结构化错误码。
@@ -132,6 +136,36 @@ schema 9 在流水和自动规则中分别保存 `counterparty`；流水字段�
 - 保存后使用 Repository canonical rows 重建 clean 草稿。
 - 账单检查和预览不写数据库；增量模式严格不去重。
 - 恢复先校验、staging 和安全快照，再关闭连接并原子替换；失败恢复原数据库。
+
+## Repository 当前拆分状态
+
+Repository 的第一轮读写拆分已经完成，`AssetTrackRepository` 继续作为 Service 依赖的兼容 facade：
+
+```text
+src/database/
+├─ AssetTrackRepository.ts          # 对外 facade、事务入口和兼容方法
+├─ monthWriteRepository.ts          # 月份、账户余额、流水、借款、固定资产写入
+├─ configurationWriteRepository.ts  # 分类、规则、账户定义写入
+├─ historyWriteRepository.ts        # 分类回溯、商品名称统一及 revision 校验
+├─ analysisReadModel.ts             # 年度、月度和资产只读分析
+├─ ruleReportReadModel.ts           # 规则定义、匹配预览、冲突报告和规则候选
+├─ productHistoryReadModel.ts       # 商品历史、分类统计和商品详情
+└─ ruleHistoryReadModel.ts          # 规则历史兼容 facade 和跨模型健康汇总
+```
+
+写入拆分通过 `repositoryWriteContext.ts` 传递显式上下文，包含当前 `DatabaseSync`、revision
+检查、`touchMonth()`、读取回调和规则历史读取模型。子模块只执行传入连接上的 SQL 和校验；
+facade 的每个公开写入方法只调用一次 `manager.write()`：
+
+- `saveMonth()`、`saveMonthSection()` 及借款/固定资产写入必须继续共享月度 revision 和同一事务；
+- `saveRuleWorkspace()` 必须继续在一个事务中同时校验并写入分类和规则；
+- 分类回溯、商品名称统一必须继续在一个事务中校验所有受影响月份并逐月增加 revision；
+- `saveAccounts()` 的账户定义和月度账户余额属于不同 revision 边界，不能为了文件拆分而合并；
+- 月度账户余额、流水、借款和固定资产共享月份 revision，但分别由月份写模块中的方法执行；
+- `databaseRepository.test.ts` 仍是集中式回归测试，后续可以按月度、配置、历史和分析拆分，
+  但不应在没有新增测试边界前单独重排测试文件。
+
+后续只在业务边界继续增长时拆分，不为降低单文件行数而重新组织 facade 或只读模型。
 
 ## 发布边界
 

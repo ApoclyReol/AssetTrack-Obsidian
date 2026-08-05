@@ -1,0 +1,443 @@
+import { Notice } from "obsidian";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
+import type {
+  CategoryBackfillPreview,
+  HistoricalProductStat,
+  ProductHistoryTransaction
+} from "../../types";
+import type { HistoryBackfillContentProps, HistoryFilters, HistorySort } from "./ruleHistoryTypes";
+import { t } from "../../i18n";
+import { normalizeProductKey } from "../../domain/rules";
+import { CategoryHistoryMigrationPanel, ProductHistoryDetailPanel } from "./RuleHistoryBackfillPanels";
+import { RuleHistoryFilters } from "./RuleHistoryFilters";
+import { ProductHealthTable, ProductOverviewTable } from "./RuleHistoryProductTables";
+import {
+  errorMessage,
+  initialFilters,
+  queryFromFilters,
+  sortGroups
+} from "./ruleHistoryPrimitives";
+
+export function HistoryBackfillContent({
+  api,
+  categories,
+  mode,
+  initialQuery,
+  embedded = false,
+  hostWindow,
+  detailOnly = false,
+  detailGroup,
+  overview = false,
+  confirmAction,
+  onSaved,
+  onDataChanged,
+  onOpenDetail,
+  onOpenProductRename,
+  onCreateRule,
+  hideIssueFilter = false,
+  onQueryChange,
+  onClose
+}: HistoryBackfillContentProps) {
+  const [filters, setFilters] = useState<HistoryFilters>(() => initialFilters(initialQuery, overview ? "" : "conflict"));
+  const [groups, setGroups] = useState<HistoricalProductStat[] | null>(null);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  const [selectedGroup, setSelectedGroup] = useState<HistoricalProductStat | null>(null);
+  const [detailRows, setDetailRows] = useState<ProductHistoryTransaction[] | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [targetCategoryKey, setTargetCategoryKey] = useState("");
+  const [preview, setPreview] = useState<CategoryBackfillPreview | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [sort, setSort] = useState<HistorySort>({ key: "last_date", direction: "desc" });
+  const requestSequence = useRef(0);
+  const autoLoadTimer = useRef<number | null>(null);
+
+  const query = useMemo(
+    () => queryFromFilters(overview ? { ...filters, issue_filter: "" } : filters),
+    [filters, overview]
+  );
+  const hasFilter = Object.keys(query).length > 0;
+  const sortedGroups = useMemo(
+    () => sortGroups(groups ?? [], sort),
+    [groups, sort]
+  );
+  const detailView = detailRows ?? [];
+  const visibleIds = detailView.map((row) => row.id);
+  const allVisibleSelected = visibleIds.length > 0
+    && visibleIds.every((id) => selectedIds.has(id));
+
+  const loadStatsForQuery = useCallback(async (
+    requestedQuery: typeof query,
+    categoryMode = false
+  ) => {
+    const sequence = requestSequence.current + 1;
+    requestSequence.current = sequence;
+    setLoading(true);
+    setMessage(categoryMode
+      ? t("正在加载当前分类下的商品…", "Loading items in this category…")
+      : overview
+        ? t("正在加载商品总览…", "Loading item overview…")
+        : t("正在加载筛选后的历史统计…", "Loading filtered history statistics…"));
+    try {
+      const result = overview && mode === "product" && Object.keys(requestedQuery).length === 0
+        ? await api.productOverview()
+        : categoryMode
+          ? await api.productHistory(requestedQuery)
+          : await api.productHistoryIndex(requestedQuery);
+      if (sequence !== requestSequence.current) return;
+      setGroups(result.groups);
+      setHasLoadedOnce(true);
+      setSelectedGroup(null);
+      setDetailRows("rows" in result ? result.rows : null);
+      setSelectedIds(new Set());
+      setPreview(null);
+      setMessage("");
+    } catch (error) {
+      if (sequence === requestSequence.current) setMessage(errorMessage(error));
+    } finally {
+      if (sequence === requestSequence.current) setLoading(false);
+    }
+  }, [api, mode, overview]);
+
+  const updateFilter = (next: Partial<HistoryFilters>) => {
+    const nextFilters = { ...filters, ...next };
+    const nextQuery = queryFromFilters(overview ? { ...nextFilters, issue_filter: "" } : nextFilters);
+    const dynamicLoad = mode === "product" && !detailOnly && hasLoadedOnce;
+    requestSequence.current += 1;
+    setLoading(false);
+    setFilters(nextFilters);
+    onQueryChange?.(nextQuery);
+    setSelectedGroup(null);
+    setDetailRows(null);
+    setSelectedIds(new Set());
+    setMessage("");
+    setPreview(null);
+    if (autoLoadTimer.current !== null) {
+      hostWindow.clearTimeout(autoLoadTimer.current);
+      autoLoadTimer.current = null;
+    }
+    if (dynamicLoad && (overview || Object.keys(nextQuery).length > 0)) {
+      autoLoadTimer.current = hostWindow.setTimeout(() => {
+        void loadStatsForQuery(nextQuery);
+      }, 250);
+    } else {
+      setGroups(null);
+      if (!overview && Object.keys(nextQuery).length === 0) {
+        setMessage(t("请选择至少一个筛选条件。", "Choose at least one filter."));
+      }
+    }
+  };
+
+  const resetFilters = () => {
+    requestSequence.current += 1;
+    setLoading(false);
+    if (autoLoadTimer.current !== null) {
+      hostWindow.clearTimeout(autoLoadTimer.current);
+      autoLoadTimer.current = null;
+    }
+    const nextFilters = initialFilters(
+      mode === "category" ? initialQuery : undefined,
+      overview ? "" : "conflict"
+    );
+    setFilters(nextFilters);
+    onQueryChange?.(queryFromFilters(overview ? { ...nextFilters, issue_filter: "" } : nextFilters));
+    setGroups(null);
+    setHasLoadedOnce(false);
+    setSelectedGroup(null);
+    setDetailRows(null);
+    setSelectedIds(new Set());
+    setPreview(null);
+    setMessage("");
+  };
+
+  const openDetail = useCallback(async (
+    group: HistoricalProductStat,
+    baseQuery: typeof query = query
+  ) => {
+    const detailQuery = {
+      ...baseQuery,
+      transaction_type: group.transaction_type,
+      product_key: group.product_key
+    };
+    if (embedded && !detailOnly && onOpenDetail) {
+      onOpenDetail(group, detailQuery);
+      return;
+    }
+    setLoading(true);
+    setMessage(t("正在加载商品时间线…", "Loading the item timeline…"));
+    try {
+      const result = await api.productHistory(detailQuery);
+      const summary = result.groups.find((item) =>
+        item.transaction_type === group.transaction_type
+        && item.product_key === group.product_key
+      ) ?? group;
+      setSelectedGroup(summary);
+      setDetailRows(result.rows);
+      setSelectedIds(new Set());
+      setPreview(null);
+      setTargetCategoryKey(
+        categories.find((category) =>
+          category.is_active && category.transaction_type === group.transaction_type
+        )?.category_key ?? ""
+      );
+      setMessage("");
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }, [api, categories, detailOnly, embedded, onOpenDetail, query]);
+
+  useEffect(() => {
+    if (mode !== "product" || detailOnly || hasLoadedOnce) return;
+    if (!overview && !hasFilter) return;
+    void loadStatsForQuery(query);
+  }, [detailOnly, hasFilter, hasLoadedOnce, loadStatsForQuery, mode, overview, query]);
+
+  useEffect(() => {
+    if (mode !== "category" || detailOnly || !initialQuery?.category_key) return;
+    const source = categories.find((category) => category.category_key === initialQuery.category_key);
+    setTargetCategoryKey(
+      categories.find((category) => category.is_active
+        && category.category_key !== initialQuery.category_key
+        && (!source || category.transaction_type === source.transaction_type))?.category_key ?? ""
+    );
+    void loadStatsForQuery(
+      { category_key: initialQuery.category_key },
+      true
+    );
+  }, [categories, detailOnly, initialQuery?.category_key, loadStatsForQuery, mode]);
+
+  useEffect(() => {
+    if (!detailOnly || !detailGroup) return;
+    void openDetail(detailGroup, initialQuery);
+  }, [detailGroup, detailOnly, initialQuery, openDetail]);
+
+  useEffect(() => () => {
+    requestSequence.current += 1;
+    if (autoLoadTimer.current !== null) hostWindow.clearTimeout(autoLoadTimer.current);
+  }, [hostWindow]);
+
+  const toggleAllVisible = () => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (allVisibleSelected) visibleIds.forEach((id) => next.delete(id));
+      else visibleIds.forEach((id) => next.add(id));
+      return next;
+    });
+    setPreview(null);
+  };
+
+  const toggleSelected = (id: number) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+    setPreview(null);
+  };
+
+  const categoryGroupTransactionIds = (group: HistoricalProductStat): number[] =>
+    (detailRows ?? [])
+      .filter((row) => row.type === group.transaction_type
+        && normalizeProductKey(row.product) === group.product_key)
+      .map((row) => row.id);
+  const categoryGroupSelected = (group: HistoricalProductStat): boolean => {
+    const ids = categoryGroupTransactionIds(group);
+    return ids.length > 0 && ids.every((id) => selectedIds.has(id));
+  };
+
+  const previewBackfill = async () => {
+    if (mode === "product" && selectedGroup?.rule_status === "冲突") {
+      setMessage(t("请先处理当前商品的规则冲突，再修改历史分类。", "Resolve this item's rule conflict before editing historical categories."));
+      return;
+    }
+    if (mode === "category" && sortedGroups.some((group) =>
+      group.rule_status === "冲突"
+      && categoryGroupTransactionIds(group).some((id) => selectedIds.has(id))
+    )) {
+      setMessage(t("选中商品存在未解决的规则冲突，请先处理规则后再迁移历史分类。", "Some selected items have unresolved rule conflicts. Resolve the rules before migrating historical categories."));
+      return;
+    }
+    if (!selectedIds.size || !targetCategoryKey) {
+      setMessage(t("请选择流水和目标分类后再预览。", "Select transactions and a target category before previewing."));
+      return;
+    }
+    setLoading(true);
+    setMessage(t("正在生成回溯预览…", "Preparing the backfill preview…"));
+    try {
+      const result = await api.previewCategoryBackfill({
+        transaction_ids: [...selectedIds],
+        target_category_key: targetCategoryKey
+      });
+      setPreview(result);
+      setMessage("");
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const applyBackfill = async () => {
+    if (!preview) return;
+    if (mode === "category") {
+      const confirmed = await confirmAction(
+        t("确认迁移历史分类？", "Confirm historical category migration?"),
+        t(
+          `将修改 ${preview.transaction_count} 条流水，涉及 ${preview.month_count} 个月份；原始日期、金额和商品不会改变。`,
+          `This will update ${preview.transaction_count} transactions across ${preview.month_count} months. Dates, amounts, and items will not change.`
+        ),
+        t("确认写入", "Apply changes")
+      );
+      if (!confirmed) return;
+    }
+    setLoading(true);
+    setMessage(t("正在写入历史分类…", "Applying historical categories…"));
+    try {
+      const result = await api.applyCategoryBackfill({
+        transaction_ids: preview.transaction_ids,
+        target_category_key: preview.target_category_key,
+        expected_month_revisions: Object.fromEntries(
+          preview.months.map((month) => [month.month, month.revision])
+        )
+      });
+      onSaved();
+      onDataChanged();
+      new Notice(t(`已更新 ${result.updated_count} 条历史流水。`, `Updated ${result.updated_count} historical transactions.`));
+
+      setMessage("");
+      if (!embedded) onClose?.();
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const sourceCategoryKey = initialQuery?.category_key ?? "";
+  const sourceCategory = categories.find((category) => category.category_key === sourceCategoryKey);
+  const allCategoryGroupsSelected = mode === "category"
+    && sortedGroups.length > 0
+    && sortedGroups.every((group) => categoryGroupSelected(group));
+  const targetCategories = categories.filter((category) =>
+    category.is_active
+      && category.category_key !== sourceCategoryKey
+      && (!selectedGroup
+        ? !sourceCategory || category.transaction_type === sourceCategory.transaction_type
+        : category.transaction_type === selectedGroup.transaction_type)
+  );
+
+  const toggleCategoryGroup = (group: HistoricalProductStat) => {
+    const ids = categoryGroupTransactionIds(group);
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (categoryGroupSelected(group)) ids.forEach((id) => next.delete(id));
+      else ids.forEach((id) => next.add(id));
+      return next;
+    });
+    setPreview(null);
+  };
+
+  const toggleAllCategoryGroups = () => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      const allIds = sortedGroups.flatMap((group) => categoryGroupTransactionIds(group));
+      if (allCategoryGroupsSelected) allIds.forEach((id) => next.delete(id));
+      else allIds.forEach((id) => next.add(id));
+      return next;
+    });
+    setPreview(null);
+  };
+
+  return <div className="asset-track-rule-history-modal-content">
+    {mode === "product" && !detailOnly && (!embedded || overview) && <RuleHistoryFilters
+      categories={categories}
+      filters={filters}
+      overview={overview}
+      hideIssueFilter={hideIssueFilter}
+      loading={loading}
+      hasFilter={hasFilter}
+      onUpdate={updateFilter}
+      onReset={resetFilters}
+    />}
+
+    {message && <p className="asset-track-rule-history-message" role="status">{message}</p>}
+
+    {mode === "product" && !overview && !detailOnly && !hasFilter && !groups && !selectedGroup && <p className="asset-track-rule-history-empty" role="status">
+      {t("请选择至少一个筛选条件。", "Choose at least one filter.")}
+    </p>}
+
+    {mode === "category" && !groups && !message && <p className="asset-track-rule-history-empty" role="status">
+      {t("正在加载当前分类下的商品…", "Loading items in this category…")}
+    </p>}
+
+    {mode === "product" && !detailOnly && !selectedGroup && groups && (overview
+      ? <ProductOverviewTable
+          groups={sortedGroups}
+          sort={sort}
+          onSort={setSort}
+          onOpenDetail={(group) => { void openDetail(group); }}
+          onOpenProductRename={onOpenProductRename}
+          onCreateRule={onCreateRule}
+        />
+      : <ProductHealthTable
+          groups={sortedGroups}
+          sort={sort}
+          onSort={setSort}
+          onOpenDetail={(group) => { void openDetail(group); }}
+          onOpenProductRename={onOpenProductRename}
+          onCreateRule={onCreateRule}
+        />)}
+
+    {mode === "category" && groups && <CategoryHistoryMigrationPanel
+      groups={sortedGroups}
+      sourceCategoryName={sourceCategory?.name ?? ""}
+      sort={sort}
+      targetCategoryKey={targetCategoryKey}
+      targetCategories={targetCategories}
+      selectedIds={selectedIds}
+      loading={loading}
+      preview={preview}
+      allCategoryGroupsSelected={allCategoryGroupsSelected}
+      categoryGroupSelected={categoryGroupSelected}
+      onSort={setSort}
+      onToggleAll={toggleAllCategoryGroups}
+      onToggleGroup={toggleCategoryGroup}
+      onTargetCategoryChange={(categoryKey) => { setTargetCategoryKey(categoryKey); setPreview(null); }}
+      onPreview={() => { void previewBackfill(); }}
+      onApply={() => { void applyBackfill(); }}
+      onClose={onClose}
+    />}
+
+    {mode === "product" && selectedGroup && detailRows && <ProductHistoryDetailPanel
+      selectedGroup={selectedGroup}
+      detailRows={detailView}
+      detailOnly={detailOnly}
+      selectedIds={selectedIds}
+      allVisibleSelected={allVisibleSelected}
+      targetCategoryKey={targetCategoryKey}
+      targetCategories={targetCategories}
+      preview={preview}
+      loading={loading}
+      onClose={() => onClose?.()}
+      onBack={() => {
+        setSelectedGroup(null);
+        setDetailRows(null);
+        setSelectedIds(new Set());
+        setPreview(null);
+      }}
+      onToggleAllVisible={toggleAllVisible}
+      onToggleSelected={toggleSelected}
+      onTargetCategoryChange={(categoryKey) => { setTargetCategoryKey(categoryKey); setPreview(null); }}
+      onPreview={() => { void previewBackfill(); }}
+      onApply={() => { void applyBackfill(); }}
+    />}
+  </div>;
+}

@@ -15,8 +15,7 @@ import {
   type AssetTrackService
 } from "../services/AssetTrackService";
 import { normalizeProductKey } from "../domain/rules";
-import { CATEGORY_COLORS } from "../domain/categoryColors";
-import { businessLabel, t } from "../i18n";
+import { t } from "../i18n";
 import {
   HistoryBackfillContent,
   ProductRenameModal,
@@ -26,15 +25,11 @@ import {
 } from "./RuleHistoryModal";
 import type { RulesMode } from "../constants";
 import { alertAction } from "./ConfirmModal";
-import { ActionTableHeader } from "./TablePrimitives";
 import {
   clone,
-  EmptyState,
   messageFor,
   OperationState,
   Section,
-  SortButton,
-  sortRows,
   type SortState,
   Status
 } from "./editorPrimitives";
@@ -42,25 +37,8 @@ import type {
   EditorDraftSnapshot,
   RulesEditorDraftSnapshot
 } from "./editorDraft";
-
-const CATEGORY_RAINBOW = CATEGORY_COLORS;
-
-function focusNewTableRow(
-  container: HTMLDivElement | null,
-  rowKey: string | null
-): boolean {
-  if (!container || !rowKey) return false;
-  const row = Array.from(
-    container.querySelectorAll("[data-asset-track-row-key]")
-  ).find((element) => element.getAttribute("data-asset-track-row-key") === rowKey);
-  if (!row) return false;
-  row.scrollIntoView({ block: "nearest" });
-  const input = row.querySelector("input:not(:disabled), select:not(:disabled)");
-  if (input instanceof HTMLInputElement || input instanceof HTMLSelectElement) {
-    input.focus();
-  }
-  return true;
-}
+import { CategoryDefinitionsTable } from "./rules/CategoryDefinitionsTable";
+import { MatchingRulesTable } from "./rules/MatchingRulesTable";
 
 const EMPTY_RULE_HEALTH_SUMMARY: RuleHealthSummary = {
   product_conflicts: 0,
@@ -133,10 +111,6 @@ export const RulesEditorV2 = forwardRef<RulesEditorHandle, RulesEditorProps>(fun
   const skipNextDataVersion = useRef(false);
   const analyticsTimer = useRef<number | null>(null);
   const rulesSectionRef = useRef<HTMLElement | null>(null);
-  const categoryTableScrollRef = useRef<HTMLDivElement | null>(null);
-  const rulesTableScrollRef = useRef<HTMLDivElement | null>(null);
-  const pendingCategoryKey = useRef<string | null>(null);
-  const pendingRuleKey = useRef<string | null>(null);
   const actionRef = useRef<RulesEditorHandle>({
     isSectionDirty: () => false,
     hasUnsavedChanges: () => false,
@@ -150,16 +124,6 @@ export const RulesEditorV2 = forwardRef<RulesEditorHandle, RulesEditorProps>(fun
     save: () => actionRef.current.save(),
     reload: () => actionRef.current.reload()
   }), [ref]);
-  useEffect(() => {
-    if (focusNewTableRow(categoryTableScrollRef.current, pendingCategoryKey.current)) {
-      pendingCategoryKey.current = null;
-    }
-  }, [workspace?.categories.length, categorySort]);
-  useEffect(() => {
-    if (focusNewTableRow(rulesTableScrollRef.current, pendingRuleKey.current)) {
-      pendingRuleKey.current = null;
-    }
-  }, [workspace?.rules.length, ruleSort]);
 
   const applyAnalytics = useCallback((analytics: RuleWorkspaceAnalytics) => {
     setWorkspace((current) => {
@@ -321,14 +285,14 @@ export const RulesEditorV2 = forwardRef<RulesEditorHandle, RulesEditorProps>(fun
   };
   const markCategoryDirty = () => setDirtyFlags(true, ruleDirtyRef.current);
   const markRuleDirty = () => setDirtyFlags(categoryDirtyRef.current, true);
-  const ruleStatusLabel = (value: unknown) => ({
-    正常: t("正常", "Normal"),
-    重复: t("重复", "Duplicate"),
-    冲突: t("冲突", "Conflict"),
-    未创建: t("未创建", "Not created"),
-    已覆盖: t("已覆盖", "Covered")
-  }[String(value)] ?? t("加载中…", "Loading…"));
-  const categoryForKey = (key: string) => workspace.categories.find((category) => category.category_key === key);
+  const updateCategories = (categories: CategoryDefinition[]) => {
+    setWorkspace((current) => current ? { ...current, categories } : current);
+    markCategoryDirty();
+  };
+  const updateRules = (rules: SavedRule[]) => {
+    setWorkspace((current) => current ? { ...current, rules } : current);
+    markRuleDirty();
+  };
 
   const saveCategories = async () => {
     setCategoryState({ kind: "pending", message: t("保存分类…", "Saving categories…") });
@@ -519,8 +483,6 @@ export const RulesEditorV2 = forwardRef<RulesEditorHandle, RulesEditorProps>(fun
     markCategoryDirty();
   };
 
-  const categoryView = sortRows(workspace.categories, categorySort, (row, key) => row[key as keyof CategoryDefinition]);
-  const ruleView = sortRows(workspace.rules, ruleSort, (row, key) => row[key as keyof SavedRule]);
   actionRef.current = {
     isSectionDirty: () => currentSection === "categories"
       ? categoryDirtyRef.current
@@ -569,70 +531,33 @@ export const RulesEditorV2 = forwardRef<RulesEditorHandle, RulesEditorProps>(fun
         onCreateRule={openRuleCreation}
       />
     </Section>}
-    {(section === undefined || section === "categories") && <Section>
-      {categoryView.length === 0 ? <EmptyState text={t("尚无分类定义。", "No category definitions yet.")} /> : <div ref={categoryTableScrollRef} className="asset-track-table-scroll asset-track-responsive-scroll asset-track-rule-table-scroll">
-        <table className="asset-track-category-table"><thead><tr>{[
-          ["name", t("名称", "Name")], ["transaction_type", t("收支", "Type")], ["necessity", t("必要性", "Necessity")], ["pattern", t("消费频率", "Frequency")], ["is_big_ticket", t("大额", "Large")], ["color", t("颜色", "Color")], ["transaction_count", t("流水数", "Transactions")]
-        ].map(([field, label]) => <th key={field} scope="col" className={field === "is_big_ticket" ? "asset-track-checkbox-heading" : field === "color" ? "asset-track-color-column" : ["transaction_type", "necessity", "pattern"].includes(field) ? "asset-track-type-column" : field === "transaction_count" ? "asset-track-count-column" : undefined}><SortButton field={field} label={label} sort={categorySort} onSort={setCategorySort} /></th>)}<ActionTableHeader /></tr></thead>
-          <tbody>{categoryView.map(({ row, originalIndex: index }) => <tr data-asset-track-row-key={row.category_key} key={row.category_key}>
-            <td><input value={row.name} onChange={(event) => { const next = clone(workspace.categories); next[index].name = event.target.value; setWorkspace({ ...workspace, categories: next }); markCategoryDirty(); }} /></td>
-            <td className="asset-track-type-cell"><select value={row.transaction_type} onChange={(event) => { const next = clone(workspace.categories); next[index].transaction_type = event.target.value as "支出" | "收入"; setWorkspace({ ...workspace, categories: next }); markCategoryDirty(); }}><option value="支出">{businessLabel("支出")}</option><option value="收入">{businessLabel("收入")}</option></select></td>
-            <td className="asset-track-type-cell"><select value={row.necessity} onChange={(event) => { const next = clone(workspace.categories); next[index].necessity = event.target.value as CategoryDefinition["necessity"]; setWorkspace({ ...workspace, categories: next }); markCategoryDirty(); }}>{["必要", "可控", "不适用"].map((value) => <option key={value} value={value}>{businessLabel(value)}</option>)}</select></td>
-            <td className="asset-track-type-cell"><select value={row.pattern} onChange={(event) => { const next = clone(workspace.categories); next[index].pattern = event.target.value as CategoryDefinition["pattern"]; setWorkspace({ ...workspace, categories: next }); markCategoryDirty(); }}>{["周期", "日常", "偶尔", "不适用"].map((value) => <option key={value} value={value}>{businessLabel(value)}</option>)}</select></td>
-            <td className="asset-track-checkbox-cell"><input type="checkbox" checked={row.is_big_ticket} onChange={(event) => { const next = clone(workspace.categories); next[index].is_big_ticket = event.target.checked; setWorkspace({ ...workspace, categories: next }); markCategoryDirty(); }} /></td>
-            <td className="asset-track-color-cell"><input type="color" value={row.color} onChange={(event) => { const next = clone(workspace.categories); next[index].color = event.target.value; setWorkspace({ ...workspace, categories: next }); markCategoryDirty(); }} /></td>
-            <td className="asset-track-count-cell">{row.transaction_count ?? 0}</td>
-            <td className="asset-track-category-actions asset-track-actions-cell">{row.transaction_count ? <button type="button" onClick={() => openCategoryHistory({ category_key: row.category_key })}>{t("迁移", "Migrate")}</button> : null}<button type="button" onClick={() => void removeCategory(row, index)}>{t("删除", "Delete")}</button></td>
-          </tr>)}</tbody>
-        </table>
-      </div>}
-      <div className="asset-track-section-actions">
-        <button type="button" onClick={() => {
-          const categoryKey = `cat-user-${crypto.randomUUID()}`;
-          pendingCategoryKey.current = categoryKey;
-          setWorkspace({ ...workspace, categories: [...workspace.categories, { category_key: categoryKey, name: "", transaction_type: "支出", necessity: "必要", pattern: "日常", is_big_ticket: false, color: CATEGORY_RAINBOW[workspace.categories.length % CATEGORY_RAINBOW.length], is_active: true, sort_order: workspace.categories.length }] });
-          markCategoryDirty();
-        }}>{t("新增分类", "Add category")}</button>
-        {section === "categories" && <>
-          <button type="button" disabled={state.kind === "pending"} onClick={() => void reloadCurrentSection()}>
-            {t("放弃并重载", "Discard and reload")}
-          </button>
-          <button type="button" className="mod-cta" disabled={!categoryDirty || categoryState.kind === "pending"} onClick={() => void saveCategories()}>
-            {t("保存分类", "Save categories")}
-          </button>
-        </>}
-      </div>
-    </Section>}
-    {(section === undefined || section === "matching") && <Section sectionRef={rulesSectionRef}>
-      {ruleView.length === 0 ? <EmptyState text={t("尚无已保存匹配规则。", "No saved matching rules yet.")} /> : <div ref={rulesTableScrollRef} className="asset-track-table-scroll asset-track-responsive-scroll asset-track-rule-table-scroll">
-        <table className="asset-track-rules-table"><thead><tr>{[
-          ["transaction_type", t("收支", "Type")], ["product", t("商品", "Item")], ["category", t("分类", "Category")], ["rule_status", t("规则状态", "Rule status")], ["occurrences", t("流水数", "Transactions")], ["last_month", t("最近月份", "Latest month")]
-        ].map(([field, label]) => <th key={field} scope="col" className={field === "transaction_type" ? "asset-track-type-column" : field === "category" || field === "rule_status" ? "asset-track-centered-column" : field === "occurrences" ? "asset-track-count-column" : field === "last_month" ? "asset-track-date-column" : undefined}><SortButton field={field} label={label} sort={ruleSort} onSort={setRuleSort} /></th>)}<ActionTableHeader /></tr></thead>
-          <tbody>{ruleView.map(({ row, originalIndex: index }) => <tr data-asset-track-row-key={String(row.id ?? `new-rule-${index}`)} key={String(row.id ?? index)}>
-            <td className="asset-track-type-cell"><select value={row.transaction_type} onChange={(event) => { const next = clone(workspace.rules); next[index].transaction_type = event.target.value as "支出" | "收入"; next[index].category_key = ""; next[index].category = ""; setWorkspace({ ...workspace, rules: next }); markRuleDirty(); }}><option value="支出">{businessLabel("支出")}</option><option value="收入">{businessLabel("收入")}</option></select></td>
-            <td><input value={row.product} onChange={(event) => { const next = clone(workspace.rules); next[index].product = event.target.value; setWorkspace({ ...workspace, rules: next }); markRuleDirty(); }} /></td>
-            <td className="asset-track-centered-cell"><select value={row.category_key} onChange={(event) => { const next = clone(workspace.rules); const category = categoryForKey(event.target.value); next[index].category_key = event.target.value; next[index].category = category?.name ?? ""; setWorkspace({ ...workspace, rules: next }); markRuleDirty(); }}><option value="">{t("请选择", "Select")}</option>{workspace.categories.filter((category) => category.transaction_type === row.transaction_type).map((category) => <option key={category.category_key} value={category.category_key} disabled={!category.is_active}>{category.name}{category.is_active ? "" : ` · ${t("停用", "Inactive")}`}</option>)}</select></td>
-            <td className="asset-track-status-cell asset-track-centered-cell">{ruleStatusLabel(row.rule_status)}{row.conflict_rule_ids?.length ? ` · ${row.conflict_rule_ids.length}` : ""}</td><td className="asset-track-count-cell">{row.occurrences ?? "—"}</td><td className="asset-track-date-cell">{row.last_month ?? "—"}</td>
-            <td className="asset-track-actions-cell"><button type="button" onClick={() => { setWorkspace({ ...workspace, rules: workspace.rules.filter((_, item) => item !== index) }); markRuleDirty(); }}>{t("删除", "Delete")}</button></td>
-          </tr>)}</tbody>
-        </table>
-      </div>}
-      <div className="asset-track-section-actions">
-        <button type="button" onClick={() => {
-          const category = workspace.categories.find((row) => row.is_active && row.transaction_type === "支出");
-          pendingRuleKey.current = `new-rule-${workspace.rules.length}`;
-          setWorkspace({ ...workspace, rules: [...workspace.rules, { transaction_type: "支出", product: "", category_key: category?.category_key ?? "", category: category?.name ?? "" }] });
-          markRuleDirty();
-        }}>{t("新增规则", "Add rule")}</button>
-        {section === "matching" && <>
-          <button type="button" disabled={state.kind === "pending"} onClick={() => void reloadCurrentSection()}>
-            {t("放弃并重载", "Discard and reload")}
-          </button>
-          <button type="button" className="mod-cta" disabled={!ruleDirty || ruleState.kind === "pending"} onClick={() => void saveRules()}>
-            {t("保存规则", "Save rules")}
-          </button>
-        </>}
-      </div>
-    </Section>}
+    {(section === undefined || section === "categories") && <CategoryDefinitionsTable
+      categories={workspace.categories}
+      sort={categorySort}
+      onSort={setCategorySort}
+      onChange={updateCategories}
+      onRemove={removeCategory}
+      onOpenHistory={openCategoryHistory}
+      showSectionActions={section === "categories"}
+      dirty={categoryDirty}
+      pageState={state}
+      saveState={categoryState}
+      onReload={reloadCurrentSection}
+      onSave={saveCategories}
+    />}
+    {(section === undefined || section === "matching") && <MatchingRulesTable
+      rules={workspace.rules}
+      categories={workspace.categories}
+      sort={ruleSort}
+      onSort={setRuleSort}
+      onChange={updateRules}
+      showSectionActions={section === "matching"}
+      dirty={ruleDirty}
+      pageState={state}
+      saveState={ruleState}
+      onReload={reloadCurrentSection}
+      onSave={saveRules}
+      sectionRef={rulesSectionRef}
+    />}
   </main>;
 });

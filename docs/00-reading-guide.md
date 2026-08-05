@@ -32,6 +32,7 @@
 | 09 | [路线图](09-roadmap.md) | 查看当前验证和后续方向 |
 | 10 | [发布后质量与功能路线](10-community-release-plan.md) | 跟踪发布后质量与功能演进 |
 | 11 | [规则中心与容错导入架构补充](11-rule-center-architecture.md) | 核对导入、质检和规则洞察接口 |
+| 15 | [规则、流水聚合与批量操作需求](15-rules-and-transaction-operations-requirements.md) | 评审规则泛化、流水 UI 重组、批量操作、AI 与未来代付方向 |
 | logs | [发行日志索引](logs/README.md) | 查看历史版本变化和发布 handoff |
 
 ## 更新日志

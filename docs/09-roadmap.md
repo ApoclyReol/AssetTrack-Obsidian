@@ -30,6 +30,10 @@ v1.6.0 已完成发布准备。它继承纯 TypeScript 架构、个性化金额�
 后续路线不以“增加更多手工记账功能”为默认方向，而以月度结算链路的完整性、唯一
 事实和可验证性排序。
 
+规则泛化、流水三类业务 Tab、商品/交易对手汇总、批量操作、AI 分类和未来代付关系
+模型的专项需求与依赖见[规则、流水聚合与批量操作需求](15-rules-and-transaction-operations-requirements.md)。
+该文档是待评审目标，不应被当作当前版本已实现能力。
+
 ### P0：把月度结算做成清晰工作流
 
 - 流水页顶部显示本月状态、保存警告、对账差额和下一步操作，但不新增独立顶层工作台。
@@ -70,11 +74,15 @@ Asset Track 项目已通过 Community Plugins 审核并支持从社区目录安�
 
 ## 工程性路线
 
-- v1.6.0 维护阶段已完成第一轮职责拆分：分析页面、流水/固定资产表、规则工作台、
-  商品统一和规则创建均有独立 UI 模块；保留 `AssetTrackEditorApp.tsx` 作为路由、草稿和月份
-  工作区边界。后续只在边界稳定、能降低耦合时继续拆分，不为目录层级而重排代码。
-- 将 `AssetTrackRepository.ts` 继续按只读报告、事务写入和领域查询拆分；所有拆分必须保持
-  Service/Repository 接口、revision 校验和单事务写入行为不变。
+- v1.6.0 维护阶段已完成两轮职责拆分：分析页面、月度编辑区块、分类/匹配规则表、数据健康、
+  商品统一和规则创建均有独立 UI 模块；`AssetTrackEditorApp.tsx` 保留页面路由，月份和规则编辑器
+  分别保留各自的草稿、dirty、revision 与事务协调。后续只在边界稳定、能降低耦合时继续拆分，
+  不为目录层级而重排代码。
+- Repository 已完成第一轮读写拆分：`AssetTrackRepository.ts` 保留兼容 facade，写入职责位于
+  `monthWriteRepository.ts`、`configurationWriteRepository.ts` 和 `historyWriteRepository.ts`，
+  规则读取位于 `ruleReportReadModel.ts` 与 `productHistoryReadModel.ts`，由
+  `ruleHistoryReadModel.ts` 协调跨模型汇总。所有拆分保持 Service/Repository 接口、revision 校验
+  和单事务写入行为不变；后续只在测试或业务边界继续增长时再拆分。
 - 将 CSV/XLSX/XLS 解析真正迁入 Worker；当前版本仍只完成 `ArrayBuffer` 读取并移除
   Data URL/Base64 中间副本。
 - 将现有中文错误文本和 `t("中文", "English")` 逐步迁移为稳定消息键与完整

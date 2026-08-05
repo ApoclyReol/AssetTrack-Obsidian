@@ -134,12 +134,12 @@ Vault 与合成数据库。
 
 | 修改目标 | 主要入口 | 重点测试 |
 | --- | --- | --- |
-| 财务公式与对账 | `src/domain/calculator.ts`、`src/database/AssetTrackRepository.ts` | `tests/plugin/databaseRepository.test.ts`、`analysisModel.test.ts` |
+| 财务公式与对账 | `src/domain/calculator.ts`、`src/database/analysisReadModel.ts`、`src/database/AssetTrackRepository.ts` | `tests/plugin/databaseRepository.test.ts`、`analysisModel.test.ts` |
 | schema 与结构校验 | `src/database/schema.ts`、`DatabaseManager.ts` | `schemaValidation.test.ts`、`databaseRepository.test.ts` |
-| 月份校验和保存 | `AssetTrackRepository.saveMonth()` | `databaseRepository.test.ts` |
+| 月份校验和保存 | `AssetTrackRepository.saveMonth()`、`saveMonthSection()`、`src/ui/MonthEditor.tsx`、`src/ui/month/` | `databaseRepository.test.ts`、`monthDebtAndSpecialRows.test.tsx`、`editorDraftRecovery.test.tsx` |
 | 账单解析与字段映射 | `src/domain/csv.ts` | `csvService.test.ts` |
 | 导入交互与草稿提交 | `CsvImportDialog.tsx`、`csvImportCommit.ts` | `csvImportDialog.test.tsx`、`csvImportCommit.test.ts` |
-| 规则工作台、商品统一与历史迁移 | `src/ui/RulesEditor.tsx`、`RuleHistoryModal.tsx`、`ProductRenameModal.tsx`、`RuleCreationModal.tsx`、`TablePrimitives.tsx`、`AssetTrackRepository.ts` | `databaseRepository.test.ts`、`ruleHistoryModal.test.tsx`、`tablePrimitives.test.tsx` |
+| 规则工作台、商品统一与历史迁移 | `src/ui/RulesEditor.tsx`、`src/ui/rules/`、`src/ui/configuration/`、`RuleHistoryModal.tsx`、`ProductRenameModal.tsx`、`RuleCreationModal.tsx`、`src/database/ruleReportReadModel.ts`、`productHistoryReadModel.ts`、`ruleHistoryReadModel.ts`、`AssetTrackRepository.ts`、`configurationWriteRepository.ts`、`historyWriteRepository.ts` | `databaseRepository.test.ts`、`ruleHistoryModal.test.tsx`、`tablePrimitives.test.tsx` |
 | ItemView 草稿恢复 | `src/ui/editorDraft.ts`、`src/views/AssetTrackEditorView.ts`、`src/main.ts` | `editorDraft.test.ts`、`editorDraftRecovery.test.tsx`、`assetTrackEditorView.test.ts` |
 | 备份与恢复 | `src/services/BackupService.ts` | `backupService.test.ts` |
 | 数据目录生命周期 | `src/main.ts`、`src/services/workspacePath.ts` | `workspacePath.test.ts`、`settingsValidation.test.ts` |
