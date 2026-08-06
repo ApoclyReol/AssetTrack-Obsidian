@@ -33,8 +33,8 @@ Service 在预览后使用当前分类定义完成。
 规则页首次进入使用轻量的 `ruleWorkspaceShell()`，再按当前页面需要加载
 `ruleWorkspaceAnalytics()`；规则候选由当前配置端口按需读取，不再保留旧的
 `ruleWorkspace()`、`ruleInsights()` 或 `saveRuleWorkspace()` 公共接口。
-数据健康直接使用 `productHistoryIndex({ issue_filter: 'conflict' })` 加载商品-分类冲突表；商品总览使用
-`productOverview()` 加载全历史统计，筛选变化后自动刷新。具体商品详情通过浮动回溯窗口加载，分类迁移 Modal
+数据健康直接使用 `productHistoryIndex({ issue_filter: 'conflict' })` 加载近 5 年商品-分类冲突表，并返回实际
+读取范围；商品总览使用 `productOverview()` 默认加载最近 1 年，起止日期由用户选择，筛选变化后自动刷新。具体商品详情通过浮动回溯窗口加载，分类迁移 Modal
 通过带 `category_key` 的 `productHistory()` 加载指定分类下的全部商品。历史查询只连接
 `month_status.status='saved'` 的月份；空商品按独立商品键展示，不会因为商品为空而从统计中消失。
 
@@ -64,16 +64,16 @@ Service 在预览后使用当前分类定义完成。
 `expected_month_revisions`；写入只更新 `transactions.product`，不自动同步规则。统一商品
 名称后刷新商品-分类冲突统计。
 
-分类定义和匹配规则分别通过 `saveCategories()` 与 `saveRules()` 保存，并分别检查 revision；分类表只显示历史流水数，
-商品总览负责全历史统计。分类删除失败和确认都使用原生 Modal。旧规则冲突由现有规则和已保存流水派生为
+分类定义和匹配规则分别通过 `saveCategories()` 与 `saveRules()` 保存，并分别检查 revision；分类表只显示读取窗口内的历史流水数，
+商品总览负责用户选择范围内的统计，默认近 1 年。分类删除失败和确认都使用原生 Modal。旧规则冲突由现有规则和已保存流水派生为
 `RuleConflictGroup`，仅用于兼容诊断和阻止可能覆盖历史语义的回溯；当前界面没有独立规则冲突面板。回溯成功后
 发布现有数据变更事件：无草稿的月份窗口重新读取数据库，有草稿的窗口保留草稿并提示外部 revision 已变化，
 旧草稿最终仍由 revision 校验保护。
 
 ## 规则洞察与能力端口
 
-`ruleWorkspaceAnalytics(minOccurrences = 2)` 查询全部已保存月份中的 `transactions`，
-不读取 React 草稿。配置 UI 通过 `ConfigurationEditorPort` 访问它，并返回规则 revision、
+`ruleWorkspaceAnalytics(minOccurrences = 2)` 查询最近 5 年已保存月份中的 `transactions`，
+不读取 React 草稿，并返回实际读取范围。配置 UI 通过 `ConfigurationEditorPort` 访问它，并返回规则 revision、
 推荐分类规则和历史商品统计：
 
 - 推荐按规范化的收支类型和商品聚合；历史统计按收支类型和商品聚合，并给出变体、交易对方、

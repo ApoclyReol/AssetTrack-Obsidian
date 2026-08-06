@@ -119,7 +119,7 @@ build/
 - `release:check` 验证版本、许可证、标准三文件和生产 bundle。
 
 测试覆盖 schema 10、schema 9→10 迁移、中文路径、WAL、整体事务、revision、冻结 golden、
-CSV/XLSX/XLS、备份恢复、5 万笔流水和数据库锁释放。恢复和写入只能使用隔离
+CSV/XLSX/XLS、备份恢复、读取窗口边界、跨 10 年的 5 万笔流水和数据库锁释放。恢复和写入只能使用隔离
 Vault 与合成数据库。
 
 ## 数据库版本边界
@@ -150,6 +150,7 @@ Vault 与合成数据库。
 | 备份与恢复 | `src/services/BackupService.ts` | `backupService.test.ts` |
 | 数据目录生命周期 | `src/main.ts`、`src/services/workspacePath.ts` | `workspacePath.test.ts`、`settingsValidation.test.ts` |
 | 分析界面 | `src/ui/AnalysisView.tsx`、`analysisModel.ts` | `analysisModel.test.ts` |
+| 读取窗口与 SQLite 性能 | `src/domain/readWindows.ts`、`analysisReadModel.ts`、`productHistoryReadModel.ts`、`ruleReportReadModel.ts` | `readWindows.test.ts`、`databaseReadWindows.test.ts`、`sqliteSpike.test.ts` |
 
 表格 UI 维护应复用 `src/ui/TablePrimitives.tsx` 的统一表头原语，并遵守
 `docs/05-design-system.md` 的表格响应式规范。新增表格时，必须明确语义列宽、正文小字号、
@@ -160,6 +161,18 @@ Vault 与合成数据库。
 先预览、校验每月 revision，再由单个 SQLite 事务提交。分类和匹配规则分别保存，不恢复
 后台匹配层级到用户界面。关闭视图恢复使用插件内存中的一次性令牌，不得写入
 `data.json` 或 Obsidian workspace layout。
+
+分析查询必须先确定读取窗口，再读取流水事实：月度为当前月加前 11 个月，年度先读取月份索引并选择年度、
+滚动和趋势抽样月份；系统检查统一为近 5 年，商品总览默认近 1 年并接受用户指定起止日期。分析和历史统计只能
+使用轻量分类定义查询，不能为了分类元数据触发全量交易聚合；当前数据版本内允许复用同一查询结果，数据变更后必须失效。
+分析页必须由父级容器预加载年度/月度结果，并把带数据版本和查询键的缓存结果传给子组件；子组件不得在渲染或挂载时再次调用分析 Service。月度编辑器的完整月度工作区与月度分析的轻量概览是两个不同入口，不能为了复用类型而扩大读取范围。
+同一分析请求中的月度计算、异常、成本审计、周期消费和历史规则统计应共享已经加载的流水快照；新增派生指标优先在内存快照上计算，只有确实不属于该窗口的事实才允许追加一次带边界的查询。
+新增统计不得在默认路径直接枚举全库流水，测试应为窗口长度、实际起止日期和代表性月度读取提供断言。
+
+读取边界按入口执行：`getMonth()` 和月度写入只读当前月份；年度与月度分析只读选定月份集合；规则报告、规则候选、
+规则影响预览、数据健康、商品总览和历史回溯统一通过 `transactionWindowPredicate()` 携带月份与日期双重边界；
+按交易 ID 的历史编辑读取只允许读取用户已选行。分类删除引用校验可以在写事务内按分类键执行全历史 COUNT；其他读取和写入依赖必须使用
+`categoryDefinitions()`，分类定义页的流水数由近 5 年规则统计结果提供。
 
 真实 Obsidian smoke 不能由单元测试代替；版本状态见
 `docs/logs/release-vN.N.N.md` 和 `docs/10-community-release-plan.md`。

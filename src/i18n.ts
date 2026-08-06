@@ -164,6 +164,16 @@ function structuredErrorText(
         chinese: "商品回溯至少选择一个筛选条件后再加载。",
         english: "Choose at least one product-history filter before loading."
       };
+    case "history.date_range_incomplete":
+      return {
+        chinese: "起止日期需要同时填写。",
+        english: "Both start and end dates are required."
+      };
+    case "history.date_range_invalid":
+      return {
+        chinese: "起始日期不能晚于结束日期。",
+        english: "The start date cannot be later than the end date."
+      };
     case "history.selection_required":
       return {
         chinese: "请选择至少一条有效历史流水。",

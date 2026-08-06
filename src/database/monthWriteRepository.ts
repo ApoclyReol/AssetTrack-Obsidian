@@ -132,7 +132,7 @@ export class MonthWriteRepository {
     month: string,
     input: Transaction[]
   ): { rows: Transaction[]; issues: ValidationIssue[] } {
-    const categories = this.context.categoryRows(db);
+    const categories = this.context.categoryDefinitions(db);
     const byKey = new Map(categories.map((row) => [row.category_key, row]));
     const byName = new Map(categories.map((row) => [row.name, row]));
     const accounts = this.accountDefinitions(db);
@@ -384,7 +384,7 @@ export class MonthWriteRepository {
     if (operationType !== "bulk-edit-category") return;
     const targetKey = text(metadata.target_category_key);
     const targetValue = text(metadata.target_value);
-    const category = this.context.categoryRows(db).find((row) => row.category_key === targetKey);
+    const category = this.context.categoryDefinitions(db).find((row) => row.category_key === targetKey);
     const isUncategorized = !targetKey && !targetValue;
     const selectedTypes = new Set<string>();
     if (isUncategorized) {

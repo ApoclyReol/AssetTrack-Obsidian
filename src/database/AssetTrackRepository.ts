@@ -29,6 +29,7 @@ import type {
   DebtRecord,
   FixedAsset,
   MonthSectionSaveRequest,
+  MonthOverview,
   MonthWorkspace
 } from "../types/month";
 import type {
@@ -89,6 +90,7 @@ export class AssetTrackRepository {
   private readonly configurationWrites: ConfigurationWriteRepository;
   private readonly historyWrites: HistoryWriteRepository;
   private readonly operations: OperationLogRepository;
+  private monthsCache: string[] | null = null;
 
   constructor(
     private readonly manager: DatabaseManager,
@@ -101,13 +103,14 @@ export class AssetTrackRepository {
       largeExpenseThreshold: this.options.largeExpenseThreshold,
       reconciliationTolerance: this.options.reconciliationTolerance,
       getMonths: (db) => this.getMonths(db),
-      categoryRows: (db) => this.categoryRows(db),
+      categoryDefinitions: (db) => this.categoryDefinitions(db),
       cashAccounts: (db, month) => this.cashAccounts(db, month),
       investmentAccounts: (db, month) => this.investmentAccounts(db, month)
     });
     this.ruleHistory = new RuleHistoryReadModel({
-      categoryRows: (db) => this.categoryRows(db),
+      categoryDefinitions: (db) => this.categoryDefinitions(db),
       categories: (db) => this.categories(db),
+      savedMonths: (db) => this.savedMonths(db),
       getRevision: (month, db) => this.getRevision(month, db)
     });
     const monthDependencies: MonthWriteDependencies = {
@@ -118,19 +121,19 @@ export class AssetTrackRepository {
         this.touchMonth(db, month, revision, fixedInitialized),
       getMonths: (db) => this.getMonths(db),
       getRevision: (month, db) => this.getRevision(month, db),
-      categoryRows: (db) => this.categoryRows(db),
+      categoryDefinitions: (db) => this.categoryDefinitions(db),
       debts: (db) => this.debts(db),
       monthDebts: (db, month) => this.monthDebts(db, month),
       rules: (db) => this.rules(db),
     };
     const configurationDependencies: ConfigurationWriteDependencies = {
-      categoryRows: (db) => this.categoryRows(db),
+      categoryDefinitions: (db) => this.categoryDefinitions(db),
       categories: (db) => this.categories(db),
       accounts: (db) => this.accounts(db),
       rules: (db) => this.rules(db)
     };
     const historyDependencies: HistoryWriteDependencies = {
-      categoryRows: (db) => this.categoryRows(db),
+      categoryDefinitions: (db) => this.categoryDefinitions(db),
       normalizedRuleRows: (db) => this.ruleHistory.normalizedRuleRows(db),
       historicalCategoryCounts: (group, categories) =>
         this.ruleHistory.historicalCategoryCounts(group, categories),
@@ -287,20 +290,28 @@ export class AssetTrackRepository {
   }
 
   getMonths(db = this.db()): string[] {
-    const result = new Set<string>();
-    for (const table of [
-      "cash_account_balances",
-      "investment_account_balances",
-      "transactions",
-      "fixed_assets",
-      "month_status"
-    ]) {
-      for (const row of rows(db.prepare(`SELECT DISTINCT month FROM ${table}`).all())) {
-        const month = text(row.month);
-        if (isMonth(month)) result.add(month);
-      }
-    }
-    return [...result].sort();
+    if (this.monthsCache) return [...this.monthsCache];
+    const result = rows(db.prepare(`
+      SELECT DISTINCT month
+      FROM (
+        SELECT month FROM cash_account_balances
+        UNION ALL SELECT month FROM investment_account_balances
+        UNION ALL SELECT month FROM transactions
+        UNION ALL SELECT month FROM fixed_assets
+        UNION ALL SELECT month FROM month_status
+      )
+      ORDER BY month
+    `).all())
+      .map((row) => text(row.month))
+      .filter(isMonth);
+    this.monthsCache = result;
+    return [...this.monthsCache];
+  }
+
+  savedMonths(db = this.db()): string[] {
+    return rows(db.prepare(
+      "SELECT month FROM month_status WHERE status='saved' ORDER BY month"
+    ).all()).map((row) => text(row.month)).filter(isMonth);
   }
 
   monthCreationPolicy(): MonthCreationPolicy {
@@ -333,6 +344,7 @@ export class AssetTrackRepository {
       this.monthWrites.createMonth(db, month);
       return this.monthWrites.ensureFixedAssetsInherited(db, month);
     });
+    this.monthsCache = null;
     const result = await this.getMonth(month);
     (result as MonthWorkspace & { inherited_fixed_assets?: number }).inherited_fixed_assets = inherited;
     return result;
@@ -342,21 +354,11 @@ export class AssetTrackRepository {
     const deletedRows = await this.manager.write((db) =>
       this.monthWrites.deleteMonth(db, month, expectedRevision)
     );
+    this.monthsCache = null;
     return { deleted: true, month, deleted_rows: deletedRows, months: this.getMonths() };
   }
 
-  private categoryRows(db = this.db()): CategoryDefinition[] {
-    const result = rows(db.prepare(`
-      SELECT d.*,
-        COUNT(DISTINCT t.id) AS transaction_count,
-        COUNT(DISTINCT r.id) AS rule_count,
-        GROUP_CONCAT(DISTINCT t.month) AS impact_months
-      FROM category_definitions d
-      LEFT JOIN transactions t ON t.category_key=d.category_key
-      LEFT JOIN auto_rules r ON r.category_key=d.category_key
-      GROUP BY d.category_key
-      ORDER BY d.sort_order,d.name
-    `).all());
+  private mapCategoryRows(result: Row[]): CategoryDefinition[] {
     return result.map((row) => ({
       category_key: text(row.category_key),
       name: text(row.name),
@@ -368,14 +370,22 @@ export class AssetTrackRepository {
       is_active: boolean(row.is_active),
       sort_order: Number(row.sort_order),
       description: text(row.description),
-      transaction_count: Number(row.transaction_count),
-      rule_count: Number(row.rule_count),
+      transaction_count: Number(row.transaction_count ?? 0),
+      rule_count: Number(row.rule_count ?? 0),
       impact_months: text(row.impact_months).split(",").filter(Boolean).sort()
     }));
   }
 
+  private categoryDefinitions(db = this.db()): CategoryDefinition[] {
+    return this.mapCategoryRows(rows(db.prepare(`
+      SELECT d.*
+      FROM category_definitions d
+      ORDER BY d.sort_order,d.name
+    `).all()));
+  }
+
   categories(db = this.db()): { revision: number; rows: CategoryDefinition[] } {
-    const result = this.categoryRows(db);
+    const result = this.categoryDefinitions(db);
     return { revision: contentRevision(result as unknown as Row[]), rows: result };
   }
 
@@ -508,9 +518,13 @@ export class AssetTrackRepository {
 
   async ensureFixedAssetsInherited(month: string): Promise<number> {
     if (!isMonth(month)) return 0;
-    return this.manager.write((db) =>
+    const current = this.monthStatus(this.db(), month);
+    if (Number(current?.fixed_assets_initialized ?? 0) || current?.status === "locked") return 0;
+    const inherited = await this.manager.write((db) =>
       this.monthWrites.ensureFixedAssetsInherited(db, month)
     );
+    this.monthsCache = null;
+    return inherited;
   }
 
   validateTransactionRows(month: string, input: Transaction[]): ValidationIssue[] {
@@ -555,6 +569,7 @@ export class AssetTrackRepository {
       );
       return nextRevision;
     });
+    this.monthsCache = null;
     const result = await this.getMonth(month);
     result.revision = revision;
     return result;
@@ -580,6 +595,7 @@ export class AssetTrackRepository {
       );
       return nextRevision;
     });
+    this.monthsCache = null;
     const result = await this.getMonth(month);
     result.revision = revision;
     return result;
@@ -665,7 +681,7 @@ export class AssetTrackRepository {
       SELECT id,transaction_date,type,category_key,category,counterparty,product,source,account_key,amount
       FROM transactions WHERE month=? ORDER BY id
     `).all(month)).map(transactionFromRow);
-    const categories = this.categoryRows(db);
+    const categories = this.categoryDefinitions(db);
     const debts = this.monthDebts(db, month);
     return {
       month,
@@ -686,6 +702,17 @@ export class AssetTrackRepository {
       ) as unknown as Record<string, unknown>,
       overview: this.analysis.monthOverview(db, month, transactions, categories)
     };
+  }
+
+  monthOverview(month: string): MonthOverview {
+    const db = this.db();
+    const transactions = rows(db.prepare(`
+      SELECT id,transaction_date,type,category_key,category,counterparty,product,
+             source,account_key,amount
+      FROM transactions WHERE month=? ORDER BY id
+    `).all(month)).map(transactionFromRow);
+    const categories = this.categoryDefinitions(db);
+    return this.analysis.monthOverview(db, month, transactions, categories);
   }
 
   rules(db = this.db()): { revision: number; rows: Row[] } {

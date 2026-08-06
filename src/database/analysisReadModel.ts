@@ -31,6 +31,11 @@ import {
   previousMonth,
   shiftMonth
 } from "../domain/dates";
+import {
+  createMonthReadWindow,
+  MONTHLY_ANALYSIS_MONTHS,
+  sampleMonths
+} from "../domain/readWindows";
 import { roundHalfEven, sum } from "../domain/money";
 import { RepositoryValidationError, type Row, rows, text, fixedAssetFromRow, transactionFromRow } from "./repositoryPrimitives";
 
@@ -38,7 +43,7 @@ export interface AnalysisReadContext {
   readonly largeExpenseThreshold: number;
   readonly reconciliationTolerance: number;
   getMonths(db: DatabaseSync): string[];
-  categoryRows(db: DatabaseSync): CategoryDefinition[];
+  categoryDefinitions(db: DatabaseSync): CategoryDefinition[];
   cashAccounts(db: DatabaseSync, month: string): CashAccountBalance[];
   investmentAccounts(db: DatabaseSync, month: string): InvestmentAccountBalance[];
 }
@@ -46,52 +51,99 @@ export interface AnalysisReadContext {
 export class AnalysisReadModel {
   constructor(private readonly context: AnalysisReadContext) {}
 
+  private transactionsByMonth(
+    db: DatabaseSync,
+    months: string[],
+    knownTransactions: Map<string, Transaction[]> = new Map()
+  ): Map<string, Transaction[]> {
+    const orderedMonths = [...new Set(months)].sort();
+    const grouped = new Map<string, Transaction[]>(orderedMonths.map((month) => {
+      const known = knownTransactions.get(month);
+      return [month, known ? [...known] : []];
+    }));
+    const missingMonths = orderedMonths.filter((month) => !knownTransactions.has(month));
+    if (!missingMonths.length) return grouped;
+    const placeholders = missingMonths.map(() => "?").join(",");
+    for (const row of rows(db.prepare(
+      `SELECT id,month,transaction_date,type,category_key,category,counterparty,
+              product,source,account_key,amount
+       FROM transactions WHERE month IN (${placeholders}) ORDER BY month,id`
+    ).all(...missingMonths))) {
+      const month = text(row.month);
+      grouped.get(month)?.push(transactionFromRow(row));
+    }
+    return grouped;
+  }
+
   private monthlyByMonth(
     db: DatabaseSync,
-    categories: CategoryDefinition[]
+    categories: CategoryDefinition[],
+    months: string[],
+    knownTransactions: Map<string, Transaction[]> = new Map()
   ): Map<string, MonthlyCalculation> {
-    const grouped = new Map<string, Transaction[]>();
-    for (const row of rows(db.prepare(
-      "SELECT * FROM transactions ORDER BY month,id"
-    ).all())) {
-      const month = text(row.month);
-      const group = grouped.get(month) ?? [];
-      group.push(transactionFromRow(row));
-      grouped.set(month, group);
-    }
-    return new Map([...grouped].map(([month, values]) => [
+    const orderedMonths = [...new Set(months)].sort();
+    if (!orderedMonths.length) return new Map();
+    const grouped = this.transactionsByMonth(db, orderedMonths, knownTransactions);
+    return new Map([...orderedMonths].map((month) => [
       month,
-      calculateMonthly(values, categories, this.context.largeExpenseThreshold)
+      calculateMonthly(grouped.get(month) ?? [], categories, this.context.largeExpenseThreshold)
     ]));
   }
 
-  private activeDebt(db: DatabaseSync, month: string): number {
-    const end = monthEnd(month);
-    return sum(rows(db.prepare(`
-      SELECT amount FROM debt_manager
+  private activeDebtByMonth(
+    db: DatabaseSync,
+    months: string[]
+  ): Map<string, number> {
+    const orderedMonths = [...new Set(months)].sort();
+    if (!orderedMonths.length) return new Map();
+    const latestEnd = monthEnd(orderedMonths.at(-1)!);
+    const debts = rows(db.prepare(`
+      SELECT amount,start_date,is_paid,paid_date
+      FROM debt_manager
       WHERE REPLACE(start_date,'/','-')<=?
-        AND (is_paid=0 OR REPLACE(paid_date,'/','-')>?)
-    `).all(end, end)).map((row) => Number(row.amount ?? 0)));
+    `).all(latestEnd));
+    return new Map(orderedMonths.map((month) => {
+      const end = monthEnd(month);
+      const total = sum(debts
+        .filter((row) =>
+          String(row.start_date).replaceAll("/", "-") <= end
+          && (
+            Number(row.is_paid ?? 0) === 0
+            || Boolean(row.paid_date)
+              && String(row.paid_date).replaceAll("/", "-") > end
+          )
+        )
+        .map((row) => Number(row.amount ?? 0)));
+      return [month, total];
+    }));
   }
 
-  private annualRows(db: DatabaseSync): ExtendedAnnualRow[] {
-    const categories = this.context.categoryRows(db);
-    const monthly = this.monthlyByMonth(db, categories);
+  private annualRows(
+    db: DatabaseSync,
+    months: string[],
+    categories = this.context.categoryDefinitions(db),
+    knownTransactions: Map<string, Transaction[]> = new Map()
+  ): ExtendedAnnualRow[] {
+    const orderedMonths = [...new Set(months)].sort();
+    if (!orderedMonths.length) return [];
+    const placeholders = orderedMonths.map(() => "?").join(",");
+    const monthly = this.monthlyByMonth(db, categories, orderedMonths, knownTransactions);
+    const debts = this.activeDebtByMonth(db, orderedMonths);
     const cash = new Map(rows(db.prepare(`
       SELECT month,SUM(balance) AS total
-      FROM cash_account_balances GROUP BY month
-    `).all()).map((row) => [text(row.month), Number(row.total ?? 0)]));
+      FROM cash_account_balances WHERE month IN (${placeholders}) GROUP BY month
+    `).all(...orderedMonths)).map((row) => [text(row.month), Number(row.total ?? 0)]));
     const investments = new Map(rows(db.prepare(`
       SELECT month,SUM(principal) AS principal,SUM(market_value) AS market_value,
              SUM(cash_balance) AS cash_balance
-      FROM investment_account_balances GROUP BY month
-    `).all()).map((row) => [text(row.month), row]));
-    return buildAnnualRows(this.context.getMonths(db).map((month) => {
+      FROM investment_account_balances WHERE month IN (${placeholders}) GROUP BY month
+    `).all(...orderedMonths)).map((row) => [text(row.month), row]));
+    return buildAnnualRows(orderedMonths.map((month) => {
       const investment = investments.get(month);
       return {
         month,
         cash: cash.get(month) ?? 0,
-        debt: this.activeDebt(db, month),
+        debt: debts.get(month) ?? 0,
         principal: Number(investment?.principal ?? 0),
         market_value: Number(investment?.market_value ?? 0),
         investment_cash: Number(investment?.cash_balance ?? 0),
@@ -102,15 +154,11 @@ export class AnalysisReadModel {
   }
 
   private anomalyRows(
-    db: DatabaseSync,
     month: string,
     current: Transaction[],
+    history: Array<Transaction & { month: string }>,
     categories: CategoryDefinition[]
   ): MonthOverview["anomalies"] {
-    const history = rows(db.prepare(`
-      SELECT month,type,category,counterparty,product,amount FROM transactions
-      WHERE month>=? AND month<? ORDER BY month,id
-    `).all(shiftMonth(month, -12), month));
     const currentExpense = current.filter((row) => row.type === "支出");
     const currentByCategory = new Map<string, number>();
     currentExpense.forEach((row) => {
@@ -130,15 +178,15 @@ export class AnalysisReadModel {
     for (const window of [1, 3]) {
       const months = previousMonths(month, window);
       const selected = history.filter(
-        (row) => row.type === "支出" && months.includes(text(row.month))
+        (row) => row.type === "支出" && months.includes(row.month)
       );
       if (!selected.length) continue;
       const monthCategory = new Map<string, Map<string, number>>();
       months.forEach((value) => monthCategory.set(value, new Map()));
       selected.forEach((row) => {
-        const values = monthCategory.get(text(row.month))!;
-        const category = text(row.category);
-        values.set(category, (values.get(category) ?? 0) + Number(row.amount ?? 0));
+        const values = monthCategory.get(row.month)!;
+        const category = row.category;
+        values.set(category, (values.get(category) ?? 0) + row.amount);
       });
       const allCategories = new Set(currentByCategory.keys());
       monthCategory.forEach((values) => values.forEach((_amount, category) => allCategories.add(category)));
@@ -189,7 +237,7 @@ export class AnalysisReadModel {
       String(left["对比口径"]).localeCompare(String(right["对比口径"]))
       || Math.abs(Number(right["增减金额"])) - Math.abs(Number(left["增减金额"]))
     );
-    const historyProducts = new Set(history.map((row) => text(row.product)));
+    const historyProducts = new Set(history.map((row) => row.product));
     const products = new Map<string, { category: string; amount: number }>();
     currentExpense.forEach((row) => {
       const existing = products.get(row.product) ?? { category: row.category, amount: 0 };
@@ -222,7 +270,16 @@ export class AnalysisReadModel {
     transactions: Transaction[],
     categories: CategoryDefinition[]
   ): MonthOverview {
-    const allRows = this.annualRows(db);
+    const windowFrom = shiftMonth(month, -(MONTHLY_ANALYSIS_MONTHS - 1));
+    const analysisMonths = this.context.getMonths(db)
+      .filter((candidate) => candidate >= windowFrom && candidate <= month);
+    if (!analysisMonths.includes(month)) analysisMonths.push(month);
+    const transactionRows = this.transactionsByMonth(
+      db,
+      analysisMonths,
+      new Map([[month, transactions]])
+    );
+    const allRows = this.annualRows(db, analysisMonths, categories, transactionRows);
     const rowIndex = allRows.findIndex((row) => row.month === month);
     if (rowIndex < 0) return { available: false };
     const row = allRows[rowIndex];
@@ -244,31 +301,25 @@ export class AnalysisReadModel {
     const flowAdjustedPrincipal = principal - aggregateDeposit + aggregateWithdraw;
     const previous = rowIndex > 0 ? allRows[rowIndex - 1] : null;
     const previousValue = previousMonth(month);
-    const previousTransactions = previousValue
-      ? rows(db.prepare(
-        "SELECT * FROM transactions WHERE month=? ORDER BY id"
-      ).all(previousValue)).map(transactionFromRow)
+    let previousTransactions = previousValue
+      ? transactionRows.get(previousValue) ?? []
       : [];
+    if (previousValue && !transactionRows.has(previousValue)) {
+      previousTransactions = this.transactionsByMonth(db, [previousValue]).get(previousValue) ?? [];
+    }
     const previousMonthly = calculateMonthly(
       previousTransactions,
       categories,
       this.context.largeExpenseThreshold
     );
-    const previousInvestment = previousValue
-      ? db.prepare(`
-          SELECT COUNT(*) AS count,
-                 COALESCE(SUM(market_value),0) + COALESCE(SUM(cash_balance),0)
-                   AS position
-          FROM investment_account_balances WHERE month=?
-        `).get(previousValue) as Row
-      : null;
-    const previousPosition = previousInvestment
-      && Number(previousInvestment.count) > 0
-      ? Number(previousInvestment.position ?? 0)
-      : null;
     const previousInvestmentAccounts = previousValue
       ? this.context.investmentAccounts(db, previousValue)
       : [];
+    const previousPosition = previousInvestmentAccounts.length
+      ? sum(previousInvestmentAccounts.map((account) =>
+          account.market_value + account.cash_balance
+        ))
+      : null;
     const previousInvestmentByKey = new Map(
       previousInvestmentAccounts.map((account) => [account.account_key, account])
     );
@@ -356,6 +407,7 @@ export class AnalysisReadModel {
     const surplus = row.total_income - row.total_expense;
     return {
       available: true,
+      analysis_window: createMonthReadWindow("analysis", windowFrom, month),
       metrics: {
         asset_delta: row.asset_delta,
         total_income: row.total_income,
@@ -418,7 +470,16 @@ export class AnalysisReadModel {
           this.context.reconciliationTolerance
         )
       },
-      anomalies: this.anomalyRows(db, month, transactions, categories),
+      anomalies: this.anomalyRows(
+        month,
+        transactions,
+        [...transactionRows.entries()]
+          .filter(([candidate]) => candidate < month)
+          .flatMap(([candidate, rowsForMonth]) =>
+            rowsForMonth.map((row) => ({ ...row, month: candidate }))
+          ),
+        categories
+      ),
       structure: {
         necessary,
         controlled,
@@ -451,38 +512,44 @@ export class AnalysisReadModel {
   }
 
   private annualCostAudit(
-    db: DatabaseSync,
     year: string,
     annualRows: ExtendedAnnualRow[],
-    categories: CategoryDefinition[]
+    categories: CategoryDefinition[],
+    transactionsByMonth: Map<string, Transaction[]>
   ): AnnualCostAudit {
     const metadata = new Map(categories.map((row) => [row.name, row]));
-    const expenses = rows(db.prepare(`
-      SELECT month,category,product,amount FROM transactions
-      WHERE month LIKE ? AND type='支出' ORDER BY month,id
-    `).all(`${year}-%`));
+    const expenses = [...transactionsByMonth.entries()]
+      .filter(([month]) => month.startsWith(year))
+      .flatMap(([month, transactions]) => transactions
+        .filter((row) => row.type === "支出")
+        .map((row) => ({
+          month,
+          category: row.category,
+          product: row.product,
+          amount: row.amount
+        })));
     const monthsCount = Math.max(1, new Set(annualRows.map((row) => row.month)).size);
-    const total = sum(expenses.map((row) => Number(row.amount ?? 0)));
+    const total = sum(expenses.map((row) => row.amount));
     const byCategory = new Map<string, number>();
     const byPattern = new Map<string, number>();
     expenses.forEach((row) => {
-      const category = text(row.category);
-      const amount = Number(row.amount ?? 0);
+      const category = row.category;
+      const amount = row.amount;
       byCategory.set(category, (byCategory.get(category) ?? 0) + amount);
       const pattern = metadata.get(category)?.pattern ?? "偶尔";
       byPattern.set(pattern, (byPattern.get(pattern) ?? 0) + amount);
     });
     const necessaryTotal = sum(expenses.filter(
-      (row) => metadata.get(text(row.category))?.necessity === "必要"
-    ).map((row) => Number(row.amount ?? 0)));
+      (row) => metadata.get(row.category)?.necessity === "必要"
+    ).map((row) => row.amount));
     const controlledTotal = sum(expenses.filter(
-      (row) => metadata.get(text(row.category))?.necessity === "可控"
-    ).map((row) => Number(row.amount ?? 0)));
+      (row) => metadata.get(row.category)?.necessity === "可控"
+    ).map((row) => row.amount));
     const productSummary = (category: string, divisor: number) => {
       const grouped = new Map<string, number>();
-      expenses.filter((row) => text(row.category) === category).forEach((row) => {
-        const product = text(row.product);
-        grouped.set(product, (grouped.get(product) ?? 0) + Number(row.amount ?? 0));
+      expenses.filter((row) => row.category === category).forEach((row) => {
+        const product = row.product;
+        grouped.set(product, (grouped.get(product) ?? 0) + row.amount);
       });
       return [...grouped].sort((left, right) => right[1] - left[1]).slice(0, 10)
         .map(([product, amount]) => ({
@@ -522,14 +589,14 @@ export class AnalysisReadModel {
           };
         }),
       big_tickets: expenses.filter((row) => {
-        const category = text(row.category);
+        const category = row.category;
         return metadata.get(category)?.is_big_ticket
-          || Number(row.amount ?? 0) >= this.context.largeExpenseThreshold;
+          || row.amount >= this.context.largeExpenseThreshold;
       }).map((row) => ({
-        month: text(row.month),
-        product: text(row.product),
-        category: text(row.category),
-        amount: roundHalfEven(Number(row.amount ?? 0))
+        month: row.month,
+        product: row.product,
+        category: row.category,
+        amount: roundHalfEven(row.amount)
       })).sort((left, right) => right.amount - left.amount),
       subscriptions: productSummary("订阅服务", 12),
       daily_essentials: productSummary("日常必需", monthsCount)
@@ -540,9 +607,9 @@ export class AnalysisReadModel {
     if (!/^\d{4}$/.test(year)) {
       throw new RepositoryValidationError({ code: "analysis.year_invalid", params: { year } });
     }
-    const full = this.annualRows(db);
-    const annual = full.filter((row) => row.month.startsWith(year));
-    if (!annual.length) {
+    const availableMonths = this.context.getMonths(db).sort();
+    const annualMonths = availableMonths.filter((month) => month.startsWith(year));
+    if (!annualMonths.length) {
       return {
         year,
         months: [],
@@ -573,11 +640,37 @@ export class AnalysisReadModel {
         }
       };
     }
+    const latestMonth = annualMonths.at(-1)!;
+    const rollingStart = shiftMonth(latestMonth, -11);
+    const rollingMonths = availableMonths.filter(
+      (month) => month >= rollingStart && month <= latestMonth
+    );
+    const trendMonths = sampleMonths(availableMonths);
+    const requiredMonths = new Set<string>([
+      ...annualMonths,
+      ...rollingMonths,
+      ...trendMonths
+    ]);
+    const baseline = previousMonth(annualMonths[0]);
+    if (baseline && availableMonths.includes(baseline)) requiredMonths.add(baseline);
+    const categories = this.context.categoryDefinitions(db);
+    const requiredMonthList = [...requiredMonths];
+    const transactionsByMonth = this.transactionsByMonth(db, requiredMonthList);
+    const full = this.annualRows(
+      db,
+      requiredMonthList,
+      categories,
+      transactionsByMonth
+    );
+    const annualRows = full.filter((row) => row.month.startsWith(year));
+    const annual = annualRows;
     const totalIncome = sum(annual.map((row) => row.total_income));
     const totalExpense = sum(annual.map((row) => row.total_expense));
     const savings = roundHalfEven(totalIncome - totalExpense);
     const latest = annual.at(-1)!;
-    const rollingStart = shiftMonth(latest.month, -11);
+    const rollingRows = full.filter(
+      (row) => row.month >= rollingStart && row.month <= latestMonth
+    );
     const annualFixedAssets = new Map<string, AnnualFixedAsset>();
     for (const row of rows(db.prepare(`
       SELECT * FROM fixed_assets
@@ -594,8 +687,8 @@ export class AnalysisReadModel {
     }
     return {
       year,
-      months: annual.map((row) => row.month),
-      rows: annual,
+      months: annualRows.map((row) => row.month),
+      rows: annualRows,
       metrics: {
         total_income: totalIncome,
         total_expense: totalExpense,
@@ -604,20 +697,23 @@ export class AnalysisReadModel {
           ? roundHalfEven(savings / totalIncome * 100, 1) : 0
       },
       latest,
-      rolling_rows: full.filter(
-        (row) => row.month >= rollingStart && row.month <= latest.month
+      rolling_rows: rollingRows,
+      recurring_expenses: this.recurringExpenses(
+        latest.month,
+        rollingMonths,
+        categories,
+        transactionsByMonth
       ),
-      recurring_expenses: this.recurringExpenses(db, latest.month),
       fixed_assets: [...annualFixedAssets.values()].sort((left, right) =>
         left.asset_name.localeCompare(right.asset_name)
         || left.last_seen_month.localeCompare(right.last_seen_month)
       ),
-      all_trend_rows: full,
+      all_trend_rows: full.filter((row) => trendMonths.includes(row.month)),
       cost_audit: this.annualCostAudit(
-        db,
         year,
         annual,
-        this.context.categoryRows(db)
+        categories,
+        transactionsByMonth
       )
     };
   }
@@ -637,18 +733,16 @@ export class AnalysisReadModel {
       SELECT COALESCE(SUM(balance),0) AS total
       FROM cash_account_balances WHERE month=?
     `).get(latest) as Row).total ?? 0);
-    const principal = Number((db.prepare(`
-      SELECT COALESCE(SUM(principal),0) AS total
-      FROM investment_account_balances WHERE month=?
-    `).get(latest) as Row).total ?? 0);
     const investment = db.prepare(`
-      SELECT COALESCE(SUM(market_value),0) AS market_value,
+      SELECT COALESCE(SUM(principal),0) AS principal,
+             COALESCE(SUM(market_value),0) AS market_value,
              COALESCE(SUM(cash_balance),0) AS cash_balance
       FROM investment_account_balances WHERE month=?
     `).get(latest) as Row;
+    const principal = Number(investment.principal ?? 0);
     const marketValue = Number(investment.market_value ?? 0);
     const investmentCash = Number(investment.cash_balance ?? 0);
-    const debt = this.activeDebt(db, latest);
+    const debt = this.activeDebtByMonth(db, [latest]).get(latest) ?? 0;
     const costAssets = roundHalfEven(cash - debt + principal);
     const marketNetAssets = roundHalfEven(cash - debt + marketValue + investmentCash);
     return {
@@ -670,11 +764,17 @@ export class AnalysisReadModel {
   }
 
   private recurringExpenses(
-    db: DatabaseSync,
-    latestMonth: string
+    latestMonth: string,
+    selectedMonths: string[],
+    categories: CategoryDefinition[],
+    transactionsByMonth: Map<string, Transaction[]>
   ): RecurringExpenseSummary[] {
-    const selectedMonths = new Set(
-      this.context.getMonths(db).filter((month) => month <= latestMonth).slice(-12)
+    const selected = new Set(selectedMonths.filter((month) => month <= latestMonth));
+    if (!selected.size) return [];
+    const periodicCategories = new Map(
+      categories
+        .filter((category) => category.pattern === "周期")
+        .map((category) => [category.category_key, category.name])
     );
     const result = new Map<string, {
       category: string;
@@ -684,33 +784,41 @@ export class AnalysisReadModel {
       latestAmount: number;
       lastDate: string;
     }>();
-    rows(db.prepare(`
-      SELECT t.month,t.transaction_date,t.category,t.product,t.amount
-      FROM transactions t
-      JOIN category_definitions c ON c.category_key=t.category_key
-      WHERE t.type='支出' AND c.pattern='周期'
-      ORDER BY t.transaction_date,t.id
-    `).all()).filter((row) => selectedMonths.has(text(row.month))).forEach((row) => {
-      const product = text(row.product);
-      const current = result.get(product) ?? {
-        category: text(row.category),
-        months: new Set<string>(),
-        count: 0,
-        total: 0,
-        latestAmount: 0,
-        lastDate: ""
-      };
-      current.months.add(text(row.month));
-      current.count += 1;
-      current.total += Number(row.amount ?? 0);
-      const date = text(row.transaction_date) || `${text(row.month)}-01`;
-      if (date >= current.lastDate) {
-        current.lastDate = date;
-        current.latestAmount = Number(row.amount ?? 0);
-        current.category = text(row.category);
-      }
-      result.set(product, current);
-    });
+    [...transactionsByMonth.entries()]
+      .filter(([month]) => selected.has(month))
+      .flatMap(([month, transactions]) => transactions
+        .filter((transaction) =>
+          transaction.type === "支出"
+          && periodicCategories.has(transaction.category_key ?? "")
+        )
+        .map((transaction) => ({ month, transaction })))
+      .sort((left, right) =>
+        left.transaction.transaction_date.localeCompare(right.transaction.transaction_date)
+        || left.month.localeCompare(right.month)
+      )
+      .forEach(({ month, transaction }) => {
+        const product = transaction.product;
+        const category = periodicCategories.get(transaction.category_key ?? "")
+          ?? transaction.category;
+        const current = result.get(product) ?? {
+          category,
+          months: new Set<string>(),
+          count: 0,
+          total: 0,
+          latestAmount: 0,
+          lastDate: ""
+        };
+        current.months.add(month);
+        current.count += 1;
+        current.total += transaction.amount;
+        const date = transaction.transaction_date || `${month}-01`;
+        if (date >= current.lastDate) {
+          current.lastDate = date;
+          current.latestAmount = transaction.amount;
+          current.category = category;
+        }
+        result.set(product, current);
+      });
     return [...result].map(([product, row]) => ({
       product,
       category: row.category,

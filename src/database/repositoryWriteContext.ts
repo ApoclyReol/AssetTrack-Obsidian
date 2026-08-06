@@ -23,7 +23,7 @@ export interface MonthWriteDependencies {
   ): number;
   getMonths(db: DatabaseSync): string[];
   getRevision(month: string, db: DatabaseSync): number;
-  categoryRows(db: DatabaseSync): CategoryDefinition[];
+  categoryDefinitions(db: DatabaseSync): CategoryDefinition[];
   debts(db: DatabaseSync): { revision: number; rows: DebtRecord[] };
   monthDebts(db: DatabaseSync, month: string): {
     revision: number;
@@ -33,14 +33,14 @@ export interface MonthWriteDependencies {
 }
 
 export interface ConfigurationWriteDependencies {
-  categoryRows(db: DatabaseSync): CategoryDefinition[];
+  categoryDefinitions(db: DatabaseSync): CategoryDefinition[];
   categories(db: DatabaseSync): { revision: number; rows: CategoryDefinition[] };
   accounts(db: DatabaseSync): { revision: number; rows: AccountDefinition[] };
   rules(db: DatabaseSync): { revision: number; rows: Row[] };
 }
 
 export interface HistoryWriteDependencies {
-  categoryRows(db: DatabaseSync): CategoryDefinition[];
+  categoryDefinitions(db: DatabaseSync): CategoryDefinition[];
   normalizedRuleRows(db: DatabaseSync): ReturnType<RuleHistoryReadModel["normalizedRuleRows"]>;
   historicalCategoryCounts(group: Row[], categories: CategoryDefinition[]): HistoricalCategoryCount[];
   getRevision(month: string, db: DatabaseSync): number;

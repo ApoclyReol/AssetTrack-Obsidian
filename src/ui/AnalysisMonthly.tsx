@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import {
   Bar,
   ComposedChart,
@@ -14,9 +13,8 @@ import type {
   InvestmentAccountAnalysis
 } from "../types/configuration";
 import type {
-  MonthWorkspace
+  MonthOverview
 } from "../types/month";
-import type { AnalysisPort } from "../services/ports";
 import {
   buildAnomalyDisplayRows,
   changeTone,
@@ -41,31 +39,17 @@ import {
 } from "./AnalysisPrimitives";
 
 export function MonthlyAnalysis({
-  api,
   month,
-  dataVersion,
+  state,
   reconciliationTolerance
 }: {
-  api: AnalysisPort;
   month: string;
-  dataVersion: number;
+  state: LoadState<MonthOverview>;
   reconciliationTolerance: number;
 }) {
-  const [state, setState] = useState<LoadState<MonthWorkspace>>({ kind: "loading" });
-  useEffect(() => {
-    let active = true;
-    setState({ kind: "loading" });
-    void api.month(month)
-      .then((data) => active && setState({ kind: "ready", data }))
-      .catch((error) => active && setState({
-        kind: "error",
-        message: displayError(error)
-      }));
-    return () => { active = false; };
-  }, [api, dataVersion, month]);
   if (state.kind === "loading") return <Empty text={t(`正在加载 ${month} 月度分析…`, `Loading ${month} monthly analysis…`)} />;
   if (state.kind === "error") return <Empty text={state.message} />;
-  const overview = state.data.overview;
+  const overview = state.data;
   if (!overview.available || !overview.metrics) return <Empty text={t(`${month} 暂无可分析数据。`, `No analyzable data is available for ${month}.`)} />;
   const structure = overview.structure;
   const necessity = structure
@@ -302,7 +286,7 @@ function BigTicketPanel({
 function AnomalyPanel({
   anomalies
 }: {
-  anomalies: MonthWorkspace["overview"]["anomalies"];
+  anomalies: MonthOverview["anomalies"];
 }) {
   const rows = buildAnomalyDisplayRows(anomalies);
   return (

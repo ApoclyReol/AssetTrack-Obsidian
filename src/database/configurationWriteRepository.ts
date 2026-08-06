@@ -201,7 +201,7 @@ export class ConfigurationWriteRepository {
   }
 
   private writeRules(db: DatabaseSync, input: Row[]): void {
-    const categories = this.context.categoryRows(db);
+    const categories = this.context.categoryDefinitions(db);
     const byKey = new Map(categories.map((row) => [row.category_key, row]));
     const byName = new Map(categories.map((row) => [row.name, row]));
     const existingRows = rows(db.prepare("SELECT id FROM auto_rules").all());

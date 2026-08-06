@@ -20,8 +20,8 @@ export function queryFromFilters(
   if (filters.issue_filter) query.issue_filter = filters.issue_filter;
   if (filters.product_search.trim()) query.product_search = filters.product_search.trim();
   if (filters.counterparty_search.trim()) query.counterparty_search = filters.counterparty_search.trim();
-  if (filters.from_month) query.from_month = filters.from_month;
-  if (filters.to_month) query.to_month = filters.to_month;
+  if (filters.from_date) query.from_date = filters.from_date;
+  if (filters.to_date) query.to_date = filters.to_date;
   const minimum = Number(filters.min_occurrences);
   if (filters.min_occurrences.trim() && Number.isFinite(minimum) && minimum >= 1) {
     query.min_occurrences = Math.trunc(minimum);
@@ -43,8 +43,8 @@ export function initialFilters(
     issue_filter: initialQuery?.issue_filter ?? defaultIssueFilter,
     product_search: initialQuery?.product_search ?? "",
     counterparty_search: initialQuery?.counterparty_search ?? "",
-    from_month: initialQuery?.from_month ?? "",
-    to_month: initialQuery?.to_month ?? "",
+    from_date: initialQuery?.from_date ?? "",
+    to_date: initialQuery?.to_date ?? "",
     min_occurrences: initialQuery?.min_occurrences === undefined
       ? ""
       : String(initialQuery.min_occurrences)

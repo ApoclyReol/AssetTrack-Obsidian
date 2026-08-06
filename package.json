@@ -11,6 +11,7 @@
     "notices:update": "node scripts/third-party-notices.mjs",
     "release:check": "node scripts/validate-release.mjs",
     "test": "vitest run",
+    "test:perf": "vitest run tests/plugin/sqliteSpike.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Bar,
   CartesianGrid,
@@ -14,8 +14,7 @@ import {
 import type {
   AnnualOverview
 } from "../types/analysis";
-import type { AnalysisPort } from "../services/ports";
-import { businessLabel, displayError, getLocale, t } from "../i18n";
+import { businessLabel, getLocale, t } from "../i18n";
 import { money } from "../domain/moneyFormat";
 import { sampleAnnualRows } from "./analysisModel";
 import { StaticTableHeader } from "./TablePrimitives";
@@ -27,7 +26,6 @@ import {
   Empty,
   GOLD,
   INFLOW,
-  LoadState,
   OUTFLOW,
   percent,
   PURPLE,
@@ -35,31 +33,18 @@ import {
   tooltipMoney,
   tooltipPercent
 } from "./AnalysisPrimitives";
+import type { LoadState } from "./AnalysisPrimitives";
 
 export function AnnualAnalysis({
-  api,
   year,
-  dataVersion
+  state
 }: {
-  api: AnalysisPort;
   year: string;
-  dataVersion: number;
+  state: LoadState<AnnualOverview>;
 }) {
-  const [state, setState] = useState<LoadState<AnnualOverview>>({ kind: "loading" });
   const [recurringSort, setRecurringSort] = useState<
     "product" | "total" | "last_date"
   >("total");
-  useEffect(() => {
-    let active = true;
-    setState({ kind: "loading" });
-    void api.annual(year)
-      .then((data) => active && setState({ kind: "ready", data }))
-      .catch((error) => active && setState({
-        kind: "error",
-        message: displayError(error)
-      }));
-    return () => { active = false; };
-  }, [api, dataVersion, year]);
   if (state.kind === "loading") return <Empty text={t(`正在加载 ${year} 年度分析…`, `Loading ${year} annual analysis…`)} />;
   if (state.kind === "error") return <Empty text={state.message} />;
   const data = state.data;

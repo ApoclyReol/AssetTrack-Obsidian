@@ -148,14 +148,13 @@ export function useMonthEditorSession({
   const load = useCallback(async () => {
     setState({ kind: "pending", message: t("加载月份…", "Loading month…") });
     try {
-      const [data, categoryData, ruleData] = await Promise.all([
+      const [data, ruleData] = await Promise.all([
         api.month(month),
-        api.categories(),
         api.ruleWorkspaceShell()
       ]);
       const validation = await api.validateTransactions(month, data.transactions);
       dispatchDraft({ type: "reset", workspace: clone(data) });
-      setCategories(categoryData.rows);
+      setCategories(ruleData.categories);
       setRules(ruleData.rules);
       setRulesRevision(ruleData.rules_revision);
       setIssues(validation.issues);
@@ -187,11 +186,10 @@ export function useMonthEditorSession({
     new Notice(t("未保存月份草稿已恢复。", "The unsaved month draft was restored."));
     void Promise.all([
       api.month(month),
-      api.categories(),
       api.ruleWorkspaceShell()
     ])
-      .then(([current, categoryData, ruleData]) => {
-        setCategories(categoryData.rows);
+      .then(([current, ruleData]) => {
+        setCategories(ruleData.categories);
         setRules(ruleData.rules);
         setRulesRevision(ruleData.rules_revision);
         if (current.revision !== restored.workspace.revision) {
@@ -271,8 +269,8 @@ export function useMonthEditorSession({
         next.investment_accounts = current.investment_accounts;
       } else if (activeSection === "transactions") {
         next.transactions = current.transactions;
-        const categoryData = await api.categories();
-        setCategories(categoryData.rows);
+        const ruleData = await api.ruleWorkspaceShell();
+        setCategories(ruleData.categories);
         const validation = await api.validateTransactions(month, current.transactions);
         nextIssues = validation.issues;
       } else if (activeSection === "debts") {

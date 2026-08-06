@@ -3,6 +3,7 @@ import type {
   HistoricalProductStat,
   RuleMatchExplanation
 } from "./rules";
+import type { ReadWindow } from "./readWindows";
 
 export type ProductHistoryIssueFilter =
   | "conflict"
@@ -21,8 +22,8 @@ export interface ProductHistoryQuery {
   product_search?: string;
   counterparty_search?: string;
   issue_filter?: ProductHistoryIssueFilter;
-  from_month?: string;
-  to_month?: string;
+  from_date?: string;
+  to_date?: string;
   min_occurrences?: number;
 }
 
@@ -30,6 +31,7 @@ export interface ProductHistoryIndexResult {
   group_by?: "product" | "counterparty";
   categories_revision: number;
   rules_revision: number;
+  scope?: ReadWindow | null;
   groups: HistoricalProductStat[];
 }
 
@@ -48,6 +50,7 @@ export interface ProductHistoryTransaction {
 }
 
 export interface ProductHistoryResult {
+  scope?: ReadWindow | null;
   groups: HistoricalProductStat[];
   rows: ProductHistoryTransaction[];
 }

@@ -23,7 +23,10 @@ import {
   type RuleRow
 } from "../domain/rules";
 import { roundHalfEven } from "../domain/money";
+import { recentMonthReadWindow, SYSTEM_CHECK_MONTHS } from "../domain/readWindows";
 import { buildRuleReport } from "./ruleReporting";
+import { transactionWindowPredicate } from "./readWindowSql";
+import type { ReadWindow } from "../types/readWindows";
 import {
   contentRevision,
   RepositoryValidationError,
@@ -34,36 +37,47 @@ import {
 } from "./repositoryPrimitives";
 
 export interface RuleReportReadContext {
-  categoryRows(db: DatabaseSync): CategoryDefinition[];
+  categoryDefinitions(db: DatabaseSync): CategoryDefinition[];
   categories(db: DatabaseSync): { revision: number; rows: CategoryDefinition[] };
+  savedMonths(db: DatabaseSync): string[];
   getRevision(month: string, db: DatabaseSync): number;
 }
 
 export class RuleReportReadModel {
   constructor(private readonly context: RuleReportReadContext) {}
 
-  rules(db: DatabaseSync): { revision: number; rows: Row[] } {
+  rules(
+    db: DatabaseSync,
+    window: ReadWindow | null = this.defaultWindow(db),
+    knownTransactions?: Row[]
+  ): { revision: number; rows: Row[] } {
     const raw = rows(db.prepare(`
       SELECT r.*,d.is_active AS category_active
       FROM auto_rules r
       LEFT JOIN category_definitions d ON d.category_key=r.category_key
       ORDER BY r.id
     `).all());
-    const transactions = rows(db.prepare(`
+    const windowPredicate = window ? transactionWindowPredicate(window) : null;
+    const transactions = knownTransactions ?? (window && windowPredicate ? rows(db.prepare(`
       SELECT t.month,t.transaction_date,t.type,t.counterparty,t.product FROM transactions t
       JOIN month_status m ON m.month=t.month AND m.status='saved'
       WHERE t.type IN ('支出','收入')
-    `).all());
+        AND ${windowPredicate.sql}
+    `).all(...windowPredicate.parameters)) : []);
     return buildRuleReport(raw, transactions);
   }
 
-  normalizedRuleRows(db: DatabaseSync): {
+  normalizedRuleRows(
+    db: DatabaseSync,
+    window: ReadWindow | null = this.defaultWindow(db),
+    knownTransactions?: Row[]
+  ): {
     data: ReturnType<RuleReportReadModel["rules"]>;
     rows: RuleRow[];
     matcher: RuleMatcher;
     statusById: Map<number, string>;
   } {
-    const data = this.rules(db);
+    const data = this.rules(db, window, knownTransactions);
     const ruleRows = data.rows.map((row) => ({
       id: Number(row.id),
       transaction_type: text(row.transaction_type),
@@ -117,8 +131,9 @@ export class RuleReportReadModel {
   }
 
   ruleImpactPreview(db: DatabaseSync, rule: RuleRow): RuleImpactPreview {
-    const ruleData = this.normalizedRuleRows(db);
-    const categories = this.context.categoryRows(db);
+    const window = this.defaultWindow(db);
+    const ruleData = this.normalizedRuleRows(db, window, []);
+    const categories = this.context.categoryDefinitions(db);
     const category = categories.find((item) => item.category_key === text(rule.category_key));
     const normalized = normalizeRuleDefinition({
       ...rule,
@@ -172,13 +187,14 @@ export class RuleReportReadModel {
         higher_priority_rule_count: 0
       };
     }
-    const historyRows = rows(db.prepare(`
+    const historyWindow = window ? transactionWindowPredicate(window) : null;
+    const historyRows = window && historyWindow ? rows(db.prepare(`
       SELECT t.month,t.type,t.counterparty,t.product,t.category_key,t.category
       FROM transactions t
       JOIN month_status m ON m.month=t.month AND m.status='saved'
-      WHERE t.type IN ('支出','收入')
+      WHERE t.type IN ('支出','收入') AND ${historyWindow.sql}
       ORDER BY t.month,t.id
-    `).all());
+    `).all(...historyWindow.parameters)) : [];
     const affected = historyRows.filter((row) => ruleConditionKey({
       transaction_type: text(row.type),
       match_scope: candidate.match_scope,
@@ -221,9 +237,10 @@ export class RuleReportReadModel {
 
   ruleConflictGroups(
     db: DatabaseSync,
-    history: Row[]
+    history: Row[],
+    providedRuleData?: ReturnType<RuleReportReadModel["normalizedRuleRows"]>
   ): RuleConflictGroup[] {
-    const ruleData = this.normalizedRuleRows(db);
+    const ruleData = providedRuleData ?? this.normalizedRuleRows(db, this.defaultWindow(db));
     const savedRules = ruleData.data.rows as unknown as SavedRule[];
     const savedById = new Map(savedRules.map((rule) => [Number(rule.id), rule]));
     const groups: RuleConflictGroup[] = [];
@@ -274,13 +291,8 @@ export class RuleReportReadModel {
     );
   }
 
-  rawRuleDefinitions(db: DatabaseSync): SavedRule[] {
-    return rows(db.prepare(`
-      SELECT r.*,d.is_active AS category_active
-      FROM auto_rules r
-      LEFT JOIN category_definitions d ON d.category_key=r.category_key
-      ORDER BY r.id
-    `).all()).map((row) => ({
+  rawRuleDefinitions(rawRows: Row[]): SavedRule[] {
+    return rawRows.map((row) => ({
       id: Number(row.id),
       transaction_type: text(row.transaction_type) as "支出" | "收入",
       match_scope: text(row.match_scope) as "product" | "merchant" | "merchant_product",
@@ -296,12 +308,18 @@ export class RuleReportReadModel {
 
   ruleWorkspaceShell(db: DatabaseSync) {
     const categoryData = this.context.categories(db);
-    const rawRules = rows(db.prepare("SELECT * FROM auto_rules ORDER BY id").all());
+    const rawRules = rows(db.prepare(`
+      SELECT r.*,d.is_active AS category_active
+      FROM auto_rules r
+      LEFT JOIN category_definitions d ON d.category_key=r.category_key
+      ORDER BY r.id
+    `).all());
+    const revisionRows = rawRules.map(({ category_active: _categoryActive, ...row }) => row);
     return {
       categories_revision: categoryData.revision,
-      rules_revision: contentRevision(rawRules),
+      rules_revision: contentRevision(revisionRows),
       categories: categoryData.rows,
-      rules: this.rawRuleDefinitions(db)
+      rules: this.rawRuleDefinitions(rawRules)
     };
   }
 
@@ -315,14 +333,18 @@ export class RuleReportReadModel {
     const threshold = Number.isFinite(requestedThreshold)
       ? Math.max(1, Math.min(10_000, Math.trunc(requestedThreshold)))
       : 2;
-    const ruleData = this.rules(db);
-    const combined = [
-      ...rows(db.prepare(`
+    const scope = this.defaultWindow(db);
+    const ruleData = this.rules(db, null);
+    const historicalWindow = scope ? transactionWindowPredicate(scope) : null;
+    const historicalRows = scope && historicalWindow ? rows(db.prepare(`
         SELECT t.month,t.type,t.category,t.product FROM transactions t
         JOIN month_status m ON m.month=t.month AND m.status='saved'
-        WHERE t.month<>? AND t.type IN ('支出','收入')
+        WHERE t.month<>? AND ${historicalWindow.sql}
+          AND t.type IN ('支出','收入')
           AND TRIM(COALESCE(t.product,''))<>''
-      `).all(month)),
+      `).all(month, ...historicalWindow.parameters)) : [];
+    const combined = [
+      ...historicalRows,
       ...draftRows.filter(
         (row) =>
           RULE_TYPES.has(row.type)
@@ -339,7 +361,7 @@ export class RuleReportReadModel {
       group.push(row);
       grouped.set(key, group);
     });
-    const metadata = new Map(this.context.categoryRows(db).map((row) => [row.name, row]));
+    const metadata = new Map(this.context.categoryDefinitions(db).map((row) => [row.name, row]));
     const result: Array<{
       transaction_type: "支出" | "收入";
       product: string;
@@ -405,5 +427,13 @@ export class RuleReportReadModel {
     return [...counts].sort((left, right) =>
       right[1].count - left[1].count || left[1].first - right[1].first
     ).map(([value, stats]) => [value, stats.count]);
+  }
+
+  private defaultWindow(db: DatabaseSync): ReadWindow | null {
+    return recentMonthReadWindow(
+      "system-check",
+      this.context.savedMonths(db).sort().at(-1),
+      SYSTEM_CHECK_MONTHS
+    );
   }
 }

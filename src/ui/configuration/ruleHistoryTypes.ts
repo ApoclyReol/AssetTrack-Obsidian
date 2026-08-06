@@ -25,8 +25,8 @@ export interface HistoryFilters {
   issue_filter: "" | ProductHistoryIssueFilter;
   product_search: string;
   counterparty_search: string;
-  from_month: string;
-  to_month: string;
+  from_date: string;
+  to_date: string;
   min_occurrences: string;
 }
 

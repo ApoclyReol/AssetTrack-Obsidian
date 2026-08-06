@@ -43,6 +43,7 @@ export function useRuleAnalytics({
           ...current,
           categories_revision: analytics.categories_revision,
           rules_revision: analytics.rules_revision,
+          scope: analytics.scope ?? null,
           categories: analytics.categories,
           rules: analytics.rules,
           recommendations: analytics.recommendations,
@@ -55,6 +56,7 @@ export function useRuleAnalytics({
       const remoteRules = new Map(analytics.rules.map((rule) => [Number(rule.id ?? 0), rule]));
       return {
         ...current,
+        scope: analytics.scope ?? null,
         categories: current.categories.map((category) => {
           const remote = remoteCategories.get(category.category_key);
           return remote ? {

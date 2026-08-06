@@ -1,35 +1,35 @@
 import type { AnalysisMode } from "../constants";
-import type { AnalysisPort } from "../services/ports";
+import type { AnnualOverview } from "../types/analysis";
+import type { MonthOverview } from "../types/month";
 import { t } from "../i18n";
-import { Empty } from "./AnalysisPrimitives";
+import { Empty, type LoadState } from "./AnalysisPrimitives";
 import { AnnualAnalysis } from "./AnalysisAnnual";
 import { MonthlyAnalysis } from "./AnalysisMonthly";
 
 export function AnalysisView({
-  api,
   month,
   mode,
   year,
-  dataVersion,
+  annualState,
+  monthlyState,
   reconciliationTolerance
 }: {
-  api: AnalysisPort;
   month: string;
   mode: AnalysisMode;
   year: string;
-  dataVersion: number;
+  annualState: LoadState<AnnualOverview>;
+  monthlyState: LoadState<MonthOverview>;
   reconciliationTolerance: number;
 }) {
   return (
     <main className="asset-track-analysis">
       {mode === "annual" && (
-        <AnnualAnalysis api={api} year={year} dataVersion={dataVersion} />
+        <AnnualAnalysis state={annualState} year={year} />
       )}
       {mode === "monthly" && month && (
         <MonthlyAnalysis
-          api={api}
           month={month}
-          dataVersion={dataVersion}
+          state={monthlyState}
           reconciliationTolerance={reconciliationTolerance}
         />
       )}

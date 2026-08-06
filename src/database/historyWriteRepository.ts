@@ -45,7 +45,7 @@ export class HistoryWriteRepository {
     selected: Row[],
     targetCategoryKey: string
   ): CategoryBackfillPreview {
-    const target = this.context.categoryRows(db).find(
+    const target = this.context.categoryDefinitions(db).find(
       (category) => category.category_key === text(targetCategoryKey)
     );
     if (!target || !target.is_active) {
@@ -87,7 +87,7 @@ export class HistoryWriteRepository {
       months,
       old_categories: this.context.historicalCategoryCounts(
         selected,
-        this.context.categoryRows(db)
+        this.context.categoryDefinitions(db)
       )
     };
   }

@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState
 } from "react";
@@ -25,7 +26,9 @@ import { AssetTrackError } from "../application/errors";
 import type {
   MonthSection
 } from "../types/month";
-import type { EditorShellPort } from "../services/ports";
+import type { MonthOverview } from "../types/month";
+import type { AnnualOverview } from "../types/analysis";
+import type { AnalysisPort, EditorShellPort } from "../services/ports";
 import { AnalysisView } from "./AnalysisView";
 import { RulesEditor, type RulesEditorHandle } from "./RulesEditor";
 export { RulesEditor } from "./RulesEditor";
@@ -33,13 +36,14 @@ import {
   reconciliationTone,
   reconciliationStatus
 } from "./analysisModel";
-import { businessLabel, getLocale, t } from "../i18n";
+import { businessLabel, displayError, getLocale, t } from "../i18n";
 import { configureMoneyFormat, money } from "../domain/moneyFormat";
 import type { ChoiceAction } from "./ConfirmModal";
 import {
   EmptyState,
   messageFor
 } from "./editorPrimitives";
+import type { LoadState } from "./AnalysisPrimitives";
 import type { EditorDraftSnapshot } from "./editorDraft";
 import type { EditorSession } from "./editorSession";
 import {
@@ -177,12 +181,104 @@ export function AssetTrackEditorApp({
   const rulesEditorRef = useRef<RulesEditorHandle>(null);
   const [initializing, setInitializing] = useState(true);
   const [showPreparing, setShowPreparing] = useState(false);
+  const analysisCache = useRef<{
+    api: AnalysisPort;
+    dataVersion: number;
+    annual: Map<string, ReturnType<AnalysisPort["annual"]>>;
+    monthly: Map<string, ReturnType<AnalysisPort["monthOverview"]>>;
+  } | null>(null);
+  const analysisApi = useMemo<AnalysisPort>(() => {
+    const previous = analysisCache.current;
+    const cache = previous && previous.api === api && previous.dataVersion === dataVersion
+      ? previous
+      : {
+          api,
+          dataVersion,
+          annual: new Map<string, ReturnType<AnalysisPort["annual"]>>(),
+          monthly: new Map<string, ReturnType<AnalysisPort["monthOverview"]>>()
+        };
+    analysisCache.current = cache;
+    return {
+      annual: (year) => {
+        const cached = cache.annual.get(year);
+        if (cached) return cached;
+        const request = api.annual(year);
+        cache.annual.set(year, request);
+        void request.catch(() => {
+          if (cache.annual.get(year) === request) cache.annual.delete(year);
+        });
+        return request;
+      },
+      monthOverview: (targetMonth) => {
+        const cached = cache.monthly.get(targetMonth);
+        if (cached) return cached;
+        const request = api.monthOverview(targetMonth);
+        cache.monthly.set(targetMonth, request);
+        void request.catch(() => {
+          if (cache.monthly.get(targetMonth) === request) cache.monthly.delete(targetMonth);
+        });
+        return request;
+      }
+    };
+  }, [api, dataVersion]);
+  const annualAnalysisKey = `${dataVersion}:${analysisYear}`;
+  const monthlyAnalysisKey = `${dataVersion}:${month}`;
+  const [annualLoad, setAnnualLoad] = useState<{
+    key: string;
+    state: LoadState<AnnualOverview>;
+  }>({ key: "", state: { kind: "loading" } });
+  const [monthlyLoad, setMonthlyLoad] = useState<{
+    key: string;
+    state: LoadState<MonthOverview>;
+  }>({ key: "", state: { kind: "loading" } });
+  const analysisYears = [...new Set(months.map((item) => item.slice(0, 4)))].sort().reverse();
+  useEffect(() => {
+    if (mode !== "analysis") return;
+    if (analysisMode === "annual") {
+      if (analysisYears.length > 0 && !analysisYears.includes(analysisYear)) return;
+      const key = annualAnalysisKey;
+      let active = true;
+      setAnnualLoad({ key, state: { kind: "loading" } });
+      void analysisApi.annual(analysisYear)
+        .then((data) => active && setAnnualLoad({ key, state: { kind: "ready", data } }))
+        .catch((error) => active && setAnnualLoad({
+          key,
+          state: { kind: "error", message: displayError(error) }
+        }));
+      return () => { active = false; };
+    }
+    if (!month) return;
+    const key = monthlyAnalysisKey;
+    let active = true;
+    setMonthlyLoad({ key, state: { kind: "loading" } });
+    void analysisApi.monthOverview(month)
+      .then((data) => active && setMonthlyLoad({ key, state: { kind: "ready", data } }))
+      .catch((error) => active && setMonthlyLoad({
+        key,
+        state: { kind: "error", message: displayError(error) }
+      }));
+    return () => { active = false; };
+  }, [
+    analysisApi,
+    analysisMode,
+    analysisYear,
+    analysisYears.join(","),
+    annualAnalysisKey,
+    mode,
+    month,
+    monthlyAnalysisKey
+  ]);
+  const currentAnnualState = annualLoad.key === annualAnalysisKey
+    ? annualLoad.state
+    : { kind: "loading" as const };
+  const currentMonthlyState = monthlyLoad.key === monthlyAnalysisKey
+    ? monthlyLoad.state
+    : { kind: "loading" as const };
   useEffect(() => {
     if (mode !== "transactions" || !month) setMonthMetrics(null);
   }, [mode, month]);
   useEffect(() => setMode(initialMode), [initialMode]);
   useEffect(() => setAnalysisMode(initialAnalysisMode), [initialAnalysisMode]);
-  const analysisYears = [...new Set(months.map((item) => item.slice(0, 4)))].sort().reverse();
   useEffect(() => {
     if (analysisYears.length && !analysisYears.includes(analysisYear)) {
       setAnalysisYear(analysisYears[0]);
@@ -275,12 +371,22 @@ export function AssetTrackEditorApp({
         ? await settleRulesPage()
         : true;
     if (!pageSettled) return;
+    if (next === "analysis") {
+      if (analysisMode === "annual") {
+        void analysisApi.annual(analysisYear).catch(() => undefined);
+      } else if (month) {
+        void analysisApi.monthOverview(month).catch(() => undefined);
+      }
+    }
     setMode(next);
   };
   const selectMonth = async (next: string): Promise<void> => {
     if (next === month) return;
     if (mode === "transactions" && !await settleTransactionPage()) return;
     if (mode === "rules" && !await settleRulesPage()) return;
+    if (mode === "analysis" && analysisMode === "monthly") {
+      void analysisApi.monthOverview(next).catch(() => undefined);
+    }
     setMonth(next);
   };
   const createNext = async () => {
@@ -345,7 +451,14 @@ export function AssetTrackEditorApp({
                   key={item}
                   type="button"
                   className={analysisMode === item ? "is-active" : ""}
-                  onClick={() => setAnalysisMode(item)}
+                  onClick={() => {
+                    if (item === "annual") {
+                      void analysisApi.annual(analysisYear).catch(() => undefined);
+                    } else if (month) {
+                      void analysisApi.monthOverview(month).catch(() => undefined);
+                    }
+                    setAnalysisMode(item);
+                  }}
                 >
                   {{ annual: t("年度", "Annual"), monthly: t("月度", "Monthly") }[item]}
                 </button>
@@ -353,7 +466,11 @@ export function AssetTrackEditorApp({
             </nav>
             <div className="asset-track-context-period">
               {analysisMode === "annual" && analysisYears.length > 0 && (
-                <select value={analysisYear} onChange={(event) => setAnalysisYear(event.target.value)} aria-label={t("分析年份", "Analysis year")}>
+                <select value={analysisYear} onChange={(event) => {
+                  const next = event.target.value;
+                  void analysisApi.annual(next).catch(() => undefined);
+                  setAnalysisYear(next);
+                }} aria-label={t("分析年份", "Analysis year")}>
                   {analysisYears.map((item) => <option key={item}>{item}</option>)}
                 </select>
               )}
@@ -434,11 +551,11 @@ export function AssetTrackEditorApp({
       </header>
       {mode === "analysis" && (
         <AnalysisView
-          api={api}
           month={month}
           mode={analysisMode}
           year={analysisYear}
-          dataVersion={dataVersion}
+          annualState={currentAnnualState}
+          monthlyState={currentMonthlyState}
           reconciliationTolerance={settings.reconciliationTolerance}
         />
       )}

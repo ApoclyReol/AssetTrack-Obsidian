@@ -80,11 +80,11 @@ export function RuleHistoryFilters({
       {overview && <label className="asset-track-rule-history-filter-search">{t("交易对手搜索", "Counterparty search")}
         <input placeholder={t("搜索交易对手", "Search counterparty")} value={filters.counterparty_search ?? ""} onChange={(event) => onUpdate({ counterparty_search: event.target.value })} />
       </label>}
-      <label className="asset-track-rule-history-filter-year">{t("起始年份", "From year")}
-        <input type="number" min="2000" max="2100" placeholder={t("例如 2026", "e.g. 2026")} value={filters.from_month.slice(0, 4)} onChange={(event) => onUpdate({ from_month: event.target.value ? `${event.target.value}-01` : "" })} />
+      <label className="asset-track-rule-history-filter-date">{t("起始日期", "From date")}
+        <input type="date" value={filters.from_date} onChange={(event) => onUpdate({ from_date: event.target.value })} />
       </label>
-      <label className="asset-track-rule-history-filter-year">{t("结束年份", "To year")}
-        <input type="number" min="2000" max="2100" placeholder={t("例如 2026", "e.g. 2026")} value={filters.to_month.slice(0, 4)} onChange={(event) => onUpdate({ to_month: event.target.value ? `${event.target.value}-12` : "" })} />
+      <label className="asset-track-rule-history-filter-date">{t("结束日期", "To date")}
+        <input type="date" value={filters.to_date} onChange={(event) => onUpdate({ to_date: event.target.value })} />
       </label>
       <label className="asset-track-rule-history-filter-count">{t("最少次数", "Minimum occurrences")}
         <input type="number" min="1" value={filters.min_occurrences} onChange={(event) => onUpdate({ min_occurrences: event.target.value })} />

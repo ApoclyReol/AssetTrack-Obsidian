@@ -13,6 +13,7 @@ import type {
 import type {
   HistoricalProductStat
 } from "../../types/rules";
+import type { ReadWindow } from "../../types/readWindows";
 import type { HistoryBackfillContentProps, HistoryFilters, HistorySort } from "./ruleHistoryTypes";
 import { t } from "../../i18n";
 import { normalizeProductKey } from "../../domain/rules";
@@ -54,6 +55,7 @@ export function HistoryBackfillContent({
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<HistoricalProductStat | null>(null);
   const [detailRows, setDetailRows] = useState<ProductHistoryTransaction[] | null>(null);
+  const [scope, setScope] = useState<ReadWindow | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [targetCategoryKey, setTargetCategoryKey] = useState("");
   const [preview, setPreview] = useState<CategoryBackfillPreview | null>(null);
@@ -62,6 +64,7 @@ export function HistoryBackfillContent({
   const [sort, setSort] = useState<HistorySort>({ key: "last_date", direction: "desc" });
   const requestSequence = useRef(0);
   const autoLoadTimer = useRef<number | null>(null);
+  const skipNextQueryRef = useRef(false);
 
   const query = useMemo(
     () => queryFromFilters(overview ? { ...filters, issue_filter: "" } : filters, groupBy),
@@ -97,18 +100,32 @@ export function HistoryBackfillContent({
           : await api.productHistoryIndex(requestedQuery);
       if (sequence !== requestSequence.current) return;
       setGroups(result.groups);
+      setScope(result.scope ?? null);
       setHasLoadedOnce(true);
       setSelectedGroup(null);
       setDetailRows("rows" in result ? result.rows : null);
       setSelectedIds(new Set());
       setPreview(null);
       setMessage("");
+      if (overview && mode === "product" && !requestedQuery.from_date && !requestedQuery.to_date && result.scope) {
+        skipNextQueryRef.current = true;
+        setFilters((current) => ({
+          ...current,
+          from_date: result.scope?.from_date ?? current.from_date,
+          to_date: result.scope?.to_date ?? current.to_date
+        }));
+        onQueryChange?.({
+          ...requestedQuery,
+          from_date: result.scope.from_date,
+          to_date: result.scope.to_date
+        });
+      }
     } catch (error) {
       if (sequence === requestSequence.current) setMessage(errorMessage(error));
     } finally {
       if (sequence === requestSequence.current) setLoading(false);
     }
-  }, [api, mode, overview]);
+  }, [api, mode, onQueryChange, overview]);
 
   const updateFilter = (next: Partial<HistoryFilters>) => {
     const nextFilters = { ...filters, ...next };
@@ -118,6 +135,7 @@ export function HistoryBackfillContent({
     setLoading(false);
     setFilters(nextFilters);
     onQueryChange?.(nextQuery);
+    setScope(null);
     setSelectedGroup(null);
     setDetailRows(null);
     setSelectedIds(new Set());
@@ -153,6 +171,7 @@ export function HistoryBackfillContent({
     setFilters(nextFilters);
     onQueryChange?.(queryFromFilters(overview ? { ...nextFilters, issue_filter: "" } : nextFilters, groupBy));
     setGroups(null);
+    setScope(null);
     setHasLoadedOnce(false);
     setSelectedGroup(null);
     setDetailRows(null);
@@ -201,6 +220,10 @@ export function HistoryBackfillContent({
 
   useEffect(() => {
     if (mode !== "product" || detailOnly || hasLoadedOnce) return;
+    if (skipNextQueryRef.current) {
+      skipNextQueryRef.current = false;
+      return;
+    }
     if (!overview && !hasFilter) return;
     void loadStatsForQuery(query);
   }, [detailOnly, hasFilter, hasLoadedOnce, loadStatsForQuery, mode, overview, query]);
@@ -374,6 +397,12 @@ export function HistoryBackfillContent({
       onUpdate={updateFilter}
       onReset={resetFilters}
     />}
+
+    {scope && !detailOnly && <p className="asset-track-read-window-note" role="note">{overview
+      ? t(`商品总览范围：${scope.from_date} 至 ${scope.to_date}`, `Item overview range: ${scope.from_date} to ${scope.to_date}`)
+      : mode === "category"
+        ? t(`分类历史范围：近 5 年（${scope.from_date} 至 ${scope.to_date}）`, `Category history range: last 5 years (${scope.from_date} to ${scope.to_date})`)
+        : t(`统计范围：近 5 年（${scope.from_date} 至 ${scope.to_date}）`, `Statistics range: last 5 years (${scope.from_date} to ${scope.to_date})`)}</p>}
 
     {message && <p className="asset-track-rule-history-message" role="status">{message}</p>}
 

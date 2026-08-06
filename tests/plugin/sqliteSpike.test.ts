@@ -7,7 +7,7 @@ import { DatabaseManager } from "../../src/database/DatabaseManager";
 import { categoryKey } from "../../src/database/schema";
 
 describe("node:sqlite technical spike", () => {
-  it("handles 50k synthetic transactions and releases the database lock", () => {
+  it("handles 50k synthetic transactions across 10 years with bounded reads", async () => {
     const root = mkdtempSync(join(tmpdir(), "asset-track-spike-"));
     const path = join(root, "中文 path", "accounting_system.db");
     const manager = new DatabaseManager(path);
@@ -22,7 +22,8 @@ describe("node:sqlite technical spike", () => {
       VALUES (?,?,?,?,?,?,?)
     `);
     for (let index = 0; index < 50_000; index += 1) {
-      const month = `2026-${String(index % 12 + 1).padStart(2, "0")}`;
+      const monthIndex = index % 120;
+      const month = `${2017 + Math.floor(monthIndex / 12)}-${String(monthIndex % 12 + 1).padStart(2, "0")}`;
       insert.run(
         month,
         `${month}-${String(index % 28 + 1).padStart(2, "0")}`,
@@ -44,13 +45,15 @@ describe("node:sqlite technical spike", () => {
     const saveMonth = db.prepare(
       "INSERT INTO month_status (month,status,updated_at) VALUES (?,?,?)"
     );
-    for (let index = 1; index <= 12; index += 1) {
-      saveMonth.run(
-        `2026-${String(index).padStart(2, "0")}`,
-        "saved",
-        "2026-12-31T00:00:00.000Z"
-      );
+    for (let index = 0; index < 120; index += 1) {
+      const month = `${2017 + Math.floor(index / 12)}-${String(index % 12 + 1).padStart(2, "0")}`;
+      saveMonth.run(month, "saved", "2026-12-31T00:00:00.000Z");
     }
+    const monthlyStarted = performance.now();
+    const monthly = await repository.getMonth("2026-12");
+    const monthlyElapsed = performance.now() - monthlyStarted;
+    expect(monthly.transactions.length).toBeGreaterThan(0);
+    expect(monthlyElapsed).toBeLessThan(2_000);
     const insertRule = db.prepare(`
       INSERT INTO auto_rules
         (transaction_type,counterparty,product,category_key,category)
@@ -63,8 +66,22 @@ describe("node:sqlite technical spike", () => {
     const productOverview = repository.productOverview();
     const ruleInsights = repository.ruleWorkspaceAnalytics(2);
     const analyticsElapsed = performance.now() - analyticsStarted;
-    expect(productOverview.groups).toHaveLength(200);
+    // The default overview is intentionally limited to the latest 12 months;
+    // the bounded fixture therefore contains fewer groups than the full history.
+    expect(productOverview.groups).toHaveLength(60);
+    expect(productOverview.scope).toMatchObject({
+      kind: "analysis",
+      from_date: "2026-01-01",
+      to_date: "2026-12-31",
+      month_count: 12
+    });
     expect(ruleInsights.historical_products).toHaveLength(200);
+    expect(ruleInsights.scope).toMatchObject({
+      kind: "system-check",
+      from_date: "2022-01-01",
+      to_date: "2026-12-31",
+      month_count: 60
+    });
     expect(analyticsElapsed).toBeLessThan(8_000);
     manager.close();
 

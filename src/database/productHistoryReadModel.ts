@@ -17,8 +17,16 @@ import type {
 } from "../types/transactions";
 import { normalizeProductKey, RuleMatcher, ruleMatchLevel } from "../domain/rules";
 import { roundHalfEven } from "../domain/money";
+import {
+  createDateReadWindow,
+  PRODUCT_OVERVIEW_MONTHS,
+  recentMonthReadWindow,
+  SYSTEM_CHECK_MONTHS
+} from "../domain/readWindows";
 import { scalarText } from "../domain/text";
 import { RuleReportReadModel } from "./ruleReportReadModel";
+import { transactionWindowPredicate } from "./readWindowSql";
+import type { ReadWindow, ReadWindowKind } from "../types/readWindows";
 import {
   boolean,
   contentRevision,
@@ -29,7 +37,8 @@ import {
 } from "./repositoryPrimitives";
 
 export interface ProductHistoryReadContext {
-  categoryRows(db: DatabaseSync): CategoryDefinition[];
+  categoryDefinitions(db: DatabaseSync): CategoryDefinition[];
+  savedMonths(db: DatabaseSync): string[];
 }
 
 export class ProductHistoryReadModel {
@@ -38,9 +47,10 @@ export class ProductHistoryReadModel {
     private readonly ruleReports: RuleReportReadModel
   ) {}
 
-  historyRows(db: DatabaseSync, query: ProductHistoryQuery = {}): Row[] {
-    const conditions = ["t.type IN ('支出','收入')"];
-    const parameters: string[] = [];
+  private historyRows(db: DatabaseSync, query: ProductHistoryQuery, window: ReadWindow): Row[] {
+    const windowPredicate = transactionWindowPredicate(window);
+    const conditions = ["t.type IN ('支出','收入')", windowPredicate.sql];
+    const parameters: string[] = [...windowPredicate.parameters];
     if (query.transaction_type) {
       conditions.push("t.type=?");
       parameters.push(query.transaction_type);
@@ -53,13 +63,13 @@ export class ProductHistoryReadModel {
         parameters.push(query.category_key);
       }
     }
-    if (query.from_month) {
-      conditions.push("t.month>=?");
-      parameters.push(query.from_month);
+    if (query.from_date) {
+      conditions.push("t.transaction_date>=?");
+      parameters.push(query.from_date);
     }
-    if (query.to_month) {
-      conditions.push("t.month<=?");
-      parameters.push(query.to_month);
+    if (query.to_date) {
+      conditions.push("t.transaction_date<=?");
+      parameters.push(query.to_date);
     }
     const productSearch = scalarText(query.product_search).trim();
     if (productSearch) {
@@ -92,8 +102,8 @@ export class ProductHistoryReadModel {
         const key = text(row.category_key);
         if (query.category_key === null ? key : key !== query.category_key) return false;
       }
-      if (query.from_month && text(row.month) < query.from_month) return false;
-      if (query.to_month && text(row.month) > query.to_month) return false;
+      if (query.from_date && text(row.transaction_date) < query.from_date) return false;
+      if (query.to_date && text(row.transaction_date) > query.to_date) return false;
       if (normalizedSearch && !normalizeProductKey(row.product).includes(normalizedSearch)) return false;
       if (normalizedCounterpartySearch && !normalizeProductKey(row.counterparty).includes(normalizedCounterpartySearch)) return false;
       return true;
@@ -315,8 +325,8 @@ export class ProductHistoryReadModel {
       || scalarText(query.product_search).trim()
       || scalarText(query.counterparty_search).trim()
       || query.issue_filter
-      || query.from_month
-      || query.to_month
+      || query.from_date
+      || query.to_date
       || query.min_occurrences !== undefined
     );
   }
@@ -343,22 +353,30 @@ export class ProductHistoryReadModel {
 
   historyGroups(
     db: DatabaseSync,
-    query: ProductHistoryQuery
+    query: ProductHistoryQuery,
+    defaultWindowKind: ReadWindowKind = "system-check"
   ): {
     ruleData: ReturnType<RuleReportReadModel["normalizedRuleRows"]>;
     categories: CategoryDefinition[];
     history: Row[];
     stats: HistoricalProductStat[];
+    scope: ReadWindow | null;
   } {
-    const ruleData = this.ruleReports.normalizedRuleRows(db);
-    const categories = this.context.categoryRows(db);
+    const scope = this.resolveWindow(db, query, defaultWindowKind);
+    const categories = this.context.categoryDefinitions(db);
     const groupBy = query.group_by ?? "product";
-    const history = this.historyRows(db, {
-      ...query,
-      product_key: query.product_key === undefined
-        ? undefined
-        : normalizeProductKey(query.product_key)
-    });
+    const history = scope
+      ? this.historyRows(db, {
+          ...query,
+          from_date: scope.from_date,
+          to_date: scope.to_date,
+          group_by: query.group_by,
+          product_key: query.product_key === undefined
+            ? undefined
+            : normalizeProductKey(query.product_key)
+        }, scope)
+      : [];
+    const ruleData = this.ruleReports.normalizedRuleRows(db, scope, history);
     const groups = new Map<string, Row[]>();
     for (const row of history) {
       const key = [
@@ -381,7 +399,7 @@ export class ProductHistoryReadModel {
         (query.min_occurrences === undefined || stat.occurrences >= query.min_occurrences)
         && this.historyStatMatchesFilter(stat, query.issue_filter)
       );
-    return { ruleData, categories, history, stats };
+    return { ruleData, categories, history, stats, scope };
   }
 
   productHistoryIndex(db: DatabaseSync, query: ProductHistoryQuery): ProductHistoryIndexResult {
@@ -392,16 +410,18 @@ export class ProductHistoryReadModel {
     return {
       categories_revision: contentRevision(data.categories as unknown as Row[]),
       rules_revision: data.ruleData.data.revision,
+      scope: data.scope,
       group_by: query.group_by ?? "product",
       groups: data.stats
     };
   }
 
   productOverview(db: DatabaseSync, query: ProductHistoryQuery = {}): ProductHistoryIndexResult {
-    const data = this.historyGroups(db, query);
+    const data = this.historyGroups(db, query, "analysis");
     return {
       categories_revision: contentRevision(data.categories as unknown as Row[]),
       rules_revision: data.ruleData.data.revision,
+      scope: data.scope,
       group_by: query.group_by ?? "product",
       groups: data.stats
     };
@@ -448,7 +468,32 @@ export class ProductHistoryReadModel {
         rule_match: ruleMatch
       };
       });
-    return { groups: stats, rows: detailRows };
+    return { scope: data.scope, groups: stats, rows: detailRows };
+  }
+
+  private resolveWindow(
+    db: DatabaseSync,
+    query: ProductHistoryQuery,
+    defaultWindowKind: ReadWindowKind
+  ): ReadWindow | null {
+    const hasFrom = Boolean(query.from_date);
+    const hasTo = Boolean(query.to_date);
+    if (hasFrom !== hasTo) {
+      throw new RepositoryValidationError({ code: "history.date_range_incomplete" });
+    }
+    if (hasFrom && hasTo) {
+      const scope = createDateReadWindow("analysis", query.from_date!, query.to_date!);
+      if (scope.from_date > scope.to_date) {
+        throw new RepositoryValidationError({ code: "history.date_range_invalid" });
+      }
+      return scope;
+    }
+    const latestMonth = this.context.savedMonths(db).sort().at(-1);
+    return recentMonthReadWindow(
+      defaultWindowKind,
+      latestMonth,
+      defaultWindowKind === "analysis" ? PRODUCT_OVERVIEW_MONTHS : SYSTEM_CHECK_MONTHS
+    );
   }
 
   private frequency(values: string[]): Array<[string, number]> {

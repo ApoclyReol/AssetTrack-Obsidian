@@ -5,6 +5,7 @@ import type {
 import type {
   SavedRule
 } from "../../types/rules";
+import type { ReadWindow } from "../../types/readWindows";
 import { businessLabel, t } from "../../i18n";
 import { inferRuleScopeFromConditions } from "../../domain/rules";
 import { ActionTableHeader } from "../TablePrimitives";
@@ -32,6 +33,7 @@ export interface MatchingRulesTableProps {
   saveState: OperationState;
   onReload: () => Promise<void>;
   onSave: () => Promise<void>;
+  readWindow?: ReadWindow | null;
   sectionRef: { current: HTMLElement | null };
 }
 
@@ -55,6 +57,7 @@ export function MatchingRulesTable({
   saveState,
   onReload,
   onSave,
+  readWindow,
   sectionRef
 }: MatchingRulesTableProps) {
   const tableScrollRef = useRef<HTMLDivElement | null>(null);
@@ -76,12 +79,11 @@ export function MatchingRulesTable({
   const ruleView = sortRows(rules, sort, (row, key) => row[key as keyof SavedRule]);
 
   return <Section sectionRef={sectionRef}>
-    <p className="asset-track-rule-priority-note">{t(
-      "匹配范围根据交易对手和商品是否填写自动识别；固定优先级：交易对手 + 商品 ＞ 商品 ＞ 交易对手；同一条流水只采用一条规则。",
-      "Match scope is inferred from the counterparty and item fields; fixed priority: counterparty + item > item > counterparty. One rule is applied per transaction."
-    )}</p>
     {ruleView.length === 0 ? <EmptyState text={t("尚无已保存匹配规则。", "No saved matching rules yet.")} /> : <div ref={tableScrollRef} className="asset-track-table-scroll asset-track-responsive-scroll asset-track-rule-table-scroll">
-      <table className="asset-track-rules-table"><thead><tr><th scope="col" className="asset-track-count-column">{t("编号", "ID")}</th>{[
+      <table className="asset-track-rules-table"><caption>{t(
+        "匹配优先级：交易对手 + 商品 ＞ 商品 ＞ 交易对手",
+        "Match priority: counterparty + item > item > counterparty"
+      )}</caption><thead><tr><th scope="col" className="asset-track-count-column">{t("编号", "ID")}</th>{[
         ["transaction_type", t("收支", "Type")], ["counterparty", t("交易对手条件", "Counterparty condition")], ["product", t("商品条件", "Item condition")], ["rewrite_merchant", t("重写交易对手", "Rewrite counterparty")], ["rewrite_product", t("重写商品", "Rewrite item")], ["category", t("分类", "Category")], ["occurrences", t("流水数", "Transactions")], ["last_month", t("最近月份", "Latest month")]
       ].map(([field, label]) => <th key={field} scope="col" className={field === "transaction_type" ? "asset-track-type-column" : field === "category" ? "asset-track-centered-column" : field === "occurrences" ? "asset-track-count-column" : field === "last_month" ? "asset-track-date-column" : undefined}><SortButton field={field} label={label} sort={sort} onSort={onSort} /></th>)}<ActionTableHeader /></tr></thead>
         <tbody>{ruleView.map(({ row, originalIndex: index }) => <tr data-asset-track-row-key={String(row.id ?? `new-rule-${index}`)} key={String(row.id ?? index)}>
@@ -112,6 +114,9 @@ export function MatchingRulesTable({
         <button type="button" className="mod-cta" disabled={!dirty || saveState.kind === "pending"} onClick={() => void onSave()}>
           {t("保存规则", "Save rules")}
         </button>
+        {readWindow && <span className="asset-track-section-scope-note" role="note">
+          {t(`统计范围：近 5 年（${readWindow.from_date} 至 ${readWindow.to_date}）`, `Statistics range: last 5 years (${readWindow.from_date} to ${readWindow.to_date})`)}
+        </span>}
       </>}
     </div>
   </Section>;

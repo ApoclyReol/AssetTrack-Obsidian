@@ -235,7 +235,7 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
       setWorkspace((current) => current ? {
         ...current,
         categories_revision: result.revision,
-        categories: result.rows,
+        categories: analytics.categories,
         rules_revision: analytics.rules_revision,
         rules: dirtyFlagsRef.current.rule ? current.rules.map((rule) => ({ ...rule, category: categoryNames.get(rule.category_key) ?? rule.category })) : analytics.rules,
         recommendations: analytics.recommendations,
@@ -449,21 +449,23 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
   };
 
   return <main className="asset-track-editor">
-    {(section === undefined || section === "health") && <HistoryBackfillContent
-      key={`data-health-${historyPanelKey}`}
-      api={api}
-      categories={workspace.categories}
-      mode="product"
-      embedded
-      hostWindow={hostWindow}
-      initialQuery={{ issue_filter: "conflict" }}
-      hideIssueFilter
-      confirmAction={confirmAction}
-      onSaved={handleHistorySaved}
-      onDataChanged={onDataChanged}
-      onOpenDetail={openProductDetail}
-      onOpenProductRename={openProductRename}
-    />}
+    {(section === undefined || section === "health") && <Section>
+      <HistoryBackfillContent
+        key={`data-health-${historyPanelKey}`}
+        api={api}
+        categories={workspace.categories}
+        mode="product"
+        embedded
+        hostWindow={hostWindow}
+        initialQuery={{ issue_filter: "conflict" }}
+        hideIssueFilter
+        confirmAction={confirmAction}
+        onSaved={handleHistorySaved}
+        onDataChanged={onDataChanged}
+        onOpenDetail={openProductDetail}
+        onOpenProductRename={openProductRename}
+      />
+    </Section>}
     {section === "products" && <Section>
       <HistoryBackfillContent
         key={`product-overview-${historyGroupBy}-${historyPanelKey}`}
@@ -498,6 +500,7 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
       saveState={categoryState}
       onReload={reloadCurrentSection}
       onSave={async () => { await saveCategories(); }}
+      readWindow={section === "categories" ? workspace.scope : null}
     />}
     {(section === undefined || section === "matching") && <MatchingRulesTable
       rules={workspace.rules}
@@ -512,6 +515,7 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
       saveState={ruleState}
       onReload={reloadCurrentSection}
       onSave={async () => { await saveRules(); }}
+      readWindow={section === "matching" ? workspace.scope : null}
       sectionRef={rulesSectionRef}
     />}
   </main>;

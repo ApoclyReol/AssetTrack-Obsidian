@@ -5,6 +5,7 @@ import type {
 } from "./configuration";
 import type { Transaction } from "./transactions";
 import type { PendingOperationLog } from "./operations";
+import type { ReadWindow } from "./readWindows";
 
 export interface FixedAsset {
   id?: number;
@@ -100,6 +101,7 @@ export interface ReconciliationExplanation {
 
 export interface MonthOverview {
   available: boolean;
+  analysis_window?: ReadWindow;
   metrics?: {
     asset_delta: number | null;
     total_income: number;

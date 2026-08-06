@@ -1,4 +1,5 @@
 import type { CategoryDefinition } from "./configuration";
+import type { ReadWindow } from "./readWindows";
 
 export type RuleMatchScope = "product" | "merchant" | "merchant_product";
 export type RuleMatchLevel = RuleMatchScope;
@@ -168,6 +169,7 @@ export interface RuleImpactPreview {
 export interface RuleWorkspace {
   categories_revision: number;
   rules_revision: number;
+  scope?: ReadWindow | null;
   categories: CategoryDefinition[];
   rules: SavedRule[];
   recommendations: RuleCandidate[];
@@ -186,6 +188,7 @@ export interface RuleWorkspaceShell {
 export interface RuleWorkspaceAnalytics {
   categories_revision: number;
   rules_revision: number;
+  scope?: ReadWindow | null;
   categories: CategoryDefinition[];
   rules: SavedRule[];
   recommendations: RuleCandidate[];

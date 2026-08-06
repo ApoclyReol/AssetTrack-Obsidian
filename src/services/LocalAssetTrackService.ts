@@ -40,6 +40,7 @@ import type {
   CurrentAsset,
   FixedAsset,
   MonthSectionSaveRequest,
+  MonthOverview,
   MonthWorkspace
 } from "../types/month";
 import type {
@@ -100,6 +101,11 @@ export class LocalAssetTrackService implements AssetTrackService {
   async month(month: string): Promise<MonthWorkspace> {
     this.ready();
     return this.repository.getMonth(month);
+  }
+
+  async monthOverview(month: string): Promise<MonthOverview> {
+    this.ready();
+    return this.repository.monthOverview(month);
   }
 
   async currentAsset(): Promise<CurrentAsset> {

@@ -37,7 +37,10 @@ export class RuleHistoryReadModel {
   constructor(context: RuleHistoryReadContext) {
     this.reports = new RuleReportReadModel(context);
     this.products = new ProductHistoryReadModel(
-      { categoryRows: (db) => context.categoryRows(db) },
+      {
+        categoryDefinitions: (db) => context.categoryDefinitions(db),
+        savedMonths: (db) => context.savedMonths(db)
+      },
       this.reports
     );
   }
@@ -78,6 +81,7 @@ export class RuleHistoryReadModel {
     return {
       categories_revision: data.categoriesRevision,
       rules_revision: data.rules.revision,
+      scope: data.scope,
       categories: data.categories,
       rules: data.rules.rows as unknown as SavedRule[],
       recommendations: data.recommendations,
@@ -114,6 +118,7 @@ export class RuleHistoryReadModel {
   ): {
     threshold: number;
     rules: ReturnType<RuleReportReadModel["rules"]>;
+    scope: ReturnType<ProductHistoryReadModel["historyGroups"]>["scope"];
     categories: CategoryDefinition[];
     categoriesRevision: number;
     historicalProducts: HistoricalProductStat[];
@@ -129,7 +134,7 @@ export class RuleHistoryReadModel {
     const ruleData = productData.ruleData;
     const categories = productData.categories;
     const history = productData.history;
-    const ruleConflicts = this.reports.ruleConflictGroups(db, history);
+    const ruleConflicts = this.reports.ruleConflictGroups(db, history, productData.ruleData);
     const historicalProducts = productData.stats;
     const recommendations: RuleCandidate[] = [];
     for (const stat of historicalProducts) {
@@ -225,6 +230,7 @@ export class RuleHistoryReadModel {
     return {
       threshold,
       rules: ruleData.data,
+      scope: productData.scope,
       categories: enrichedCategories,
       categoriesRevision: contentRevision(categories as unknown as Row[]),
       historicalProducts,

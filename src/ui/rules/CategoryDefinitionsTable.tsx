@@ -5,6 +5,7 @@ import type {
 import type {
   ProductHistoryQuery
 } from "../../types/history";
+import type { ReadWindow } from "../../types/readWindows";
 import { CATEGORY_COLORS } from "../../domain/categoryColors";
 import { businessLabel, t } from "../../i18n";
 import { ActionTableHeader } from "../TablePrimitives";
@@ -34,6 +35,7 @@ export interface CategoryDefinitionsTableProps {
   saveState: OperationState;
   onReload: () => Promise<void>;
   onSave: () => Promise<void>;
+  readWindow?: ReadWindow | null;
 }
 
 export function CategoryDefinitionsTable({
@@ -48,7 +50,8 @@ export function CategoryDefinitionsTable({
   pageState,
   saveState,
   onReload,
-  onSave
+  onSave,
+  readWindow
 }: CategoryDefinitionsTableProps) {
   const tableScrollRef = useRef<HTMLDivElement | null>(null);
   const pendingCategoryKey = useRef<string | null>(null);
@@ -98,6 +101,9 @@ export function CategoryDefinitionsTable({
         <button type="button" className="mod-cta" disabled={!dirty || saveState.kind === "pending"} onClick={() => void onSave()}>
           {t("保存分类", "Save categories")}
         </button>
+        {readWindow && <span className="asset-track-section-scope-note" role="note">
+          {t(`统计范围：近 5 年（${readWindow.from_date} 至 ${readWindow.to_date}）`, `Statistics range: last 5 years (${readWindow.from_date} to ${readWindow.to_date})`)}
+        </span>}
       </>}
     </div>
   </Section>;

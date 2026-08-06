@@ -29,6 +29,7 @@ import type {
   CurrentAsset,
   FixedAsset,
   MonthSectionSaveRequest,
+  MonthOverview,
   MonthWorkspace
 } from "../types/month";
 import type {
@@ -128,7 +129,7 @@ export interface EditorShellPort
 
 export interface AnalysisPort {
   annual(year: string): Promise<AnnualOverview>;
-  month(month: string): Promise<MonthWorkspace>;
+  monthOverview(month: string): Promise<MonthOverview>;
 }
 
 export interface BackupPort {

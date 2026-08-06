@@ -117,6 +117,8 @@ it("matches the synthetic cross-month financial baseline", async () => {
           percent_delta: 52.2
         }
       });
+    const fullMonth = await repository.getMonth("2026-01");
+    expect(repository.monthOverview("2026-01")).toEqual(fullMonth.overview);
   });
 
 it("tracks investment flows and month-over-month returns per investment account", async () => {
