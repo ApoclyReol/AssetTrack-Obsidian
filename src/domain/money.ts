@@ -1,5 +1,9 @@
+import { AssetTrackError } from "../application/errors";
+
 export function roundHalfEven(value: number, digits = 2): number {
-  if (!Number.isFinite(value)) throw new Error("金额必须是有限数字");
+  if (!Number.isFinite(value)) {
+    throw new AssetTrackError({ code: "amount.invalid_number", status: 422 });
+  }
   const factor = 10 ** digits;
   const scaled = value * factor;
   const lower = Math.floor(scaled);
@@ -21,10 +25,18 @@ export function finiteNumber(
   const normalized =
     value === null || value === undefined || value === "" ? 0 : Number(value);
   if (!Number.isFinite(normalized)) {
-    throw new Error(`${options.label ?? "金额"}必须是有限数字`);
+    throw new AssetTrackError({
+      code: "amount.invalid_number",
+      status: 422,
+      params: { label: options.label ?? "金额" }
+    });
   }
   if (options.nonNegative && normalized < 0) {
-    throw new Error(`${options.label ?? "金额"}不能为负数`);
+    throw new AssetTrackError({
+      code: "amount.negative",
+      status: 422,
+      params: { label: options.label ?? "金额" }
+    });
   }
   return roundHalfEven(normalized, 2);
 }

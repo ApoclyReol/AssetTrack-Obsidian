@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { businessLabel, displayError, localeFromLanguage } from "../../src/i18n";
+import { AssetTrackError } from "../../src/application/errors";
 import { setTestLanguage } from "../mocks/obsidian";
 
 afterEach(() => setTestLanguage("zh-CN"));
@@ -57,6 +58,22 @@ describe("locale selection", () => {
     ))).toBe(
       "This debt was already paid on 2026-08-15; it cannot be changed from this month."
     );
+  });
+
+  it("translates structured errors from their codes and parameters", () => {
+    setTestLanguage("en-US");
+    expect(displayError(new AssetTrackError({
+      code: "month.invalid",
+      params: { month: "2026-13" }
+    }))).toBe("Invalid month: 2026-13.");
+    expect(displayError(new AssetTrackError({
+      code: "csv.mapping_required",
+      params: { field: "amount_column" }
+    }))).toBe("Choose a valid amount column.");
+    expect(displayError(new AssetTrackError({
+      code: "ai.http_error",
+      params: { status: 429 }
+    }))).toBe("The AI API returned HTTP 429.");
   });
 
   it("does not leak unmapped Chinese system errors in English", () => {

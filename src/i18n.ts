@@ -1,4 +1,5 @@
 import { getLanguage } from "obsidian";
+import { AssetTrackError, type AssetTrackErrorParams } from "./application/errors";
 
 export type AssetTrackLocale = "zh-CN" | "en";
 
@@ -64,6 +65,707 @@ export function businessLabel(value: string): string {
   return localizedValue(value, BUSINESS_VALUE_EN);
 }
 
+function paramText(params: AssetTrackErrorParams, key: string, fallback = "—"): string {
+  const value = params[key];
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return JSON.stringify(value) ?? fallback;
+}
+
+function structuredErrorText(
+  code: string,
+  params: AssetTrackErrorParams
+): { chinese: string; english: string } | null {
+  switch (code) {
+    case "revision_conflict":
+      return {
+        chinese: `revision 冲突：草稿基于 ${paramText(params, "expected")}，当前数据库为 ${paramText(params, "actual")}。请重新加载。`,
+        english: `Revision conflict: the draft is based on ${paramText(params, "expected")}, but the database is at ${paramText(params, "actual")}. Reload and try again.`
+      };
+    case "rules.revision_conflict":
+      return {
+        chinese: `规则 revision 冲突：预览基于 ${paramText(params, "expected_rules_revision")}，当前规则为 ${paramText(params, "actual_rules_revision")}。请重新生成预览。`,
+        english: `Rules revision conflict: the preview is based on ${paramText(params, "expected_rules_revision")}, but the current rules are at ${paramText(params, "actual_rules_revision")}. Generate the preview again.`
+      };
+    case "transaction.category.invalid_selection":
+      return {
+        chinese: "批量分类只能处理支出、收入或代付流水。",
+        english: "Batch category edits only support expense, income, or paid-on-behalf transactions."
+      };
+    case "transaction.category.mixed_types":
+      return {
+        chinese: "不能同时修改不同收支类型的流水分类，请分开选择。",
+        english: "Transactions with different types cannot have their categories edited together. Select one type at a time."
+      };
+    case "transaction.category.invalid_target":
+      return {
+        chinese: "批量分类必须选择启用中的有效分类。",
+        english: "Batch category edits require an active category."
+      };
+    case "transaction.category.mismatched_target":
+      return {
+        chinese: "批量分类的目标分类必须与所有选中流水的收支类型一致。",
+        english: "The target category must match the transaction type of every selected row."
+      };
+    case "transaction.operation.unsupported":
+      return {
+        chinese: `不支持的流水操作：${paramText(params, "operation_type")}`,
+        english: `Unsupported transaction operation: ${paramText(params, "operation_type")}.`
+      };
+    case "transaction.selection.invalid":
+      return {
+        chinese: "流水选择范围包含无效编号。",
+        english: "The transaction selection contains an invalid ID."
+      };
+    case "transaction.selection.duplicate":
+      return {
+        chinese: "流水选择范围包含重复或空的选择标识。",
+        english: "The transaction selection contains duplicate or empty identifiers."
+      };
+    case "transaction.selection.empty":
+      return {
+        chinese: "请至少选择一条流水。",
+        english: "Select at least one transaction."
+      };
+    case "transaction.selection.not_found":
+      return {
+        chinese: "部分选中的流水已不在当前草稿中，请重新选择。",
+        english: "Some selected transactions are no longer in the current draft. Select them again."
+      };
+    case "transaction.conversion.invalid_source":
+      return {
+        chinese: `只有${paramText(params, "expected")}流水可以执行此转换。`,
+        english: `Only ${businessLabel(paramText(params, "expected"))} transactions can be converted this way.`
+      };
+    case "transaction.validation_failed":
+      return {
+        chinese: "流水质检未通过，请先处理标记为错误的问题。",
+        english: "Transaction validation failed. Resolve the errors before saving."
+      };
+    case "transaction.id_invalid":
+      return {
+        chinese: "流水编号无效、重复，或不属于当前月份。",
+        english: "A transaction ID is invalid, duplicated, or does not belong to the current month."
+      };
+    case "fixed_asset.name_required":
+      return {
+        chinese: `第 ${paramText(params, "row")} 行的资产名称不能为空。`,
+        english: `The asset name in row ${paramText(params, "row")} cannot be empty.`
+      };
+    case "fixed_asset.key_duplicate":
+      return {
+        chinese: "固定资产标识不能重复。",
+        english: "Fixed-asset keys cannot be duplicated."
+      };
+    case "history.filter_required":
+      return {
+        chinese: "商品回溯至少选择一个筛选条件后再加载。",
+        english: "Choose at least one product-history filter before loading."
+      };
+    case "history.selection_required":
+      return {
+        chinese: "请选择至少一条有效历史流水。",
+        english: "Select at least one valid historical transaction."
+      };
+    case "history.selection_duplicate":
+      return {
+        chinese: "历史流水不能重复选择。",
+        english: "A historical transaction cannot be selected more than once."
+      };
+    case "history.selection_not_saved":
+      return {
+        chinese: "部分流水不属于已保存月份，回溯未执行。",
+        english: "Some transactions are not in saved months, so the backfill was not applied."
+      };
+    case "history.category_invalid":
+      return {
+        chinese: "目标分类不存在或已停用。",
+        english: "The target category does not exist or is inactive."
+      };
+    case "history.category_type_mismatch":
+      return {
+        chinese: "目标分类的收支类型与选中流水不一致。",
+        english: "The target category type does not match the selected transactions."
+      };
+    case "history.unresolved_rule_conflict":
+      return {
+        chinese: "选中流水存在未解决的规则冲突，请先处理规则。",
+        english: "Selected transactions have unresolved rule conflicts. Resolve the rules first."
+      };
+    case "history.revision_missing":
+      return {
+        chinese: `缺少 ${paramText(params, "month")} 的 revision。`,
+        english: `The revision for ${paramText(params, "month")} is missing.`
+      };
+    case "history.update_count_mismatch":
+      return {
+        chinese: "历史修改的更新行数与预览不一致，已回滚。",
+        english: "The history update count did not match the preview; the transaction was rolled back."
+      };
+    case "history.target_required":
+      return {
+        chinese: `目标${businessLabel(paramText(params, "field"))}名称不能为空。`,
+        english: `The target ${paramText(params, "field")} name cannot be empty.`
+      };
+    case "analysis.year_invalid":
+      return {
+        chinese: `年份必须是 YYYY：${paramText(params, "year")}`,
+        english: `The year must use YYYY format: ${paramText(params, "year")}.`
+      };
+    case "amount.invalid_number":
+      return {
+        chinese: `${errorFieldLabel(paramText(params, "label", "金额"))}必须是有限数字`,
+        english: `${errorFieldLabel(paramText(params, "label", "金额"))} must be a finite number.`
+      };
+    case "amount.negative":
+      return {
+        chinese: `${errorFieldLabel(paramText(params, "label", "金额"))}不能为负数`,
+        english: `${errorFieldLabel(paramText(params, "label", "金额"))} cannot be negative.`
+      };
+    case "date.invalid_format":
+      return {
+        chinese: "日期必须是 YYYY-MM-DD 或 YYYY/MM/DD",
+        english: "Date must use YYYY-MM-DD or YYYY/MM/DD."
+      };
+    case "month.invalid":
+      return {
+        chinese: `非法月份：${paramText(params, "month")}`,
+        english: `Invalid month: ${paramText(params, "month")}.`
+      };
+    case "month.not_loaded":
+      return {
+        chinese: "当前月份尚未加载。",
+        english: "The current month has not loaded yet."
+      };
+    case "month.creation_order":
+      return {
+        chinese: `只能按自然顺序创建下一个月份：${paramText(params, "target")}`,
+        english: `The next month must be created in calendar order: ${paramText(params, "target")}.`
+      };
+    case "month.creation_limit":
+      return {
+        chinese: `当前最多只能创建到 ${paramText(params, "max")}`,
+        english: `The latest available month is ${paramText(params, "max")}.`
+      };
+    case "month.creation_blocked":
+      return {
+        chinese: "当前不能创建新月份",
+        english: "A new month cannot be created right now."
+      };
+    case "month.draft_exists":
+      return {
+        chinese: `最多只能有一个草稿月份；请先保存或删除 ${paramText(params, "month")}`,
+        english: `Only one draft month is allowed. Save or delete ${paramText(params, "month")} first.`
+      };
+    case "month.not_found":
+      return {
+        chinese: `${paramText(params, "month")} 不存在，无需删除。`,
+        english: `Month ${paramText(params, "month")} does not exist, so there is nothing to delete.`
+      };
+    case "account.definition_invalid":
+      return {
+        chinese: "账户 key、名称或类型无效或重复。",
+        english: "Account keys, names, and types must be valid and unique."
+      };
+    case "account.type_immutable":
+      return {
+        chinese: "已有账户不能改变现金/理财类型。",
+        english: "An existing account cannot switch between cash and investment."
+      };
+    case "account.cash_invalid":
+      return {
+        chinese: "现金账户无效或重复。",
+        english: "A cash account is invalid or duplicated."
+      };
+    case "account.investment_invalid":
+      return {
+        chinese: "理财账户无效或重复。",
+        english: "An investment account is invalid or duplicated."
+      };
+    case "category.definition_invalid":
+      return {
+        chinese: "分类 key 和名称不能为空或重复。",
+        english: "Category keys and names must be present and unique."
+      };
+    case "category.type_invalid":
+      return {
+        chinese: "分类收支类型只能是收入或支出。",
+        english: "A category type must be Income or Expense."
+      };
+    case "category.necessity_invalid":
+      return {
+        chinese: "分类必要性无效。",
+        english: "The category necessity value is invalid."
+      };
+    case "category.pattern_invalid":
+      return {
+        chinese: "分类消费频率无效。",
+        english: "The category spending frequency is invalid."
+      };
+    case "category.type_change_referenced":
+      return {
+        chinese: `分类“${paramText(params, "name")}”已有不匹配的历史引用，不能改变收支类型。`,
+        english: `Category “${paramText(params, "name")}” has incompatible historical references, so its transaction type cannot change.`
+      };
+    case "category.deactivation_referenced":
+      return {
+        chinese: `分类“${paramText(params, "name")}”仍被 ${paramText(params, "transaction_count", "0")} 条流水和 ${paramText(params, "rule_count", "0")} 条规则使用，不能停用。`,
+        english: `Category “${paramText(params, "name")}” is still used by ${paramText(params, "transaction_count", "0")} transactions and ${paramText(params, "rule_count", "0")} rules, so it cannot be deactivated.`
+      };
+    case "category.delete_referenced":
+      return {
+        chinese: `分类“${paramText(params, "name")}”仍有 ${paramText(params, "transaction_count", "0")} 条历史流水和 ${paramText(params, "rule_count", "0")} 条规则引用，不能删除。`,
+        english: `Category “${paramText(params, "name")}” still has ${paramText(params, "transaction_count", "0")} historical transactions and ${paramText(params, "rule_count", "0")} rule references, so it cannot be deleted.`
+      };
+    case "rule.definition_invalid":
+      return {
+        chinese: `第 ${paramText(params, "row")} 条规则无效。`,
+        english: `Rule ${paramText(params, "row")} is invalid.`
+      };
+    case "rule.category_missing":
+      return {
+        chinese: `第 ${paramText(params, "row")} 条规则的分类不存在。`,
+        english: `The category for rule ${paramText(params, "row")} does not exist.`
+      };
+    case "rule.category_inactive":
+      return {
+        chinese: "自动规则不能使用停用分类。",
+        english: "An automatic rule cannot use an inactive category."
+      };
+    case "rule.type_invalid":
+      return {
+        chinese: "自动规则的收支类型只能是支出或收入。",
+        english: "An automatic rule type must be Expense or Income."
+      };
+    case "rule.category_type_mismatch":
+      return {
+        chinese: `${paramText(params, "transaction_type")}规则不能使用分类“${paramText(params, "category")}”。`,
+        english: `${businessLabel(paramText(params, "transaction_type"))} rules cannot use category “${paramText(params, "category")}”.`
+      };
+    case "rule.id_invalid":
+      return {
+        chinese: "自动规则 id 无效或重复。",
+        english: "An automatic rule ID is invalid or duplicated."
+      };
+    case "rule.conflict":
+    case "rule.impact_conflict":
+      return {
+        chinese: `规则冲突：${paramText(params, "description", "存在多个同等级规则")}`,
+        english: `Rule conflict: ${paramText(params, "description", "multiple rules have the same priority")}.`
+      };
+    case "rule.rewrite_chain":
+    case "rule.impact_rewrite_chain":
+      return {
+        chinese: `规则重写链冲突：${paramText(params, "reason", "请修改重写字段")}`,
+        english: `Rule rewrite-chain conflict: ${paramText(params, "reason", "change the rewrite fields")}.`
+      };
+    case "rule.impact_invalid":
+      return {
+        chinese: "规则影响预览失败，请检查规则字段。",
+        english: "The rule impact preview failed. Check the rule fields."
+      };
+    case "rule.impact_category_missing":
+      return {
+        chinese: "规则影响预览失败：目标分类不存在。",
+        english: "The rule impact preview failed because the target category does not exist."
+      };
+    case "rule.impact_category_type_mismatch":
+      return {
+        chinese: "规则影响预览失败：目标分类与收支类型不匹配。",
+        english: "The rule impact preview failed because the target category type does not match."
+      };
+    case "rule.impact_category_inactive":
+      return {
+        chinese: "规则影响预览失败：目标分类已停用。",
+        english: "The rule impact preview failed because the target category is inactive."
+      };
+    case "debt.id_invalid":
+      return {
+        chinese: "借款 id 无效或重复。",
+        english: "A debt ID is invalid or duplicated."
+      };
+    case "debt.future_locked":
+      return {
+        chinese: `借款未来 ${paramText(params, "paid_date")} 已还清，不可修改此月借款。`,
+        english: `This debt was already paid on ${paramText(params, "paid_date")}; it cannot be changed from this month.`
+      };
+    case "debt.start_date_invalid":
+      return {
+        chinese: "借款发生日期必须是 YYYY-MM-DD、YYYY/MM/DD 或 YYYY-MM。",
+        english: "A debt start date must be YYYY-MM-DD, YYYY/MM/DD, or YYYY-MM."
+      };
+    case "debt.paid_date_invalid":
+      return {
+        chinese: "借款还清日期必须是 YYYY-MM-DD、YYYY/MM/DD 或 YYYY-MM。",
+        english: "A debt paid date must be YYYY-MM-DD, YYYY/MM/DD, or YYYY-MM."
+      };
+    case "debt.paid_date_required":
+      return {
+        chinese: "已还借款必须填写还清日期。",
+        english: "A paid debt requires a paid date."
+      };
+    case "debt.paid_date_before_start":
+      return {
+        chinese: "借款还清日期不能早于发生日期。",
+        english: "A debt paid date cannot be earlier than its start date."
+      };
+    case "operation.logs_section_required":
+      return {
+        chinese: "操作日志只能随流水区块一起提交。",
+        english: "Operation logs can only be submitted with the transaction section."
+      };
+    case "operation.preview_selection_mismatch":
+    case "operation.preview_metadata_mismatch":
+    case "operation.preview_ids_mismatch":
+    case "operation.preview_counts_changed":
+    case "operation.preview_month_mismatch":
+    case "operation.preview_row_deleted":
+    case "operation.preview_row_missing":
+    case "operation.preview_fields_missing":
+    case "operation.preview_status_changed":
+    case "operation.preview_change_mismatch":
+    case "operation.preview_draft_mismatch":
+    case "operation.preview_uncategorized_changed":
+    case "operation.preview_category_changed":
+      return {
+        chinese: "流水操作预览已失效，请重新生成后再保存。",
+        english: "The transaction operation preview is no longer valid. Generate it again before saving."
+      };
+    case "backup.directory_required":
+      return {
+        chinese: "请选择备份导出目录",
+        english: "Choose a backup export directory."
+      };
+    case "backup.schema_invalid":
+      return {
+        chinese: "SQLite schema 校验失败。",
+        english: "SQLite schema validation failed."
+      };
+    case "backup.zip.directory_invalid":
+      return { chinese: "ZIP 目录无效。", english: "The ZIP directory is invalid." };
+    case "backup.zip.member_limit":
+      return {
+        chinese: `ZIP 文件数量超过安全上限（${paramText(params, "limit")}）。`,
+        english: `The ZIP contains more than the safety limit of ${paramText(params, "limit")} files.`
+      };
+    case "backup.zip.central_directory_invalid":
+      return { chinese: "ZIP 中央目录无效。", english: "The ZIP central directory is invalid." };
+    case "backup.zip.uncompressed_limit":
+      return {
+        chinese: "ZIP 解压后体积超过安全上限。",
+        english: "The uncompressed ZIP exceeds the safety limit."
+      };
+    case "backup.zip.unsafe_path":
+      return {
+        chinese: `ZIP 包含非法路径：${paramText(params, "path")}`,
+        english: `The ZIP contains an unsafe path: ${paramText(params, "path")}`
+      };
+    case "backup.zip.local_directory_invalid":
+      return { chinese: "ZIP 本地目录无效。", english: "The ZIP local directory is invalid." };
+    case "backup.zip.compression_unsupported":
+      return {
+        chinese: `ZIP 压缩算法不受支持：${paramText(params, "method")}`,
+        english: `The ZIP compression method is not supported: ${paramText(params, "method")}`
+      };
+    case "backup.zip.size_mismatch":
+      return {
+        chinese: `ZIP 文件大小不匹配：${paramText(params, "path")}`,
+        english: `The ZIP file size does not match: ${paramText(params, "path")}`
+      };
+    case "backup.database_missing":
+      return {
+        chinese: "完整备份缺少 accounting_system.db。",
+        english: "The complete backup is missing accounting_system.db."
+      };
+    case "backup.source_missing":
+      return {
+        chinese: `备份来源不存在：${paramText(params, "path")}`,
+        english: `The backup source does not exist: ${paramText(params, "path")}`
+      };
+    case "backup.source_unsupported":
+      return {
+        chinese: `不支持的备份来源：${paramText(params, "path")}`,
+        english: `The backup source is not supported: ${paramText(params, "path")}`
+      };
+    case "backup.manifest_unreadable":
+      return {
+        chinese: "manifest.json 无法读取。",
+        english: "manifest.json could not be read."
+      };
+    case "backup.format_unsupported":
+      return {
+        chinese: `不支持的备份格式版本：${paramText(params, "version")}`,
+        english: `The backup format version is not supported: ${paramText(params, "version")}`
+      };
+    case "backup.manifest_tables_invalid":
+      return {
+        chinese: "manifest 的必需表清单不完整或顺序不匹配。",
+        english: "The manifest required-table list is incomplete or out of order."
+      };
+    case "backup.manifest_summary_invalid":
+      return {
+        chinese: "manifest 的表摘要不完整。",
+        english: "The manifest table summary is incomplete."
+      };
+    case "backup.file_digest_mismatch":
+      return {
+        chinese: `文件校验失败：${paramText(params, "filename")}`,
+        english: `File validation failed: ${paramText(params, "filename")}`
+      };
+    case "backup.csv_missing":
+      return {
+        chinese: `备份缺少 CSV：${paramText(params, "filename")}`,
+        english: `The backup is missing CSV file ${paramText(params, "filename")}.`
+      };
+    case "backup.csv_columns_mismatch":
+      return {
+        chinese: `CSV 字段不匹配：${paramText(params, "filename")}`,
+        english: `CSV columns do not match for ${paramText(params, "filename")}.`
+      };
+    case "backup.row_count_mismatch":
+      return {
+        chinese: `数据库、CSV 与 manifest 行数不一致：${paramText(params, "table")}`,
+        english: `Database, CSV, and manifest row counts differ for ${paramText(params, "table")}.`
+      };
+    case "backup.content_digest_mismatch":
+      return {
+        chinese: `数据库与 CSV 内容摘要不一致：${paramText(params, "table")}`,
+        english: `Database and CSV content digests differ for ${paramText(params, "table")}.`
+      };
+    case "sqlite.runtime_unavailable": {
+      const reason = paramText(params, "reason", "unknown runtime error");
+      return {
+        chinese: `当前 Obsidian 桌面运行时不支持 node:sqlite（${reason}）。请下载并安装新版 Obsidian 桌面安装器后重试。`,
+        english: `The current Obsidian desktop runtime does not support node:sqlite (${englishError(reason)}). Download and install a newer Obsidian desktop installer, then try again.`
+      };
+    }
+    case "sqlite.api_incomplete":
+      return {
+        chinese: "当前 Obsidian 桌面运行时缺少完整的 node:sqlite API。",
+        english: "The current Obsidian desktop runtime does not provide the complete node:sqlite API."
+      };
+    case "sqlite.node_version_unsupported":
+      return {
+        chinese: `当前 Node.js 版本 ${paramText(params, "node")} 不满足要求（至少 22.16）。`,
+        english: `Node.js ${paramText(params, "node")} is not supported; version 22.16 or newer is required.`
+      };
+    case "database.empty_user_version":
+      return {
+        chinese: `空数据库的 user_version 必须为 0，当前为 ${paramText(params, "version")}`,
+        english: `An empty database must have user_version 0, but it is ${paramText(params, "version")}.`
+      };
+    case "database.validation_failed":
+      return {
+        chinese: `SQLite schema 校验失败${paramText(params, "version", "") ? `（版本 ${paramText(params, "version")}）` : ""}`,
+        english: `SQLite schema validation failed${paramText(params, "version", "") ? ` (version ${paramText(params, "version")})` : ""}.`
+      };
+    case "database.snapshot_validation_failed":
+      return {
+        chinese: "schema 保护备份校验失败。",
+        english: "The schema protection snapshot failed validation."
+      };
+    case "database.restoring":
+      return {
+        chinese: "数据库正在恢复，请稍后重试",
+        english: "The database is being restored. Try again shortly."
+      };
+    case "database.already_open":
+      return {
+        chinese: "数据库已在运行；请使用迁移当前库或载入目标库",
+        english: "A database is already open. Migrate the current database or load the target database."
+      };
+    case "database.file_exists_use_load":
+      return {
+        chinese: "所选目录已有 accounting_system.db，请使用载入数据库",
+        english: "The selected directory already contains accounting_system.db. Use Load database."
+      };
+    case "database.file_missing":
+      return {
+        chinese: "所选目录没有 accounting_system.db",
+        english: "The selected directory does not contain accounting_system.db."
+      };
+    case "database.not_ready":
+      return {
+        chinese: "当前数据库尚未就绪",
+        english: "The current database is not ready."
+      };
+    case "database.directory_in_use":
+      return {
+        chinese: "所选目录就是当前数据目录",
+        english: "The selected directory is already in use."
+      };
+    case "database.unsaved_changes":
+      return {
+        chinese: "当前编辑器存在未保存草稿，不能切换数据目录",
+        english: "The editor has unsaved changes, so the data directory cannot be switched."
+      };
+    case "database.migration_target_exists":
+      return {
+        chinese: "目标目录已有 accounting_system.db，迁移不会覆盖",
+        english: "The target directory already contains accounting_system.db. Migration will not overwrite it."
+      };
+    case "database.invalid_database":
+      return {
+        chinese: "所选目录没有有效数据库",
+        english: "The selected directory does not contain a valid database."
+      };
+    case "database.migration_validation_failed":
+      return {
+        chinese: "迁移数据库校验失败",
+        english: "Migrated database validation failed."
+      };
+    case "database.migration_blocked":
+      return {
+        chinese: "数据库迁移已阻止，请先处理迁移报告中的问题。",
+        english: "Database migration was blocked. Resolve the issues in the migration report first."
+      };
+    case "database.protection_backup_invalid":
+      return {
+        chinese: "保护备份校验失败",
+        english: "Protection backup validation failed."
+      };
+    case "filesystem.desktop_vault_required":
+      return {
+        chinese: "Asset Track 仅支持桌面文件系统 Vault",
+        english: "Asset Track supports desktop filesystem vaults only."
+      };
+    case "rules.unsaved_changes":
+      return {
+        chinese: "当前有未保存的分类或规则修改，请先保存后再直接创建规则。",
+        english: "Save the current category or rule changes before creating a rule directly."
+      };
+    case "rules.duplicate":
+      return {
+        chinese: "相同收支、匹配范围和条件的规则已经存在。",
+        english: "A rule with the same type, scope, and conditions already exists."
+      };
+    case "import.file_too_large":
+    case "IMPORT_FILE_TOO_LARGE": {
+      const limit = paramText(params, "limitMiB", "20");
+      return {
+        chinese: `账单文件不能超过 ${limit} MiB；请拆分后重新导入。`,
+        english: `Statement files cannot exceed ${limit} MiB. Split the file and import it again.`
+      };
+    }
+    case "workspace.relative_required":
+      return {
+        chinese: "Asset-track 数据目录必须是 Vault 内的相对路径",
+        english: "The Asset Track data directory must be a relative path inside the vault."
+      };
+    case "workspace.invalid_character":
+      return {
+        chinese: "Asset-track 数据目录包含无效字符",
+        english: "The Asset Track data directory contains an invalid character."
+      };
+    case "workspace.dot_segment":
+      return {
+        chinese: "Asset-track 数据目录不能包含 . 或 ..",
+        english: "The Asset Track data directory cannot contain \".\" or \"..\"."
+      };
+    case "workspace.outside_vault":
+      return {
+        chinese: "Asset-track 数据路径超出当前 Vault",
+        english: "The Asset Track data path is outside the current vault."
+      };
+    case "workspace.data_directory_required":
+      return {
+        chinese: "尚未选择 Asset-track 数据目录",
+        english: "No Asset Track data directory has been selected."
+      };
+    case "native.file_picker_unavailable":
+      return {
+        chinese: "当前 Obsidian 桌面运行时无法打开系统文件选择器",
+        english: "The current desktop runtime cannot open the system file picker."
+      };
+    case "csv.header_missing":
+      return {
+        chinese: "CSV 没有可识别的表头",
+        english: "The CSV file has no recognizable header row."
+      };
+    case "csv.worksheet_missing":
+      return {
+        chinese: "工作簿中没有可读取的工作表",
+        english: "The workbook has no readable worksheet."
+      };
+    case "csv.worksheet_header_missing":
+      return {
+        chinese: "工作表没有可识别的表头",
+        english: "The worksheet has no recognizable header row."
+      };
+    case "csv.extension_unsupported":
+      return {
+        chinese: "当前导入入口支持 CSV、XLSX 和 XLS 文件",
+        english: "This import flow supports CSV, XLSX, and XLS files."
+      };
+    case "csv.mapping_required": {
+      const field = csvFieldLabel(paramText(params, "field"));
+      return {
+        chinese: `请选择有效的${field.chinese}列`,
+        english: `Choose a valid ${field.english} column.`
+      };
+    }
+    case "csv.mapping_missing": {
+      const field = csvFieldLabel(paramText(params, "field"));
+      return {
+        chinese: `选择的${field.chinese}列不存在`,
+        english: `The selected ${field.english} column does not exist.`
+      };
+    }
+    case "csv.file_not_selected":
+      return {
+        chinese: "尚未选择账单文件。",
+        english: "No statement file has been selected."
+      };
+    case "transaction.selection.no_editable_rows":
+      return {
+        chinese: "当前选择没有可修改的流水。",
+        english: "The current selection has no editable transactions."
+      };
+    case "ai.timeout":
+      return {
+        chinese: `AI 请求超时（${paramText(params, "timeoutMs")} ms）`,
+        english: `The AI request timed out after ${paramText(params, "timeoutMs")} ms.`
+      };
+    case "ai.http_error":
+      return {
+        chinese: `AI API 返回 HTTP ${paramText(params, "status")}`,
+        english: `The AI API returned HTTP ${paramText(params, "status")}.`
+      };
+    case "ai.configuration_missing":
+      return {
+        chinese: "请先在设置中配置 AI API 地址和模型。",
+        english: "Configure the AI API endpoint and model in Settings first."
+      };
+    case "ai.api_key_missing":
+      return {
+        chinese: "请先在设置中配置 AI API Key。",
+        english: "Configure the AI API key in Settings first."
+      };
+    case "validation_error": {
+      const message = paramText(params, "message", "校验失败");
+      return {
+        chinese: message,
+        english: englishError(message)
+      };
+    }
+    default:
+      return null;
+  }
+}
+
+export function errorMessage(
+  code: string,
+  params: AssetTrackErrorParams = {}
+): string {
+  const translated = structuredErrorText(code, params);
+  if (translated) return isChinese() ? translated.chinese : translated.english;
+  return isChinese()
+    ? paramText(params, "message", `操作失败：${code}`)
+    : "Asset Track could not complete this operation.";
+}
+
 function errorFieldLabel(value: string): string {
   return {
     "购买价格": "Purchase price",
@@ -72,6 +774,18 @@ function errorFieldLabel(value: string): string {
     "流动现金": "Liquid cash",
     "余额": "Balance"
   }[value] ?? businessLabel(value);
+}
+
+function csvFieldLabel(value: string): { chinese: string; english: string } {
+  return {
+    date_column: { chinese: "日期/时间", english: "date/time" },
+    product_column: { chinese: "商品或说明", english: "item or description" },
+    amount_column: { chinese: "金额", english: "amount" },
+    type_column: { chinese: "收支方向", english: "transaction type" },
+    counterparty_column: { chinese: "交易对方", english: "counterparty" },
+    category_column: { chinese: "分类", english: "category" },
+    status_column: { chinese: "交易状态", english: "transaction status" }
+  }[value] ?? { chinese: value, english: value };
 }
 
 function englishError(raw: string): string {
@@ -161,8 +875,8 @@ function englishError(raw: string): string {
       "Choose Expense, Income, Paid on behalf, Investment contribution, or Investment withdrawal.",
     "特殊类型流水不能设置分类":
       "Special transaction types cannot have a category.",
-    "代付、加仓、提现的分类必须为空":
-      "Paid on behalf, investment contribution, and investment withdrawal transactions must have an empty category.",
+    "加仓、提现的分类必须为空":
+      "Investment contribution and investment withdrawal transactions must have an empty category.",
     "API 不完整": "The node:sqlite API is incomplete.",
     "Asset-track 数据目录必须是 Vault 内的相对路径":
       "The Asset Track data directory must be a relative path inside the vault.",
@@ -243,6 +957,24 @@ function englishError(raw: string): string {
   if (mismatchedCategory) return `${businessLabel(mismatchedCategory[1])} uses a mismatched category.`;
   const chooseCategory = /^请选择(支出|收入)类分类$/.exec(raw);
   if (chooseCategory) return `Choose an ${businessLabel(chooseCategory[1])} category.`;
+  if (/^批量分类只能处理支出、收入或代付流水。?$/.test(raw)) {
+    return "Batch category edits only support expense, income, or paid-on-behalf transactions.";
+  }
+  if (/^不能同时修改不同收支类型的流水分类，请分开选择。?$/.test(raw)) {
+    return "Transactions with different types cannot have their categories edited together. Select one type at a time.";
+  }
+  if (/^操作目标分类不存在或已停用，请重新生成预览$/.test(raw)) {
+    return "The operation target category does not exist or is inactive. Generate the preview again.";
+  }
+  if (/^操作目标分类与流水收支类型不匹配，请重新生成预览$/.test(raw)) {
+    return "The operation target category does not match the transaction type. Generate the preview again.";
+  }
+  if (/^操作预览的未分类目标已变化，请重新生成预览$/.test(raw)) {
+    return "The uncategorized operation target changed. Generate the preview again.";
+  }
+  if (/^操作预览的目标分类已变化，请重新生成预览$/.test(raw)) {
+    return "The operation target category changed. Generate the preview again.";
+  }
   const validColumn = /^请选择有效的(.+)列$/.exec(raw);
   if (validColumn) {
     const label = {
@@ -366,19 +1098,16 @@ function englishError(raw: string): string {
 }
 
 export function displayError(error: unknown): string {
+  if (error instanceof AssetTrackError) {
+    return errorMessage(error.code, error.params);
+  }
   const structured = typeof error === "object" && error !== null
     ? error as {
         code?: string;
-        params?: Record<string, string | number | boolean | null>;
+        params?: AssetTrackErrorParams;
       }
     : null;
-  if (structured?.code === "IMPORT_FILE_TOO_LARGE") {
-    const limit = structured.params?.limitMiB ?? 20;
-    return t(
-      `账单文件不能超过 ${limit} MiB；请拆分后重新导入。`,
-      `Statement files cannot exceed ${limit} MiB. Split the file and import it again.`
-    );
-  }
+  if (structured?.code) return errorMessage(structured.code, structured.params);
   const raw = error instanceof Error ? error.message : String(error);
   if (isChinese()) return raw;
   return englishError(raw);

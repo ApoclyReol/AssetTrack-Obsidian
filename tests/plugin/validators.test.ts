@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { validateTransactions } from "../../src/domain/validators";
-import type { CategoryDefinition } from "../../src/types";
+import type {
+  CategoryDefinition
+} from "../../src/types/configuration";
 
 const categories: CategoryDefinition[] = [{
   category_key: "cat-food",
@@ -64,6 +66,30 @@ describe("transaction validation severity", () => {
       expect.objectContaining({ field: "日期", severity: "错误" }),
       expect.objectContaining({ field: "金额", severity: "错误" }),
       expect.objectContaining({ field: "收支", severity: "错误" })
+    ]));
+  });
+
+  it("allows uncategorized daifu but validates a provided category", () => {
+    const valid = validateTransactions([{
+      transaction_date: "2026-01-01",
+      type: "代付",
+      category_key: null,
+      category: "",
+      product: "代付午餐",
+      amount: 10
+    }], "2026-01", categories);
+    expect(valid.some((issue) => issue.field === "分类")).toBe(false);
+
+    const invalid = validateTransactions([{
+      transaction_date: "2026-01-01",
+      type: "代付",
+      category_key: "missing",
+      category: "不存在",
+      product: "代付午餐",
+      amount: 10
+    }], "2026-01", categories);
+    expect(invalid).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "分类", severity: "警告" })
     ]));
   });
 });

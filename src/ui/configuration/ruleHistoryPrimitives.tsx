@@ -1,19 +1,25 @@
 import type {
-  HistoricalProductStat,
+  HistoricalProductStat
+} from "../../types/rules";
+import type {
   ProductHistoryIssueFilter,
   ProductHistoryQuery
-} from "../../types";
-import { AssetTrackError } from "../../services/AssetTrackService";
+} from "../../types/history";
+import { AssetTrackError } from "../../application/errors";
 import { displayError, t } from "../../i18n";
 import { scalarText } from "../../domain/text";
 import type { HistoryFilters, HistorySort } from "./ruleHistoryTypes";
 
-export function queryFromFilters(filters: HistoryFilters): ProductHistoryQuery {
-  const query: ProductHistoryQuery = {};
+export function queryFromFilters(
+  filters: HistoryFilters,
+  groupBy: "product" | "counterparty" = "product"
+): ProductHistoryQuery {
+  const query: ProductHistoryQuery = groupBy === "counterparty" ? { group_by: groupBy } : {};
   if (filters.transaction_type) query.transaction_type = filters.transaction_type;
   if (filters.category_key) query.category_key = filters.category_key;
   if (filters.issue_filter) query.issue_filter = filters.issue_filter;
   if (filters.product_search.trim()) query.product_search = filters.product_search.trim();
+  if (filters.counterparty_search.trim()) query.counterparty_search = filters.counterparty_search.trim();
   if (filters.from_month) query.from_month = filters.from_month;
   if (filters.to_month) query.to_month = filters.to_month;
   const minimum = Number(filters.min_occurrences);
@@ -36,6 +42,7 @@ export function initialFilters(
     category_key: initialQuery?.category_key ?? "",
     issue_filter: initialQuery?.issue_filter ?? defaultIssueFilter,
     product_search: initialQuery?.product_search ?? "",
+    counterparty_search: initialQuery?.counterparty_search ?? "",
     from_month: initialQuery?.from_month ?? "",
     to_month: initialQuery?.to_month ?? "",
     min_occurrences: initialQuery?.min_occurrences === undefined

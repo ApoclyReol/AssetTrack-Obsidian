@@ -3,7 +3,15 @@
 import { useState } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { CategoryDefinition, DebtRecord, Transaction } from "../../src/types";
+import type {
+  CategoryDefinition
+} from "../../src/types/configuration";
+import type {
+  DebtRecord
+} from "../../src/types/month";
+import type {
+  Transaction
+} from "../../src/types/transactions";
 import { MonthDebtSection } from "../../src/ui/MonthDebtSection";
 import { TransactionSummaryTable, TransactionTable } from "../../src/ui/TransactionTables";
 
@@ -69,6 +77,14 @@ describe("month debt and special transaction rows", () => {
         rows={rows}
         visibleIndexes={[0]}
         categories={categories}
+        investmentAccounts={[{
+          account_key: "investment-default",
+          name: "默认理财账户",
+          principal: 0,
+          market_value: 0,
+          cash_balance: 0,
+          is_active: true
+        }]}
         onUpdate={vi.fn()}
         onDelete={vi.fn()}
         onAdd={vi.fn()}
@@ -77,10 +93,12 @@ describe("month debt and special transaction rows", () => {
 
     expect(screen.queryByText("分类")).toBeNull();
     expect(screen.queryByText("无需分类")).toBeNull();
+    expect(screen.getByLabelText("加仓第 1 行账户")).toBeDefined();
     expect(screen.queryByLabelText("加仓第 1 行分类")).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
   });
 
-  it("removes latest date from item summary and keeps type/category sortable", () => {
+  it("removes rule coverage from item summary and keeps type/category sortable", () => {
     const onSort = vi.fn();
     const rows: Transaction[] = [
       {
@@ -114,12 +132,14 @@ describe("month debt and special transaction rows", () => {
         expanded=""
         onExpanded={vi.fn()}
         onUpdate={vi.fn()}
+        onDelete={vi.fn()}
       />
     );
 
     expect(screen.queryByText("最近日期")).toBeNull();
+    expect(screen.queryByText("规则覆盖")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "收支排序" }));
+    fireEvent.click(screen.getByRole("button", { name: "类型排序" }));
     expect(onSort).toHaveBeenCalledWith({ key: "type", direction: "asc" });
 
     fireEvent.click(screen.getByRole("button", { name: "分类排序" }));
@@ -149,6 +169,7 @@ describe("month debt and special transaction rows", () => {
           expanded={expanded}
           onExpanded={setExpanded}
           onUpdate={vi.fn()}
+          onDelete={vi.fn()}
         />
       );
     }
@@ -158,5 +179,57 @@ describe("month debt and special transaction rows", () => {
 
     expect(screen.queryByText("无需分类")).toBeNull();
     expect(screen.queryByRole("combobox")).toBeNull();
+  });
+
+  it("aligns summary details with the parent columns", () => {
+    const rows: Transaction[] = [{
+      id: 1,
+      transaction_date: "2026-01-01",
+      type: "支出",
+      category_key: "food",
+      category: "餐饮改善",
+      counterparty: "咖啡店",
+      product: "咖啡",
+      amount: 20
+    }];
+    const categories: CategoryDefinition[] = [{
+      category_key: "food",
+      name: "餐饮改善",
+      transaction_type: "支出",
+      necessity: "不适用",
+      pattern: "不适用",
+      is_big_ticket: false,
+      color: "#ffffff",
+      is_active: true,
+      sort_order: 0
+    }];
+    function Harness() {
+      const [expanded, setExpanded] = useState("");
+      return (
+        <TransactionSummaryTable
+          rows={rows}
+          categories={categories}
+          sort={null}
+          onSort={vi.fn()}
+          expanded={expanded}
+          onExpanded={setExpanded}
+          onUpdate={vi.fn()}
+          onDelete={vi.fn()}
+          selectedTransactionKeys={new Set()}
+          onToggleTransaction={vi.fn()}
+          renderRuleControls={() => <button type="button">新建规则</button>}
+        />
+      );
+    }
+
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "展开逐项" }));
+
+    expect(screen.getByRole("columnheader", { name: "行号" })).toBeDefined();
+    expect(screen.getByRole("columnheader", { name: "交易对手商品金额日期" })).toBeDefined();
+    expect(screen.getByDisplayValue("2026-01-01")).toBeDefined();
+    expect(screen.getByLabelText("选择支出第 1 行")).toBeDefined();
+    expect(screen.getByText("新建规则")).toBeDefined();
+    expect(screen.getByText("删除")).toBeDefined();
   });
 });

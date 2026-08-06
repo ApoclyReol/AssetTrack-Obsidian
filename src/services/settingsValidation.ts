@@ -1,10 +1,13 @@
 import type {
-  AssetTrackSettings,
+  AssetTrackSettings
+} from "../types/settings";
+import type {
   CsvColumnMapping,
   CsvMappingProfile
-} from "../types";
+} from "../types/csv";
 import { normalizeDataDirectory } from "./workspacePath";
 import { isCurrencyCode } from "../domain/moneyFormat";
+import { displayError } from "../i18n";
 
 export interface SettingsParseResult {
   settings: AssetTrackSettings;
@@ -81,7 +84,7 @@ export function parseAssetTrackSettings(value: unknown): SettingsParseResult {
     } catch (error) {
       issues.push(
         `已忽略无效数据目录：${
-          error instanceof Error ? error.message : String(error)
+          displayError(error)
         }`
       );
     }
@@ -117,6 +120,14 @@ export function parseAssetTrackSettings(value: unknown): SettingsParseResult {
     && Number.isFinite(source.largeExpenseThreshold)
     && source.largeExpenseThreshold > 0
     ? source.largeExpenseThreshold : 1000;
+  const aiEndpoint = typeof source.aiEndpoint === "string" ? source.aiEndpoint.trim() : "";
+  const aiModel = typeof source.aiModel === "string" ? source.aiModel.trim() : "";
+  const aiTimeoutMs = typeof source.aiTimeoutMs === "number"
+    && Number.isFinite(source.aiTimeoutMs)
+    && source.aiTimeoutMs >= 5_000
+    && source.aiTimeoutMs <= 300_000
+    ? Math.trunc(source.aiTimeoutMs)
+    : 60_000;
 
   return {
     settings: {
@@ -125,7 +136,10 @@ export function parseAssetTrackSettings(value: unknown): SettingsParseResult {
       baseCurrency,
       currencyFormat,
       reconciliationTolerance,
-      largeExpenseThreshold
+      largeExpenseThreshold,
+      aiEndpoint,
+      aiModel,
+      aiTimeoutMs
     },
     issues
   };

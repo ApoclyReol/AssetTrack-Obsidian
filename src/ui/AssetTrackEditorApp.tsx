@@ -13,15 +13,22 @@ import {
   type RulesMode
 } from "../constants";
 import type {
-  CsvColumnMapping,
-  AssetTrackSettings,
-  MonthCreationPolicy,
+  CsvColumnMapping
+} from "../types/csv";
+import type {
+  AssetTrackSettings
+} from "../types/settings";
+import type {
+  MonthCreationPolicy
+} from "../types/configuration";
+import { AssetTrackError } from "../application/errors";
+import type {
   MonthSection
-} from "../types";
-import type { AssetTrackService } from "../services/AssetTrackService";
+} from "../types/month";
+import type { EditorShellPort } from "../services/ports";
 import { AnalysisView } from "./AnalysisView";
-import { RulesEditorV2, type RulesEditorHandle } from "./RulesEditor";
-export { RulesEditorV2 } from "./RulesEditor";
+import { RulesEditor, type RulesEditorHandle } from "./RulesEditor";
+export { RulesEditor } from "./RulesEditor";
 import {
   reconciliationTone,
   reconciliationStatus
@@ -34,6 +41,7 @@ import {
   messageFor
 } from "./editorPrimitives";
 import type { EditorDraftSnapshot } from "./editorDraft";
+import type { EditorSession } from "./editorSession";
 import {
   MONTH_SECTIONS,
   MonthEditor,
@@ -44,7 +52,7 @@ export { MonthEditor } from "./MonthEditor";
 
 interface Props {
   app: App;
-  api: AssetTrackService;
+  api: EditorShellPort;
   settings: AssetTrackSettings;
   hostWindow: Window;
   confirmAction: (
@@ -61,8 +69,7 @@ interface Props {
   initialAnalysisMode: AnalysisMode;
   initialMonth?: string;
   initialDraft?: EditorDraftSnapshot;
-  onDirtyChange: (dirty: boolean) => void;
-  onDraftSnapshotChange: (snapshot: EditorDraftSnapshot | null) => void;
+  onSessionChange: (snapshot: EditorDraftSnapshot | null) => void;
   onStateChange: (
     mode: EditorMode,
     analysisMode: AnalysisMode,
@@ -127,8 +134,7 @@ export function AssetTrackEditorApp({
   initialAnalysisMode,
   initialMonth,
   initialDraft,
-  onDirtyChange,
-  onDraftSnapshotChange,
+  onSessionChange,
   onStateChange,
   notifyDataChanged,
   subscribeDataChanges,
@@ -141,12 +147,12 @@ export function AssetTrackEditorApp({
     currencyFormat: settings.currencyFormat
   });
   const recoveryDraft = useRef(initialDraft);
-  const handleDraftSnapshotChange = useCallback((
+  const handleSessionChange = useCallback((
     snapshot: EditorDraftSnapshot | null
   ) => {
     recoveryDraft.current = snapshot ?? undefined;
-    onDraftSnapshotChange(snapshot);
-  }, [onDraftSnapshotChange]);
+    onSessionChange(snapshot);
+  }, [onSessionChange]);
   const [mode, setMode] = useState<EditorMode>(
     recoveryDraft.current?.kind ?? initialMode
   );
@@ -165,7 +171,6 @@ export function AssetTrackEditorApp({
       ? recoveryDraft.current.month
       : initialMonth ?? ""
   );
-  const [dirty, setDirty] = useState(Boolean(recoveryDraft.current));
   const [dataVersion, setDataVersion] = useState(0);
   const [monthMetrics, setMonthMetrics] = useState<MonthMetrics | null>(null);
   const monthEditorRef = useRef<MonthEditorHandle>(null);
@@ -221,20 +226,16 @@ export function AssetTrackEditorApp({
     }),
     [refreshMonths, subscribeDataChanges]
   );
-  useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
   useEffect(
     () => onStateChange(mode, analysisMode, month),
     [analysisMode, mode, month, onStateChange]
   );
 
   const settleCurrentPage = async (
-    isDirty: () => boolean,
-    hasUnsavedChanges: () => boolean,
-    save: () => Promise<void>,
-    reload: () => Promise<void>,
+    session: EditorSession | null,
     pageLabel: string
   ): Promise<boolean> => {
-    if (!isDirty()) return true;
+    if (!session || !session.hasUnsavedChanges()) return true;
     const action = await chooseAction<UnsavedPageAction>(
       t("当前页面有未保存修改", "This page has unsaved changes"),
       t(`当前${pageLabel}有未保存修改，请选择下一步。`, `The current ${pageLabel} has unsaved changes. Choose what to do next.`),
@@ -245,14 +246,13 @@ export function AssetTrackEditorApp({
       ]
     );
     if (action === "save") {
-      await save();
-      if (!isDirty()) return true;
+      if (await session.save() && !session.hasUnsavedChanges()) return true;
       new Notice(t(`当前${pageLabel}仍有未保存修改，未切换。`, `The current ${pageLabel} still has unsaved changes. The view was not switched.`));
       return false;
     }
     if (action !== "discard") return false;
-    await reload();
-    if (isDirty() || hasUnsavedChanges()) {
+    await session.discard();
+    if (session.hasUnsavedChanges()) {
       new Notice(t(`当前${pageLabel}未能重载，未切换。`, `The current ${pageLabel} could not be reloaded. The view was not switched.`));
       return false;
     }
@@ -260,25 +260,11 @@ export function AssetTrackEditorApp({
   };
 
   const settleTransactionPage = async (): Promise<boolean> => {
-    if (!monthEditorRef.current) return true;
-    return settleCurrentPage(
-      monthEditorRef.current.isSectionDirty,
-      monthEditorRef.current.hasUnsavedChanges,
-      monthEditorRef.current.save,
-      monthEditorRef.current.reload,
-      t("流水区块", "transaction section")
-    );
+    return settleCurrentPage(monthEditorRef.current, t("流水区块", "transaction section"));
   };
 
   const settleRulesPage = async (): Promise<boolean> => {
-    if (!rulesEditorRef.current) return true;
-    return settleCurrentPage(
-      rulesEditorRef.current.isSectionDirty,
-      rulesEditorRef.current.hasUnsavedChanges,
-      rulesEditorRef.current.save,
-      rulesEditorRef.current.reload,
-      t("配置子页面", "configuration subpage")
-    );
+    return settleCurrentPage(rulesEditorRef.current, t("配置子页面", "configuration subpage"));
   };
 
   const switchMode = async (next: EditorMode): Promise<void> => {
@@ -289,39 +275,24 @@ export function AssetTrackEditorApp({
         ? await settleRulesPage()
         : true;
     if (!pageSettled) return;
-    const remainingDraft = mode === "transactions"
-      ? monthEditorRef.current?.hasUnsavedChanges() ?? false
-      : mode === "rules"
-        ? rulesEditorRef.current?.hasUnsavedChanges() ?? false
-        : dirty;
-    if (remainingDraft && !await confirmAction(
-      t("放弃其他未保存修改？", "Discard other unsaved changes?"),
-      t("当前还有未保存修改。放弃这些修改并切换？", "There are still unsaved changes. Discard them and switch?"),
-      t("放弃并切换", "Discard and switch")
-    )) return;
-    setDirty(false);
-    handleDraftSnapshotChange(null);
     setMode(next);
   };
   const selectMonth = async (next: string): Promise<void> => {
     if (next === month) return;
     if (mode === "transactions" && !await settleTransactionPage()) return;
-    const remainingDraft = mode === "transactions"
-      ? monthEditorRef.current?.hasUnsavedChanges() ?? false
-      : dirty;
-    if (remainingDraft && !await confirmAction(
-      t("放弃其他未保存修改？", "Discard other unsaved changes?"),
-      t("当前还有未保存修改。放弃这些修改并切换月份？", "There are still unsaved changes. Discard them and switch months?"),
-      t("放弃并切换", "Discard and switch")
-    )) return;
-    setDirty(false);
-    handleDraftSnapshotChange(null);
+    if (mode === "rules" && !await settleRulesPage()) return;
     setMonth(next);
   };
   const createNext = async () => {
     if (mode === "transactions" && !await settleTransactionPage()) return;
+    if (mode === "rules" && !await settleRulesPage()) return;
     if (!monthPolicy?.can_create) {
-      throw new Error(monthPolicy?.reason ?? t("当前不能创建新月份", "A new month cannot be created right now."));
+      const reason = monthPolicy?.reason;
+      throw new AssetTrackError({
+        code: reason?.code ?? "month.creation_blocked",
+        status: 422,
+        params: reason?.params
+      });
     }
     const target = monthPolicy.next_target;
     await api.createMonth(target);
@@ -475,7 +446,9 @@ export function AssetTrackEditorApp({
         <MonthEditor
           key={month}
           ref={monthEditorRef}
+          app={app}
           api={api}
+          settings={settings}
           hostWindow={hostWindow}
           month={month}
           months={months}
@@ -492,29 +465,27 @@ export function AssetTrackEditorApp({
             await refreshMonths();
             setDataVersion((value) => value + 1);
           }}
-          onDirty={setDirty}
           initialDraft={recoveryDraft.current?.kind === "transactions"
             ? recoveryDraft.current
             : undefined}
-          onDraftChange={handleDraftSnapshotChange}
+          onSessionChange={handleSessionChange}
           getCsvMapping={getCsvMapping}
           saveCsvMapping={saveCsvMapping}
         />
       )}
       {mode === "transactions" && !month && <EmptyState text={t("尚无月份，请创建第一个月份。", "No months exist yet. Create the first month.")} />}
       {mode === "rules" && (
-        <RulesEditorV2
+        <RulesEditor
           ref={rulesEditorRef}
           app={app}
           api={api}
           hostWindow={hostWindow}
           dataVersion={dataVersion}
           onSectionChange={setRulesMode}
-          onDirty={setDirty}
           initialDraft={recoveryDraft.current?.kind === "rules"
             ? recoveryDraft.current
             : undefined}
-          onDraftChange={handleDraftSnapshotChange}
+          onSessionChange={handleSessionChange}
           onSaved={() => setDataVersion((value) => value + 1)}
           onDataChanged={notifyDataChanged}
           confirmAction={confirmAction}

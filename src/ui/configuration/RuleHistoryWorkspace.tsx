@@ -8,9 +8,11 @@ import {
 } from "react";
 import type {
   CategoryBackfillPreview,
-  HistoricalProductStat,
   ProductHistoryTransaction
-} from "../../types";
+} from "../../types/history";
+import type {
+  HistoricalProductStat
+} from "../../types/rules";
 import type { HistoryBackfillContentProps, HistoryFilters, HistorySort } from "./ruleHistoryTypes";
 import { t } from "../../i18n";
 import { normalizeProductKey } from "../../domain/rules";
@@ -34,11 +36,14 @@ export function HistoryBackfillContent({
   detailOnly = false,
   detailGroup,
   overview = false,
+  groupBy = "product",
   confirmAction,
   onSaved,
   onDataChanged,
   onOpenDetail,
   onOpenProductRename,
+  onOpenCounterpartyRename,
+  onGroupBy,
   onCreateRule,
   hideIssueFilter = false,
   onQueryChange,
@@ -59,10 +64,10 @@ export function HistoryBackfillContent({
   const autoLoadTimer = useRef<number | null>(null);
 
   const query = useMemo(
-    () => queryFromFilters(overview ? { ...filters, issue_filter: "" } : filters),
-    [filters, overview]
+    () => queryFromFilters(overview ? { ...filters, issue_filter: "" } : filters, groupBy),
+    [filters, groupBy, overview]
   );
-  const hasFilter = Object.keys(query).length > 0;
+  const hasFilter = Object.keys(query).some((key) => key !== "group_by");
   const sortedGroups = useMemo(
     () => sortGroups(groups ?? [], sort),
     [groups, sort]
@@ -85,8 +90,8 @@ export function HistoryBackfillContent({
         ? t("正在加载商品总览…", "Loading item overview…")
         : t("正在加载筛选后的历史统计…", "Loading filtered history statistics…"));
     try {
-      const result = overview && mode === "product" && Object.keys(requestedQuery).length === 0
-        ? await api.productOverview()
+      const result = overview && mode === "product" && !Object.keys(requestedQuery).some((key) => key !== "group_by")
+        ? await api.productOverview(requestedQuery)
         : categoryMode
           ? await api.productHistory(requestedQuery)
           : await api.productHistoryIndex(requestedQuery);
@@ -107,7 +112,7 @@ export function HistoryBackfillContent({
 
   const updateFilter = (next: Partial<HistoryFilters>) => {
     const nextFilters = { ...filters, ...next };
-    const nextQuery = queryFromFilters(overview ? { ...nextFilters, issue_filter: "" } : nextFilters);
+    const nextQuery = queryFromFilters(overview ? { ...nextFilters, issue_filter: "" } : nextFilters, groupBy);
     const dynamicLoad = mode === "product" && !detailOnly && hasLoadedOnce;
     requestSequence.current += 1;
     setLoading(false);
@@ -122,13 +127,13 @@ export function HistoryBackfillContent({
       hostWindow.clearTimeout(autoLoadTimer.current);
       autoLoadTimer.current = null;
     }
-    if (dynamicLoad && (overview || Object.keys(nextQuery).length > 0)) {
+    if (dynamicLoad && (overview || Object.keys(nextQuery).some((key) => key !== "group_by"))) {
       autoLoadTimer.current = hostWindow.setTimeout(() => {
         void loadStatsForQuery(nextQuery);
       }, 250);
     } else {
       setGroups(null);
-      if (!overview && Object.keys(nextQuery).length === 0) {
+      if (!overview && !Object.keys(nextQuery).some((key) => key !== "group_by")) {
         setMessage(t("请选择至少一个筛选条件。", "Choose at least one filter."));
       }
     }
@@ -146,7 +151,7 @@ export function HistoryBackfillContent({
       overview ? "" : "conflict"
     );
     setFilters(nextFilters);
-    onQueryChange?.(queryFromFilters(overview ? { ...nextFilters, issue_filter: "" } : nextFilters));
+    onQueryChange?.(queryFromFilters(overview ? { ...nextFilters, issue_filter: "" } : nextFilters, groupBy));
     setGroups(null);
     setHasLoadedOnce(false);
     setSelectedGroup(null);
@@ -359,6 +364,8 @@ export function HistoryBackfillContent({
   return <div className="asset-track-rule-history-modal-content">
     {mode === "product" && !detailOnly && (!embedded || overview) && <RuleHistoryFilters
       categories={categories}
+      groupBy={groupBy}
+      onGroupBy={onGroupBy}
       filters={filters}
       overview={overview}
       hideIssueFilter={hideIssueFilter}
@@ -384,8 +391,10 @@ export function HistoryBackfillContent({
           sort={sort}
           onSort={setSort}
           onOpenDetail={(group) => { void openDetail(group); }}
-          onOpenProductRename={onOpenProductRename}
+          onOpenProductRename={groupBy === "product" ? onOpenProductRename : undefined}
+          onOpenCounterpartyRename={groupBy === "counterparty" ? onOpenCounterpartyRename : undefined}
           onCreateRule={onCreateRule}
+          groupBy={groupBy}
         />
       : <ProductHealthTable
           groups={sortedGroups}

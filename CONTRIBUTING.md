@@ -7,7 +7,7 @@ AssetTrack 处理本地个人财务数据。修改前先阅读 `AGENTS.md`，检
 
 - TypeScript Domain、Repository 和 Service 是唯一生产实现；不要重新引入
   Python、HTTP API、sidecar 或平台原生扩展。
-- SQLite schema 9 是当前唯一开发 schema。财务公式、revision、事务、备份与
+- SQLite schema 10 是当前唯一开发 schema。财务公式、revision、事务、备份与
   恢复边界必须由 TypeScript 测试保护。
 - 新功能必须包含 Repository 校验、明确反馈和失败时保留草稿。
 - 不提交数据库、备份、日志、Vault、依赖、虚拟环境或构建产物。

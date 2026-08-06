@@ -12,10 +12,30 @@ import {
   HistoryBackfillContent,
   ProductRenameContent
 } from "../../src/ui/RuleHistoryModal";
-import type { AssetTrackService } from "../../src/services/AssetTrackService";
+import type { ConfigurationEditorPort } from "../../src/services/ports";
 import type {
   HistoricalProductStat
-} from "../../src/types";
+} from "../../src/types/rules";
+
+function configurationApi(overrides: Partial<ConfigurationEditorPort> = {}): ConfigurationEditorPort {
+  return {
+    ruleWorkspaceShell: vi.fn(),
+    saveRules: vi.fn(),
+    ruleImpactPreview: vi.fn(),
+    ruleWorkspaceAnalytics: vi.fn(),
+    productOverview: vi.fn(),
+    productHistoryIndex: vi.fn(),
+    productHistory: vi.fn(),
+    previewCategoryBackfill: vi.fn(),
+    applyCategoryBackfill: vi.fn(),
+    previewProductRename: vi.fn(),
+    applyProductRename: vi.fn(),
+    previewCounterpartyRename: vi.fn(),
+    applyCounterpartyRename: vi.fn(),
+    saveCategories: vi.fn(),
+    ...overrides
+  };
+}
 
 describe("rule history workspace loading", () => {
   afterEach(cleanup);
@@ -26,12 +46,12 @@ describe("rule history workspace loading", () => {
       rules_revision: 1,
       groups: []
     });
-    const api = {
+    const api = configurationApi({
       productHistoryIndex: loadStats,
       productHistory: vi.fn(),
       previewCategoryBackfill: vi.fn(),
       applyCategoryBackfill: vi.fn()
-    } as unknown as AssetTrackService;
+    });
     render(
       <HistoryBackfillContent
         api={api}
@@ -59,12 +79,12 @@ describe("rule history workspace loading", () => {
       rows: []
     });
     const loadIndex = vi.fn();
-    const api = {
+    const api = configurationApi({
       productHistoryIndex: loadIndex,
       productHistory: loadCategory,
       previewCategoryBackfill: vi.fn(),
       applyCategoryBackfill: vi.fn()
-    } as unknown as AssetTrackService;
+    });
     render(
       <HistoryBackfillContent
         api={api}
@@ -111,12 +131,12 @@ describe("rule history workspace loading", () => {
         rules_revision: 1,
         groups: []
       });
-    const api = {
+    const api = configurationApi({
       productHistoryIndex: loadStats,
       productHistory: vi.fn(),
       previewCategoryBackfill: vi.fn(),
       applyCategoryBackfill: vi.fn()
-    } as unknown as AssetTrackService;
+    });
     render(
       <HistoryBackfillContent
         api={api}
@@ -145,13 +165,13 @@ describe("rule history workspace loading", () => {
       groups: []
     });
     const loadIndex = vi.fn();
-    const api = {
+    const api = configurationApi({
       productOverview: loadOverview,
       productHistoryIndex: loadIndex,
       productHistory: vi.fn(),
       previewCategoryBackfill: vi.fn(),
       applyCategoryBackfill: vi.fn()
-    } as unknown as AssetTrackService;
+    });
     render(
       <HistoryBackfillContent
         api={api}
@@ -213,7 +233,7 @@ describe("rule history workspace loading", () => {
       rule_status: "未创建",
       history_rule_mismatch: false
     } satisfies HistoricalProductStat;
-    const loadCandidates = vi.fn<AssetTrackService["productHistory"]>()
+    const loadCandidates = vi.fn<ConfigurationEditorPort["productHistory"]>()
       .mockResolvedValue({
       groups: [],
       rows: [{
@@ -269,11 +289,11 @@ describe("rule history workspace loading", () => {
       updated_count: 2,
       revisions: { "2026-01": 5, "2026-02": 6 }
     });
-    const api = {
+    const api = configurationApi({
       productHistory: loadCandidates,
       previewProductRename,
       applyProductRename
-    } as unknown as AssetTrackService;
+    });
     const onClose = vi.fn();
 
     render(

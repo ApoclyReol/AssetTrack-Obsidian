@@ -3,37 +3,62 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AssetTrackRepository } from "../database/AssetTrackRepository";
 import { DatabaseManager } from "../database/DatabaseManager";
+import { CURRENT_SCHEMA_VERSION } from "../database/schema";
 import { inspectCsv, previewCsv } from "../domain/csv";
+import {
+  previewTransactionOperation as buildTransactionOperationPreview,
+  validateTransactionOperationRequest
+} from "../domain/transactionOperations";
 import type {
   AccountDefinition,
-  AnnualOverview,
+  CategoryDefinition,
+  MonthCreationPolicy
+} from "../types/configuration";
+import type {
+  AnnualOverview
+} from "../types/analysis";
+import type {
   CategoryBackfillPreview,
   CategoryBackfillRequest,
   CategoryBackfillResult,
-  CategoryDefinition,
-  CsvColumnMapping,
-  CsvImportPreview,
-  CsvInspection,
-  CurrentAsset,
-  FixedAsset,
-  MonthCreationPolicy,
-  MonthSectionSaveRequest,
-  MonthWorkspace,
   ProductRenamePreview,
   ProductRenameRequest,
   ProductRenameResult,
+  CounterpartyRenamePreview,
+  CounterpartyRenameRequest,
+  CounterpartyRenameResult,
   ProductHistoryQuery,
   ProductHistoryResult,
-  RuleInsights,
-  RuleWorkspace,
-  SaveRuleWorkspaceRequest,
+  ProductHistoryIndexResult
+} from "../types/history";
+import type {
+  CsvColumnMapping,
+  CsvImportPreview,
+  CsvInspection
+} from "../types/csv";
+import type {
+  CurrentAsset,
+  FixedAsset,
+  MonthSectionSaveRequest,
+  MonthWorkspace
+} from "../types/month";
+import type {
   Transaction
-} from "../types";
+} from "../types/transactions";
+import type {
+  TransactionOperationPreviewRequest,
+  OperationAuditContext,
+  OperationPreview
+} from "../types/operations";
+import type {
+  RuleCandidate,
+  RuleWorkspaceShell,
+  RuleImpactPreview,
+  RuleWorkspaceAnalytics
+} from "../types/rules";
 import { BackupService } from "./BackupService";
-import {
-  AssetTrackError,
-  type AssetTrackService
-} from "./AssetTrackService";
+import type { AssetTrackService } from "./AssetTrackService";
+import { AssetTrackError } from "../application/errors";
 
 export class LocalAssetTrackService implements AssetTrackService {
   private readonly repository: AssetTrackRepository;
@@ -62,7 +87,7 @@ export class LocalAssetTrackService implements AssetTrackService {
       app_name: "Asset Track",
       app_version: this.pluginVersion,
       protocol_version: "typescript-local-1",
-      schema_version: 9,
+      schema_version: CURRENT_SCHEMA_VERSION,
       source_revision: this.sourceRevision()
     };
   }
@@ -110,6 +135,10 @@ export class LocalAssetTrackService implements AssetTrackService {
       fixed_assets: FixedAsset[];
       debt_revision?: number;
       debts?: MonthWorkspace["debts"];
+      operation_logs: Array<{
+        preview: OperationPreview;
+        selection: string[];
+      }>;
     }
   ): Promise<MonthWorkspace> {
     this.ready();
@@ -125,7 +154,8 @@ export class LocalAssetTrackService implements AssetTrackService {
         : {
             expected_revision: payload.debt_revision,
             rows: payload.debts
-          }
+          },
+      payload.operation_logs
     );
   }
 
@@ -158,6 +188,69 @@ export class LocalAssetTrackService implements AssetTrackService {
     return this.repository.rulesPreview(month, rows);
   }
 
+  async previewTransactionOperation(
+    request: TransactionOperationPreviewRequest
+  ): Promise<{ preview: OperationPreview; rows: Transaction[] }> {
+    this.ready();
+    const requestIssues = validateTransactionOperationRequest(request.rows, request);
+    if (requestIssues.length) {
+      const issue = requestIssues[0];
+      throw new AssetTrackError({
+        code: issue.code,
+        status: 422,
+        params: issue.params
+      });
+    }
+    const currentRules = this.repository.rules();
+    if (request.rules_revision !== undefined && request.rules_revision !== currentRules.revision) {
+      throw new AssetTrackError({
+        code: "rules.revision_conflict",
+        status: 409,
+        params: {
+          expected_rules_revision: request.rules_revision,
+          actual_rules_revision: currentRules.revision
+        }
+      });
+    }
+    const ruleRows = request.rules ?? currentRules.rows;
+    if (request.operation_type === "bulk-edit-category") {
+      const targetKey = request.target_category_key?.trim() ?? "";
+      const category = this.repository.categories().rows.find((row) => row.category_key === targetKey);
+      const targetValue = request.target_value?.trim() ?? "";
+      const selected = request.rows.filter((row, index) => {
+        const id = typeof row.id === "number" ? row.id : null;
+        return (id !== null && request.transaction_ids.includes(id))
+          || (request.transaction_keys ?? []).includes(
+            row.id !== undefined ? `id:${row.id}` : `client:${row.client_id ?? `row-${index}`}`
+          );
+      });
+      if (!targetKey && !targetValue) {
+        return buildTransactionOperationPreview(
+          request.rows,
+          request,
+          ruleRows as import("../domain/rules").RuleRow[]
+        );
+      }
+      if (!category || !category.is_active) {
+        throw new AssetTrackError({
+          code: "transaction.category.invalid_target",
+          status: 422,
+        });
+      }
+      if (selected.some((row) => (row.type === "代付" ? "支出" : row.type) !== category.transaction_type)) {
+        throw new AssetTrackError({
+          code: "transaction.category.mismatched_target",
+          status: 422,
+        });
+      }
+    }
+    return buildTransactionOperationPreview(
+      request.rows,
+      request,
+      ruleRows as import("../domain/rules").RuleRow[]
+    );
+  }
+
   async inspectCsv(
     month: string,
     filename: string,
@@ -183,7 +276,7 @@ export class LocalAssetTrackService implements AssetTrackService {
     const byName = new Map(categories.map((category) => [category.name, category]));
     preview.rows = preview.rows.map((row) => {
       const definition = byName.get(row.category);
-      if (["代付", "加仓", "提现"].includes(row.type)) {
+      if (["加仓", "提现"].includes(row.type)) {
         return { ...row, category: "", category_key: null };
       }
       return { ...row, category_key: definition?.category_key ?? null };
@@ -200,42 +293,37 @@ export class LocalAssetTrackService implements AssetTrackService {
     month: string;
     rules_revision: number;
     min_occurrences: number;
-    rows: import("../types").RuleCandidate[];
+    rows: RuleCandidate[];
   }> {
     this.ready();
     return this.repository.ruleCandidates(month, rows, minOccurrences);
   }
 
-  async ruleInsights(minOccurrences = 2): Promise<RuleInsights> {
-    this.ready();
-    return this.repository.ruleInsights(minOccurrences);
-  }
-
-  async ruleWorkspace(minOccurrences = 2): Promise<RuleWorkspace> {
-    this.ready();
-    return this.repository.ruleWorkspace(minOccurrences);
-  }
-
-  async ruleWorkspaceShell(): Promise<import("../types").RuleWorkspaceShell> {
+  async ruleWorkspaceShell(): Promise<RuleWorkspaceShell> {
     this.ready();
     return this.repository.ruleWorkspaceShell();
   }
 
+  async ruleImpactPreview(rule: import("../domain/rules").RuleRow): Promise<RuleImpactPreview> {
+    this.ready();
+    return this.repository.ruleImpactPreview(rule);
+  }
+
   async ruleWorkspaceAnalytics(
     minOccurrences = 2
-  ): Promise<import("../types").RuleWorkspaceAnalytics> {
+  ): Promise<RuleWorkspaceAnalytics> {
     this.ready();
     return this.repository.ruleWorkspaceAnalytics(minOccurrences);
   }
 
-  async productOverview(): Promise<import("../types").ProductHistoryIndexResult> {
+  async productOverview(query: ProductHistoryQuery = {}): Promise<ProductHistoryIndexResult> {
     this.ready();
-    return this.repository.productOverview();
+    return this.repository.productOverview(query);
   }
 
   async productHistoryIndex(
     query: ProductHistoryQuery
-  ): Promise<import("../types").ProductHistoryIndexResult> {
+  ): Promise<ProductHistoryIndexResult> {
     this.ready();
     return this.repository.productHistoryIndex(query);
   }
@@ -271,9 +359,16 @@ export class LocalAssetTrackService implements AssetTrackService {
     return this.repository.applyProductRename(request);
   }
 
-  async saveRuleWorkspace(request: SaveRuleWorkspaceRequest): Promise<RuleWorkspace> {
+  async previewCounterpartyRename(
+    request: Omit<CounterpartyRenameRequest, "expected_month_revisions">
+  ): Promise<CounterpartyRenamePreview> {
     this.ready();
-    return this.repository.saveRuleWorkspace(request);
+    return this.repository.previewCounterpartyRename(request);
+  }
+
+  async applyCounterpartyRename(request: CounterpartyRenameRequest): Promise<CounterpartyRenameResult> {
+    this.ready();
+    return this.repository.applyCounterpartyRename(request);
   }
 
   async debts(): Promise<{ revision: number; rows: MonthWorkspace["debts"] }> {
@@ -299,10 +394,11 @@ export class LocalAssetTrackService implements AssetTrackService {
 
   async saveRules(
     revision: number,
-    rows: Array<Record<string, unknown>>
+    rows: Array<Record<string, unknown>>,
+    audit?: OperationAuditContext
   ): Promise<unknown> {
     this.ready();
-    return this.repository.saveRules(revision, rows);
+    return this.repository.saveRules(revision, rows, audit);
   }
 
   async categories(): Promise<{
@@ -315,10 +411,11 @@ export class LocalAssetTrackService implements AssetTrackService {
 
   async saveCategories(
     revision: number,
-    rows: CategoryDefinition[]
+    rows: CategoryDefinition[],
+    audit?: OperationAuditContext
   ): Promise<{ revision: number; rows: CategoryDefinition[] }> {
     this.ready();
-    return this.repository.saveCategories(revision, rows);
+    return this.repository.saveCategories(revision, rows, audit);
   }
 
   async accounts(): Promise<{
@@ -343,7 +440,10 @@ export class LocalAssetTrackService implements AssetTrackService {
   }> {
     this.ready();
     if (!directory) {
-      throw new AssetTrackError("请选择备份导出目录", 422);
+      throw new AssetTrackError({
+        code: "backup.directory_required",
+        status: 422
+      });
     }
     const result = await this.backups.exportZip(directory);
     return {
@@ -413,7 +513,7 @@ export class LocalAssetTrackService implements AssetTrackService {
     const status = this.manager.isOpen ? this.manager.validate(false) : null;
     return createHash("sha256")
       .update(JSON.stringify({
-        schema: status?.schema_version ?? 9,
+        schema: status?.schema_version ?? CURRENT_SCHEMA_VERSION,
         database: this.manager.getPath()
       }))
       .digest("hex")

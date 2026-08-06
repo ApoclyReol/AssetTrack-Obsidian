@@ -11,8 +11,10 @@ import {
   XAxis,
   YAxis
 } from "recharts";
-import type { AnnualOverview } from "../types";
-import type { AssetTrackService } from "../services/AssetTrackService";
+import type {
+  AnnualOverview
+} from "../types/analysis";
+import type { AnalysisPort } from "../services/ports";
 import { businessLabel, displayError, getLocale, t } from "../i18n";
 import { money } from "../domain/moneyFormat";
 import { sampleAnnualRows } from "./analysisModel";
@@ -39,7 +41,7 @@ export function AnnualAnalysis({
   year,
   dataVersion
 }: {
-  api: AssetTrackService;
+  api: AnalysisPort;
   year: string;
   dataVersion: number;
 }) {
@@ -116,7 +118,7 @@ export function AnnualAnalysis({
             <Bar yAxisId="flow" dataKey="total_expense" name={t("支出", "Expense")} fill={OUTFLOW} />
             <Line yAxisId="asset" type="monotone" dataKey="cash" name={t("现金", "Cash")} stroke={GOLD} strokeWidth={2} dot={false} />
             <Line yAxisId="asset" type="monotone" dataKey="market_net_assets" name={t("市场净资产", "Market net assets")} stroke={PURPLE} strokeWidth={3} dot={false} />
-            <Line yAxisId="asset" type="monotone" dataKey="cost_assets" name={t("资金投入资产", "Cost assets")} stroke={BLUE} strokeWidth={2} dot={false} />
+            <Line yAxisId="asset" type="monotone" dataKey="cost_assets" name={t("总资产", "Total assets")} stroke={BLUE} strokeWidth={2} dot={false} />
           </ComposedChart>
         </ResponsiveContainer>
       </ChartPanel>
@@ -241,7 +243,7 @@ export function AnnualAnalysis({
             <Bar yAxisId="flow" dataKey="total_expense" name={t("支出", "Expense")} fill={OUTFLOW} />
             <Line yAxisId="asset" type="monotone" dataKey="cash" name={t("现金", "Cash")} stroke={GOLD} dot={false} />
             <Line yAxisId="asset" type="monotone" dataKey="market_net_assets" name={t("市场净资产", "Market net assets")} stroke={PURPLE} strokeWidth={2.5} dot={false} />
-            <Line yAxisId="asset" type="monotone" dataKey="cost_assets" name={t("资金投入资产", "Cost assets")} stroke={BLUE} strokeWidth={2} dot={false} />
+            <Line yAxisId="asset" type="monotone" dataKey="cost_assets" name={t("总资产", "Total assets")} stroke={BLUE} strokeWidth={2} dot={false} />
           </ComposedChart>
         </ResponsiveContainer>
       </ChartPanel>

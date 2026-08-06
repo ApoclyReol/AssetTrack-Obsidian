@@ -3,7 +3,9 @@ import {
   groupTransactions,
   normalizeProduct
 } from "../../src/ui/transactionGrouping";
-import type { Transaction } from "../../src/types";
+import type {
+  Transaction
+} from "../../src/types/transactions";
 
 function row(overrides: Partial<Transaction>): Transaction {
   return {
@@ -39,5 +41,38 @@ describe("transaction grouping", () => {
 
   it("normalizes width, case, spaces and punctuation conservatively", () => {
     expect(normalizeProduct(" Ａb C！")).toBe("abc");
+  });
+
+  it("reports rule coverage and item-rule coverage for grouped rows", () => {
+    const rows = [
+      row({ id: 1, counterparty: "商户甲", product: "咖啡" }),
+      row({ id: 2, counterparty: "商户甲", product: "茶" }),
+      row({ id: 3, counterparty: "商户乙", product: "咖啡" })
+    ];
+    const groups = groupTransactions(rows, "counterparty", undefined, [{
+      id: 7,
+      transaction_type: "支出",
+      match_scope: "product",
+      counterparty: "",
+      product: "咖啡",
+      category_key: "food",
+      category: "餐饮基础"
+    }]);
+
+    expect(groups[0]).toMatchObject({
+      label: "商户甲",
+      count: 2,
+      matchedCount: 1,
+      unmatchedCount: 1,
+      itemRuleCoveredCount: 1,
+      ruleCoverage: "partial",
+      ruleIds: [7]
+    });
+    expect(groups[1]).toMatchObject({
+      label: "商户乙",
+      matchedCount: 1,
+      ruleCoverage: "full",
+      itemRuleCoveredCount: 1
+    });
   });
 });

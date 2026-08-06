@@ -10,8 +10,13 @@ import {
   XAxis,
   YAxis
 } from "recharts";
-import type { MonthWorkspace } from "../types";
-import type { AssetTrackService } from "../services/AssetTrackService";
+import type {
+  InvestmentAccountAnalysis
+} from "../types/configuration";
+import type {
+  MonthWorkspace
+} from "../types/month";
+import type { AnalysisPort } from "../services/ports";
 import {
   buildAnomalyDisplayRows,
   changeTone,
@@ -41,7 +46,7 @@ export function MonthlyAnalysis({
   dataVersion,
   reconciliationTolerance
 }: {
-  api: AssetTrackService;
+  api: AnalysisPort;
   month: string;
   dataVersion: number;
   reconciliationTolerance: number;
@@ -83,6 +88,24 @@ export function MonthlyAnalysis({
     ? overview.reconciliation.discrepancy
     : null;
   const discrepancyStatus = reconciliationStatus(discrepancy, reconciliationTolerance);
+  const investmentAccounts: InvestmentAccountAnalysis[] = overview.investment_accounts
+    ?? (overview.investment ? [{
+      account_key: "aggregate",
+      name: t("全部理财账户", "All investment accounts"),
+      principal: overview.investment.principal,
+      deposit: 0,
+      withdraw: 0,
+      market_value: overview.investment.market_value,
+      cash_balance: overview.investment.cash_balance,
+      position: overview.investment.position,
+      profit: overview.investment.profit,
+      roi_percent: overview.investment.roi_percent,
+      comparison: {
+        ...overview.investment.comparison,
+        previous_roi_percent: null,
+        roi_delta_percent: null
+      }
+    }] : []);
   return (
     <>
       <div className="asset-track-analysis-heading">
@@ -135,32 +158,33 @@ export function MonthlyAnalysis({
           </div>
         </ChartPanel>
         <ChartPanel title={t("理财状态", "Investment status")}>
-          <div className="asset-track-analysis-list">
-            <div><span>{t("本金", "Principal")}</span><strong>{money(overview.investment?.principal)}</strong></div>
-            <div><span>{t("市值", "Market value")}</span><strong>{money(overview.investment?.market_value)}</strong></div>
-            <div><span>{t("流动现金", "Liquid cash")}</span><strong>{money(overview.investment?.cash_balance)}</strong></div>
-            <div><span>{t("收益率", "Return")}</span><strong>{percent(overview.investment?.roi_percent)}</strong></div>
-            <div>
-              <span>{t("对比上月", "Compared with previous month")}</span>
-              <strong className={
-                (overview.investment?.comparison.amount_delta ?? 0) > 0
-                  ? "is-growth"
-                  : (overview.investment?.comparison.amount_delta ?? 0) < 0
-                    ? "is-decline"
-                    : ""
-              }>
-                {overview.investment?.comparison.available
-                  ? `${signed(
-                    overview.investment.comparison.amount_delta,
-                    money
-                  )}（${signed(
-                    overview.investment.comparison.percent_delta,
-                    percent
-                  )}）`
-                  : t("不可比较", "Unavailable")}
-              </strong>
-            </div>
-          </div>
+          {investmentAccounts.length ? investmentAccounts.map((account) => {
+            const flow = [
+              account.deposit > 0 ? `${t("加仓", "Added")} ${money(account.deposit)}` : "",
+              account.withdraw > 0 ? `${t("提现", "Withdrawn")} ${money(account.withdraw)}` : ""
+            ].filter(Boolean).join("，");
+            return <div className="asset-track-investment-account" key={account.account_key}>
+              <h4>{account.name}</h4>
+              <div className="asset-track-analysis-list">
+                <div><span>{t("本金", "Principal")}</span><strong>{money(account.principal)}{flow ? <small>（{flow}）</small> : null}</strong></div>
+                <div><span>{t("市值", "Market value")}</span><strong>{money(account.market_value)}</strong></div>
+                <div><span>{t("流动资金", "Liquid funds")}</span><strong>{money(account.cash_balance)}</strong></div>
+                <div><span>{t("仓位", "Position")}</span><strong>{money(account.position)}</strong></div>
+                <div><span>{t("收益率", "Return")}</span><strong>{percent(account.roi_percent)}</strong></div>
+                <div>
+                  <span>{t("对比上月", "Compared with previous month")}</span>
+                  <strong className={account.comparison.amount_delta !== null && account.comparison.amount_delta > 0
+                    ? "is-growth"
+                    : account.comparison.amount_delta !== null && account.comparison.amount_delta < 0
+                      ? "is-decline" : ""}>
+                    {account.comparison.available
+                      ? `${signed(account.comparison.amount_delta, money)}（${t("收益率", "Return")} ${signed(account.comparison.roi_delta_percent, percent)}）`
+                      : t("不可比较", "Unavailable")}
+                  </strong>
+                </div>
+              </div>
+            </div>;
+          }) : <Empty text={t("暂无理财账户。", "No investment accounts.")} />}
         </ChartPanel>
       </div>
       <div className="asset-track-analysis-grid is-three">

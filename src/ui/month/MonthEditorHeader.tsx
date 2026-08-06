@@ -1,10 +1,17 @@
-import type { MonthSection, MonthWorkspace } from "../../types";
+import type {
+  MonthSection,
+  MonthWorkspace
+} from "../../types/month";
+import type {
+  TransactionBusinessTab
+} from "../../types/operations";
 import { businessLabel, t } from "../../i18n";
 import { money } from "../../domain/moneyFormat";
 import { type MonthMetrics } from "../monthEditorModel";
 import { reconciliationStatus, reconciliationTone } from "../analysisModel";
 import { debtSummary } from "../MonthDebtSection";
 import type { OperationState } from "../editorPrimitives";
+import { TRANSACTION_BUSINESS_TABS } from "./MonthEditorTransactionsSection";
 
 interface MonthEditorHeaderProps {
   activeSection?: MonthSection;
@@ -14,10 +21,13 @@ interface MonthEditorHeaderProps {
   dirtySections: MonthSection[];
   monthMetrics: MonthMetrics;
   reconciliationTolerance: number;
+  businessTab: TransactionBusinessTab;
+  hasSelectedTransactions?: boolean;
   emptyMonth: boolean;
   deleteConfirm: string;
   showDeleteConfirm: boolean;
   onOpenImport: () => void;
+  onBusinessTabChange: (tab: TransactionBusinessTab) => void;
   onApplyRules: () => Promise<void>;
   onReload: () => Promise<void>;
   onSave: () => Promise<void>;
@@ -72,10 +82,13 @@ export function MonthEditorHeader({
   dirtySections,
   monthMetrics,
   reconciliationTolerance,
+  businessTab,
+  hasSelectedTransactions = false,
   emptyMonth,
   deleteConfirm,
   showDeleteConfirm,
   onOpenImport,
+  onBusinessTabChange,
   onApplyRules,
   onReload,
   onSave,
@@ -94,8 +107,28 @@ export function MonthEditorHeader({
     <>
       {activeSection && (
         <section className="asset-track-month-header asset-track-page-heading">
-          <div>
-            <h2>{activeSectionTitle(activeSection, draft)}</h2>
+          <div className="asset-track-page-heading-content">
+            <div className="asset-track-page-heading-main">
+              <h2>{activeSectionTitle(activeSection, draft)}</h2>
+              {activeSection === "transactions" && <div
+                className="asset-track-transaction-business-tabs"
+                role="tablist"
+                aria-label={t("流水业务类型", "Transaction business type")}
+              >
+                {TRANSACTION_BUSINESS_TABS.map((tab) => (
+                  <button
+                    key={tab.value}
+                    type="button"
+                    role="tab"
+                    className={businessTab === tab.value ? "is-active" : ""}
+                    aria-selected={businessTab === tab.value}
+                    onClick={() => onBusinessTabChange(tab.value)}
+                  >
+                    {t(tab.label, tab.englishLabel)}
+                  </button>
+                ))}
+              </div>}
+            </div>
             {activeSection === "debts" && <span>{(() => {
               const summary = debtSummary(draft.debts);
               return t(
@@ -111,13 +144,16 @@ export function MonthEditorHeader({
           <div className="asset-track-page-actions">
             {activeSection === "transactions" && <>
               {importButton(onOpenImport, state.kind === "pending")}
-              <button
+              {businessTab !== "investment" && <button
                 type="button"
-                disabled={state.kind === "pending"}
+                disabled={state.kind === "pending" || hasSelectedTransactions}
+                title={hasSelectedTransactions
+                  ? t("当前已有选中流水，请先取消选择后再应用全部规则。", "Selected rows are active. Clear the selection before applying all rules.")
+                  : undefined}
                 onClick={() => void onApplyRules()}
               >
                 {t("应用规则", "Apply rules")}
-              </button>
+              </button>}
             </>}
             <button
               type="button"
@@ -150,13 +186,16 @@ export function MonthEditorHeader({
         </div>
         <div className="asset-track-actions">
           {importButton(onOpenImport, state.kind === "pending")}
-          <button
+          {businessTab !== "investment" && <button
             type="button"
-            disabled={state.kind === "pending"}
+            disabled={state.kind === "pending" || hasSelectedTransactions}
+            title={hasSelectedTransactions
+              ? t("当前已有选中流水，请先取消选择后再应用全部规则。", "Selected rows are active. Clear the selection before applying all rules.")
+              : undefined}
             onClick={() => void onApplyRules()}
           >
             {t("应用规则", "Apply rules")}
-          </button>
+          </button>}
           <button
             type="button"
             disabled={state.kind === "pending"}

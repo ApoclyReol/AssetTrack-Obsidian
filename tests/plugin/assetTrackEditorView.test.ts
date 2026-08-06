@@ -13,8 +13,7 @@ import {
 } from "../../src/views/AssetTrackEditorView";
 
 interface TestViewFields {
-  dirty: boolean;
-  draftSnapshot: EditorDraftSnapshot | null;
+  sessionSnapshot: EditorDraftSnapshot | null;
   state: AssetTrackViewState;
   root: { unmount: () => void } | null;
   confirmAction: () => Promise<boolean>;
@@ -54,8 +53,7 @@ function setup(discard: boolean) {
   };
   const unmount = vi.fn();
   Object.assign(view as unknown as TestViewFields, {
-    dirty: true,
-    draftSnapshot: snapshot,
+    sessionSnapshot: snapshot,
     state: { mode: "transactions", analysisMode: "annual", month: "2026-08" },
     root: { unmount },
     confirmAction: vi.fn().mockResolvedValue(discard)

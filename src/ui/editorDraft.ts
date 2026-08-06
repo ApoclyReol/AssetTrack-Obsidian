@@ -1,9 +1,13 @@
 import type {
-  CategoryDefinition,
+  CategoryDefinition
+} from "../types/configuration";
+import type {
   MonthWorkspace,
-  MonthSection,
+  MonthSection
+} from "../types/month";
+import type {
   RuleWorkspace
-} from "../types";
+} from "../types/rules";
 
 export interface MonthEditorDraftSnapshot {
   kind: "transactions";

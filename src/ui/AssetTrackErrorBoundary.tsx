@@ -3,12 +3,12 @@ import { displayError, t } from "../i18n";
 
 export class AssetTrackErrorBoundary extends Component<
   { children?: ReactNode; onReload: () => void },
-  { error: Error | null }
+  { error: unknown }
 > {
-  state: { error: Error | null } = { error: null };
+  state: { error: unknown } = { error: null };
 
-  static getDerivedStateFromError(error: unknown): { error: Error } {
-    return { error: error instanceof Error ? error : new Error(String(error)) };
+  static getDerivedStateFromError(error: unknown): { error: unknown } {
+    return { error };
   }
 
   componentDidCatch(_error: unknown, _info: ErrorInfo): void {

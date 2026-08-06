@@ -1,9 +1,10 @@
 import { type ReactNode } from "react";
-import { AssetTrackError } from "../services/AssetTrackService";
 import { scalarText } from "../domain/text";
 import { businessLabel, displayError, getLocale, t } from "../i18n";
 import { transactionBlockNumber } from "./analysisModel";
-import type { Transaction } from "../types";
+import type {
+  Transaction
+} from "../types/transactions";
 
 export type OperationState =
   | { kind: "idle"; message?: string }
@@ -18,13 +19,6 @@ export function issueIsBlocking(issue: Record<string, unknown>): boolean {
 }
 
 export function messageFor(error: unknown): string {
-  if (error instanceof AssetTrackError && error.status === 409) {
-    const detail = error.detail as { expected?: number; actual?: number };
-    return t(
-      `revision 冲突：草稿基于 ${detail.expected ?? "—"}，当前数据库为 ${detail.actual ?? "—"}。请重新加载。`,
-      `Revision conflict: the draft is based on ${detail.expected ?? "—"}, but the database is at ${detail.actual ?? "—"}. Reload and try again.`
-    );
-  }
   return displayError(error);
 }
 

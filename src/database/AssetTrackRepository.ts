@@ -1,33 +1,51 @@
+import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import type {
   AccountDefinition,
-  AnnualOverview,
   CashAccountBalance,
+  CategoryDefinition,
+  InvestmentAccountBalance,
+  MonthCreationPolicy
+} from "../types/configuration";
+import type {
+  AnnualOverview
+} from "../types/analysis";
+import type {
   CategoryBackfillPreview,
   CategoryBackfillRequest,
   CategoryBackfillResult,
-  CategoryDefinition,
-  CurrentAsset,
-  DebtRecord,
-  FixedAsset,
-  InvestmentAccountBalance,
-  MonthCreationPolicy,
-  MonthSectionSaveRequest,
-  MonthWorkspace,
   ProductHistoryIndexResult,
   ProductHistoryQuery,
   ProductHistoryResult,
   ProductRenamePreview,
   ProductRenameRequest,
   ProductRenameResult,
+  CounterpartyRenamePreview,
+  CounterpartyRenameRequest,
+  CounterpartyRenameResult
+} from "../types/history";
+import type {
+  CurrentAsset,
+  DebtRecord,
+  FixedAsset,
+  MonthSectionSaveRequest,
+  MonthWorkspace
+} from "../types/month";
+import type {
   RuleCandidate,
-  RuleInsights,
   RuleWorkspaceAnalytics,
   RuleWorkspaceShell,
-  RuleWorkspace,
-  SaveRuleWorkspaceRequest,
+  RuleImpactPreview
+} from "../types/rules";
+import type {
   Transaction
-} from "../types";
+} from "../types/transactions";
+import type {
+  OperationLogSummary,
+  OperationAuditContext,
+  OperationKind,
+  OperationPreview
+} from "../types/operations";
 import { calculateMonthly } from "../domain/calculator";
 import {
   isMonth,
@@ -44,6 +62,7 @@ import { ConfigurationWriteRepository } from "./configurationWriteRepository";
 import { HistoryWriteRepository } from "./historyWriteRepository";
 import { MonthWriteRepository } from "./monthWriteRepository";
 import { RuleHistoryReadModel } from "./ruleHistoryReadModel";
+import { OperationLogRepository } from "./operationLogRepository";
 import {
   boolean,
   contentRevision,
@@ -57,7 +76,11 @@ import {
   type Row
 } from "./repositoryPrimitives";
 import type { ValidationIssue } from "../domain/validators";
-import type { RepositoryWriteContext } from "./repositoryWriteContext";
+import type {
+  ConfigurationWriteDependencies,
+  HistoryWriteDependencies,
+  MonthWriteDependencies
+} from "./repositoryWriteContext";
 
 export class AssetTrackRepository {
   private readonly analysis: AnalysisReadModel;
@@ -65,6 +88,7 @@ export class AssetTrackRepository {
   private readonly monthWrites: MonthWriteRepository;
   private readonly configurationWrites: ConfigurationWriteRepository;
   private readonly historyWrites: HistoryWriteRepository;
+  private readonly operations: OperationLogRepository;
 
   constructor(
     private readonly manager: DatabaseManager,
@@ -86,7 +110,7 @@ export class AssetTrackRepository {
       categories: (db) => this.categories(db),
       getRevision: (month, db) => this.getRevision(month, db)
     });
-    const writeContext: RepositoryWriteContext = {
+    const monthDependencies: MonthWriteDependencies = {
       monthStatus: (db, month) => this.monthStatus(db, month),
       checkMonthRevision: (db, month, revision) =>
         this.checkMonthRevision(db, month, revision),
@@ -95,16 +119,29 @@ export class AssetTrackRepository {
       getMonths: (db) => this.getMonths(db),
       getRevision: (month, db) => this.getRevision(month, db),
       categoryRows: (db) => this.categoryRows(db),
-      categories: (db) => this.categories(db),
-      accounts: (db) => this.accounts(db),
       debts: (db) => this.debts(db),
       monthDebts: (db, month) => this.monthDebts(db, month),
       rules: (db) => this.rules(db),
-      ruleHistory: this.ruleHistory
     };
-    this.monthWrites = new MonthWriteRepository(writeContext);
-    this.configurationWrites = new ConfigurationWriteRepository(writeContext);
-    this.historyWrites = new HistoryWriteRepository(writeContext);
+    const configurationDependencies: ConfigurationWriteDependencies = {
+      categoryRows: (db) => this.categoryRows(db),
+      categories: (db) => this.categories(db),
+      accounts: (db) => this.accounts(db),
+      rules: (db) => this.rules(db)
+    };
+    const historyDependencies: HistoryWriteDependencies = {
+      categoryRows: (db) => this.categoryRows(db),
+      normalizedRuleRows: (db) => this.ruleHistory.normalizedRuleRows(db),
+      historicalCategoryCounts: (group, categories) =>
+        this.ruleHistory.historicalCategoryCounts(group, categories),
+      getRevision: (month, db) => this.getRevision(month, db),
+      touchMonth: (db, month, revision, fixedInitialized) =>
+        this.touchMonth(db, month, revision, fixedInitialized)
+    };
+    this.monthWrites = new MonthWriteRepository(monthDependencies);
+    this.configurationWrites = new ConfigurationWriteRepository(configurationDependencies);
+    this.historyWrites = new HistoryWriteRepository(historyDependencies);
+    this.operations = new OperationLogRepository();
   }
 
   initialize(): void {
@@ -113,6 +150,102 @@ export class AssetTrackRepository {
 
   private db(): DatabaseSync {
     return this.manager.connection();
+  }
+
+  private entityOperation(
+    before: Row[],
+    after: Row[],
+    entity: "category" | "rule",
+    operationType: Extract<OperationKind, "save-categories" | "save-rules">,
+    audit: OperationAuditContext
+  ): OperationPreview {
+    const keyOf = (row: Row): string => entity === "category"
+      ? text(row.category_key)
+      : String(Number(row.id));
+    const beforeByKey = new Map(before.map((row) => [keyOf(row), row]));
+    const afterByKey = new Map(after.map((row) => [keyOf(row), row]));
+    const keys = [...new Set([...beforeByKey.keys(), ...afterByKey.keys()])].sort();
+    const changes = keys.map((key) => {
+      const oldRow = beforeByKey.get(key) ?? {};
+      const newRow = afterByKey.get(key) ?? {};
+      const changed = JSON.stringify(oldRow) !== JSON.stringify(newRow);
+      return {
+        transaction_id: null,
+        transaction_key: `${entity}:${key}`,
+        month: "",
+        before: oldRow,
+        after: newRow,
+        status: changed ? "change" as const : "skip" as const,
+        reason: changed ? undefined : "保存前后没有字段变化"
+      };
+    }).filter((change) => change.status === "change");
+    const effectiveOperationType = audit.operation_type ?? operationType;
+    return {
+      operation_id: audit.operation_id ?? randomUUID(),
+      actor: audit.actor ?? "local-user",
+      operation_type: effectiveOperationType,
+      source_page: audit.source_page,
+      business_tab: audit.business_tab,
+      total_count: changes.length,
+      change_count: changes.filter((change) => change.status === "change").length,
+      skipped_count: changes.filter((change) => change.status === "skip").length,
+      failure_count: 0,
+      changes,
+      metadata: {
+        entity,
+        actor: audit.actor ?? "local-user",
+        ...(audit.metadata ?? {})
+      }
+    };
+  }
+
+  private historicalTransactionRows(db: DatabaseSync, ids: number[]): Row[] {
+    const uniqueIds = [...new Set(ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
+    if (!uniqueIds.length) return [];
+    const placeholders = uniqueIds.map(() => "?").join(",");
+    return rows(db.prepare(`
+      SELECT id,month,transaction_date,type,category_key,category,counterparty,product,source,account_key,amount
+      FROM transactions WHERE id IN (${placeholders}) ORDER BY month,transaction_date,id
+    `).all(...uniqueIds));
+  }
+
+  private historyOperation(
+    before: Row[],
+    after: Row[],
+    operationType: Extract<OperationKind, "history-category-backfill" | "history-product-rename" | "history-counterparty-rename">,
+    audit: OperationAuditContext,
+    metadata: Record<string, unknown>
+  ): OperationPreview {
+    const beforeById = new Map(before.map((row) => [Number(row.id), row]));
+    const afterById = new Map(after.map((row) => [Number(row.id), row]));
+    const ids = [...new Set([...beforeById.keys(), ...afterById.keys()])].sort((left, right) => left - right);
+    const changes = ids.map((id) => {
+      const oldRow = beforeById.get(id) ?? {};
+      const newRow = afterById.get(id) ?? {};
+      const changed = JSON.stringify(oldRow) !== JSON.stringify(newRow);
+      return {
+        transaction_id: Number.isFinite(id) ? id : null,
+        transaction_key: `id:${id}`,
+        month: text(newRow.month) || text(oldRow.month),
+        before: oldRow,
+        after: newRow,
+        status: changed ? "change" as const : "skip" as const,
+        reason: changed ? undefined : "保存前后没有字段变化"
+      };
+    });
+    return {
+      operation_id: audit.operation_id ?? randomUUID(),
+      actor: audit.actor ?? "local-user",
+      operation_type: operationType,
+      source_page: audit.source_page,
+      business_tab: audit.business_tab,
+      total_count: changes.length,
+      change_count: changes.filter((change) => change.status === "change").length,
+      skipped_count: changes.filter((change) => change.status === "skip").length,
+      failure_count: 0,
+      changes,
+      metadata: { ...metadata, actor: audit.actor ?? "local-user" }
+    };
   }
 
   private monthStatus(db: DatabaseSync, month: string): Row | null {
@@ -125,7 +258,7 @@ export class AssetTrackRepository {
     month: string,
     expectedRevision: number
   ): number {
-    if (!isMonth(month)) throw new RepositoryValidationError(`非法月份：${month}`);
+    if (!isMonth(month)) throw new RepositoryValidationError({ code: "month.invalid", params: { month } });
     const actual = Number(this.monthStatus(db, month)?.revision ?? 0);
     if (actual !== expectedRevision) throw new RevisionConflictError(expectedRevision, actual);
     return actual;
@@ -179,9 +312,12 @@ export class AssetTrackRepository {
     const current = localMonth();
     const max = nextMonth(current);
     const target = months.length ? nextMonth(months.at(-1)!) : current;
-    let reason: string | null = null;
-    if (drafts.length) reason = `请先保存或删除草稿月份 ${drafts[0]}`;
-    else if (target > max) reason = `最多只能预建到 ${max}`;
+    let reason: MonthCreationPolicy["reason"] = null;
+    if (drafts.length) {
+      reason = { code: "month.draft_exists", params: { month: drafts[0] } };
+    } else if (target > max) {
+      reason = { code: "month.creation_limit", params: { max } };
+    }
     return {
       months,
       draft_month: drafts[0] ?? null,
@@ -231,6 +367,7 @@ export class AssetTrackRepository {
       color: text(row.color),
       is_active: boolean(row.is_active),
       sort_order: Number(row.sort_order),
+      description: text(row.description),
       transaction_count: Number(row.transaction_count),
       rule_count: Number(row.rule_count),
       impact_months: text(row.impact_months).split(",").filter(Boolean).sort()
@@ -244,11 +381,20 @@ export class AssetTrackRepository {
 
   async saveCategories(
     expectedRevision: number,
-    input: CategoryDefinition[]
+    input: CategoryDefinition[],
+    audit: OperationAuditContext = { source_page: "配置/分类定义" }
   ): Promise<{ revision: number; rows: CategoryDefinition[] }> {
-    await this.manager.write((db) =>
-      this.configurationWrites.saveCategories(db, expectedRevision, input)
-    );
+    await this.manager.write((db) => {
+      const before = rows(db.prepare("SELECT * FROM category_definitions ORDER BY category_key").all());
+      this.configurationWrites.saveCategories(db, expectedRevision, input);
+      const after = rows(db.prepare("SELECT * FROM category_definitions ORDER BY category_key").all());
+      const operation = this.entityOperation(before, after, "category", "save-categories", audit);
+      this.operations.write(
+        db,
+        operation,
+        audit.selection ?? operation.changes.map((change) => change.transaction_key ?? "")
+      );
+    });
     return this.categories();
   }
 
@@ -381,18 +527,34 @@ export class AssetTrackRepository {
     debts?: {
       expected_revision: number;
       rows: DebtRecord[];
-    }
+    },
+    operationLogs: Array<{
+      preview: OperationPreview;
+      selection: string[];
+    }> = []
   ): Promise<MonthWorkspace> {
-    const revision = await this.manager.write((db) => this.monthWrites.saveMonth(
-      db,
-      month,
-      expectedRevision,
-      cashAccounts,
-      investmentAccounts,
-      transactions,
-      fixedAssets,
-      debts
-    ));
+    const revision = await this.manager.write((db) => {
+      const canonicalOperationLogs = this.monthWrites.validateOperationLogs(
+        db,
+        month,
+        transactions,
+        operationLogs
+      );
+      const nextRevision = this.monthWrites.saveMonth(
+        db,
+        month,
+        expectedRevision,
+        cashAccounts,
+        investmentAccounts,
+        transactions,
+        fixedAssets,
+        debts
+      );
+      canonicalOperationLogs.forEach((entry) =>
+        this.operations.write(db, entry.preview, entry.selection)
+      );
+      return nextRevision;
+    });
     const result = await this.getMonth(month);
     result.revision = revision;
     return result;
@@ -402,9 +564,22 @@ export class AssetTrackRepository {
     month: string,
     payload: MonthSectionSaveRequest
   ): Promise<MonthWorkspace> {
-    const revision = await this.manager.write((db) =>
-      this.monthWrites.saveMonthSection(db, month, payload)
-    );
+    const revision = await this.manager.write((db) => {
+      const pendingOperationLogs = [
+        ...(payload.operation_logs ?? [])
+      ];
+      if (payload.section !== "transactions" && pendingOperationLogs.length) {
+        throw new RepositoryValidationError({ code: "operation.logs_section_required" });
+      }
+      const canonicalOperationLogs = payload.section === "transactions"
+        ? this.monthWrites.validateOperationLogs(db, month, payload.transactions, pendingOperationLogs)
+        : [];
+      const nextRevision = this.monthWrites.saveMonthSection(db, month, payload);
+      canonicalOperationLogs.forEach((entry) =>
+        this.operations.write(db, entry.preview, entry.selection)
+      );
+      return nextRevision;
+    });
     const result = await this.getMonth(month);
     result.revision = revision;
     return result;
@@ -436,7 +611,7 @@ export class AssetTrackRepository {
     month: string,
     viewState: boolean
   ): DebtRecord[] {
-    if (!isMonth(month)) throw new RepositoryValidationError(`非法月份：${month}`);
+    if (!isMonth(month)) throw new RepositoryValidationError({ code: "month.invalid", params: { month } });
     const start = `${month}-01`;
     const end = monthEnd(month);
     return rows(db.prepare(`
@@ -487,7 +662,7 @@ export class AssetTrackRepository {
     await this.ensureFixedAssetsInherited(month);
     const db = this.db();
     const transactions = rows(db.prepare(`
-      SELECT id,transaction_date,type,category_key,category,counterparty,product,amount
+      SELECT id,transaction_date,type,category_key,category,counterparty,product,source,account_key,amount
       FROM transactions WHERE month=? ORDER BY id
     `).all(month)).map(transactionFromRow);
     const categories = this.categoryRows(db);
@@ -517,11 +692,31 @@ export class AssetTrackRepository {
     return this.ruleHistory.rules(db);
   }
 
-  async saveRules(expectedRevision: number, input: Row[]): Promise<{ revision: number; rows: Row[] }> {
-    await this.manager.write((db) =>
-      this.configurationWrites.saveRules(db, expectedRevision, input)
-    );
+  async saveRules(
+    expectedRevision: number,
+    input: Row[],
+    audit: OperationAuditContext = { source_page: "配置/匹配规则" }
+  ): Promise<{ revision: number; rows: Row[] }> {
+    await this.manager.write((db) => {
+      const before = rows(db.prepare("SELECT * FROM auto_rules ORDER BY id").all());
+      this.configurationWrites.saveRules(db, expectedRevision, input);
+      const after = rows(db.prepare("SELECT * FROM auto_rules ORDER BY id").all());
+      const operation = this.entityOperation(before, after, "rule", "save-rules", audit);
+      this.operations.write(
+        db,
+        operation,
+        audit.selection ?? operation.changes.map((change) => change.transaction_key ?? "")
+      );
+    });
     return this.rules();
+  }
+
+  operationLogs(limit = 50): OperationLogSummary[] {
+    return this.operations.list(this.db(), limit);
+  }
+
+  operationDetails(operationId: string): Record<string, unknown> | null {
+    return this.operations.details(this.db(), operationId);
   }
 
   rulesPreview(month: string, input: Transaction[]): {
@@ -533,24 +728,20 @@ export class AssetTrackRepository {
     return this.ruleHistory.rulesPreview(this.db(), month, input);
   }
 
-  ruleInsights(minOccurrences = 2): RuleInsights {
-    return this.ruleHistory.ruleInsights(this.db(), minOccurrences);
-  }
-
-  ruleWorkspace(minOccurrences = 2): RuleWorkspace {
-    return this.ruleHistory.ruleWorkspace(this.db(), minOccurrences);
-  }
-
   ruleWorkspaceShell(): RuleWorkspaceShell {
     return this.ruleHistory.ruleWorkspaceShell(this.db());
+  }
+
+  ruleImpactPreview(rule: import("../domain/rules").RuleRow): RuleImpactPreview {
+    return this.ruleHistory.ruleImpactPreview(this.db(), rule);
   }
 
   ruleWorkspaceAnalytics(minOccurrences = 2): RuleWorkspaceAnalytics {
     return this.ruleHistory.ruleWorkspaceAnalytics(this.db(), minOccurrences);
   }
 
-  productOverview(): ProductHistoryIndexResult {
-    return this.ruleHistory.productOverview(this.db());
+  productOverview(query: ProductHistoryQuery = {}): ProductHistoryIndexResult {
+    return this.ruleHistory.productOverview(this.db(), query);
   }
 
   productHistoryIndex(query: ProductHistoryQuery): ProductHistoryIndexResult {
@@ -570,7 +761,20 @@ export class AssetTrackRepository {
   async applyCategoryBackfill(
     request: CategoryBackfillRequest
   ): Promise<CategoryBackfillResult> {
-    return this.manager.write((db) => this.historyWrites.applyCategoryBackfill(db, request));
+    return this.manager.write((db) => {
+      const before = this.historicalTransactionRows(db, request.transaction_ids);
+      const result = this.historyWrites.applyCategoryBackfill(db, request);
+      const after = this.historicalTransactionRows(db, request.transaction_ids);
+      const operation = this.historyOperation(
+        before,
+        after,
+        "history-category-backfill",
+        { source_page: request.source_page ?? "配置/数据健康", actor: request.actor },
+        { target_category_key: result.target_category_key, target_category: result.target_category }
+      );
+      this.operations.write(db, operation, operation.changes.map((change) => change.transaction_key ?? ""));
+      return result;
+    });
   }
 
   previewProductRename(
@@ -580,12 +784,43 @@ export class AssetTrackRepository {
   }
 
   async applyProductRename(request: ProductRenameRequest): Promise<ProductRenameResult> {
-    return this.manager.write((db) => this.historyWrites.applyProductRename(db, request));
+    return this.manager.write((db) => {
+      const before = this.historicalTransactionRows(db, request.transaction_ids);
+      const result = this.historyWrites.applyProductRename(db, request);
+      const after = this.historicalTransactionRows(db, request.transaction_ids);
+      const operation = this.historyOperation(
+        before,
+        after,
+        "history-product-rename",
+        { source_page: request.source_page ?? "配置/商品总览", actor: request.actor },
+        { target_product: result.target_product }
+      );
+      this.operations.write(db, operation, operation.changes.map((change) => change.transaction_key ?? ""));
+      return result;
+    });
   }
 
-  async saveRuleWorkspace(request: SaveRuleWorkspaceRequest): Promise<RuleWorkspace> {
-    await this.manager.write((db) => this.configurationWrites.saveRuleWorkspace(db, request));
-    return this.ruleWorkspace();
+  previewCounterpartyRename(
+    request: Omit<CounterpartyRenameRequest, "expected_month_revisions">
+  ): CounterpartyRenamePreview {
+    return this.historyWrites.previewCounterpartyRename(this.db(), request);
+  }
+
+  async applyCounterpartyRename(request: CounterpartyRenameRequest): Promise<CounterpartyRenameResult> {
+    return this.manager.write((db) => {
+      const before = this.historicalTransactionRows(db, request.transaction_ids);
+      const result = this.historyWrites.applyCounterpartyRename(db, request);
+      const after = this.historicalTransactionRows(db, request.transaction_ids);
+      const operation = this.historyOperation(
+        before,
+        after,
+        "history-counterparty-rename",
+        { source_page: request.source_page ?? "配置/商品总览", actor: request.actor },
+        { target_counterparty: result.target_counterparty }
+      );
+      this.operations.write(db, operation, operation.changes.map((change) => change.transaction_key ?? ""));
+      return result;
+    });
   }
 
   ruleCandidates(

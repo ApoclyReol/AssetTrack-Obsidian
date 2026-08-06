@@ -6,6 +6,17 @@ import {
   normalizeDataDirectory,
   validateDataDirectory
 } from "../../src/services/workspacePath";
+import { AssetTrackError } from "../../src/application/errors";
+
+function thrownCode(action: () => unknown): string {
+  try {
+    action();
+  } catch (error) {
+    expect(error).toBeInstanceOf(AssetTrackError);
+    return (error as AssetTrackError).code;
+  }
+  throw new Error("Expected action to throw");
+}
 
 describe("workspace path", () => {
   it("normalizes a Vault-relative Asset_Track root", () => {
@@ -21,15 +32,23 @@ describe("workspace path", () => {
   });
 
   it("rejects traversal and unconfigured roots", () => {
-    expect(() => normalizeDataDirectory("../Asset_Track")).toThrow();
-    expect(() => databaseVaultPath("")).toThrow("尚未选择");
+    expect(thrownCode(() => normalizeDataDirectory("../Asset_Track"))).toBe(
+      "workspace.dot_segment"
+    );
+    expect(thrownCode(() => databaseVaultPath(""))).toBe(
+      "workspace.data_directory_required"
+    );
   });
 
   it("rejects absolute, drive and UNC paths", () => {
-    expect(() => normalizeDataDirectory("/tmp/Asset_Track")).toThrow("相对路径");
-    expect(() => normalizeDataDirectory("C:\\Asset_Track")).toThrow("相对路径");
-    expect(() => normalizeDataDirectory("\\\\server\\Asset_Track")).toThrow(
-      "相对路径"
+    expect(thrownCode(() => normalizeDataDirectory("/tmp/Asset_Track"))).toBe(
+      "workspace.relative_required"
+    );
+    expect(thrownCode(() => normalizeDataDirectory("C:\\Asset_Track"))).toBe(
+      "workspace.relative_required"
+    );
+    expect(thrownCode(() => normalizeDataDirectory("\\\\server\\Asset_Track"))).toBe(
+      "workspace.relative_required"
     );
     expect(validateDataDirectory("../Asset_Track")).toMatchObject({
       valid: false,
@@ -39,8 +58,8 @@ describe("workspace path", () => {
 
   it("rejects a resolved target outside the Vault", () => {
     expect(() => assertPathInsideVault("/vault", "/vault/data")).not.toThrow();
-    expect(() => assertPathInsideVault("/vault", "/outside/data")).toThrow(
-      "超出当前 Vault"
+    expect(thrownCode(() => assertPathInsideVault("/vault", "/outside/data"))).toBe(
+      "workspace.outside_vault"
     );
   });
 });

@@ -1,6 +1,12 @@
 import { useEffect, useRef } from "react";
-import type { CategoryDefinition, SavedRule } from "../../types";
+import type {
+  CategoryDefinition
+} from "../../types/configuration";
+import type {
+  SavedRule
+} from "../../types/rules";
 import { businessLabel, t } from "../../i18n";
+import { inferRuleScopeFromConditions } from "../../domain/rules";
 import { ActionTableHeader } from "../TablePrimitives";
 import {
   clone,
@@ -19,6 +25,7 @@ export interface MatchingRulesTableProps {
   sort: SortState;
   onSort: (next: SortState) => void;
   onChange: (rules: SavedRule[]) => void;
+  onRemove?: (index: number, rule: SavedRule) => void | Promise<void>;
   showSectionActions: boolean;
   dirty: boolean;
   pageState: OperationState;
@@ -28,14 +35,11 @@ export interface MatchingRulesTableProps {
   sectionRef: { current: HTMLElement | null };
 }
 
-function ruleStatusLabel(value: unknown): string {
-  return ({
-    正常: t("正常", "Normal"),
-    重复: t("重复", "Duplicate"),
-    冲突: t("冲突", "Conflict"),
-    未创建: t("未创建", "Not created"),
-    已覆盖: t("已覆盖", "Covered")
-  }[String(value)] ?? t("加载中…", "Loading…"));
+function inferredScope(rule: Pick<SavedRule, "counterparty" | "product">): SavedRule["match_scope"] | null {
+  return inferRuleScopeFromConditions({
+    counterparty: rule.counterparty,
+    product: rule.product
+  });
 }
 
 export function MatchingRulesTable({
@@ -44,6 +48,7 @@ export function MatchingRulesTable({
   sort,
   onSort,
   onChange,
+  onRemove,
   showSectionActions,
   dirty,
   pageState,
@@ -64,22 +69,33 @@ export function MatchingRulesTable({
   const updateRule = (index: number, update: (rule: SavedRule) => void) => {
     const next = clone(rules);
     update(next[index]);
+    next[index].match_scope = inferredScope(next[index]) ?? undefined;
     onChange(next);
   };
 
   const ruleView = sortRows(rules, sort, (row, key) => row[key as keyof SavedRule]);
 
   return <Section sectionRef={sectionRef}>
+    <p className="asset-track-rule-priority-note">{t(
+      "匹配范围根据交易对手和商品是否填写自动识别；固定优先级：交易对手 + 商品 ＞ 商品 ＞ 交易对手；同一条流水只采用一条规则。",
+      "Match scope is inferred from the counterparty and item fields; fixed priority: counterparty + item > item > counterparty. One rule is applied per transaction."
+    )}</p>
     {ruleView.length === 0 ? <EmptyState text={t("尚无已保存匹配规则。", "No saved matching rules yet.")} /> : <div ref={tableScrollRef} className="asset-track-table-scroll asset-track-responsive-scroll asset-track-rule-table-scroll">
-      <table className="asset-track-rules-table"><thead><tr>{[
-        ["transaction_type", t("收支", "Type")], ["product", t("商品", "Item")], ["category", t("分类", "Category")], ["rule_status", t("规则状态", "Rule status")], ["occurrences", t("流水数", "Transactions")], ["last_month", t("最近月份", "Latest month")]
-      ].map(([field, label]) => <th key={field} scope="col" className={field === "transaction_type" ? "asset-track-type-column" : field === "category" || field === "rule_status" ? "asset-track-centered-column" : field === "occurrences" ? "asset-track-count-column" : field === "last_month" ? "asset-track-date-column" : undefined}><SortButton field={field} label={label} sort={sort} onSort={onSort} /></th>)}<ActionTableHeader /></tr></thead>
+      <table className="asset-track-rules-table"><thead><tr><th scope="col" className="asset-track-count-column">{t("编号", "ID")}</th>{[
+        ["transaction_type", t("收支", "Type")], ["counterparty", t("交易对手条件", "Counterparty condition")], ["product", t("商品条件", "Item condition")], ["rewrite_merchant", t("重写交易对手", "Rewrite counterparty")], ["rewrite_product", t("重写商品", "Rewrite item")], ["category", t("分类", "Category")], ["occurrences", t("流水数", "Transactions")], ["last_month", t("最近月份", "Latest month")]
+      ].map(([field, label]) => <th key={field} scope="col" className={field === "transaction_type" ? "asset-track-type-column" : field === "category" ? "asset-track-centered-column" : field === "occurrences" ? "asset-track-count-column" : field === "last_month" ? "asset-track-date-column" : undefined}><SortButton field={field} label={label} sort={sort} onSort={onSort} /></th>)}<ActionTableHeader /></tr></thead>
         <tbody>{ruleView.map(({ row, originalIndex: index }) => <tr data-asset-track-row-key={String(row.id ?? `new-rule-${index}`)} key={String(row.id ?? index)}>
+          <td className="asset-track-count-cell">{row.id ? `#${row.id}` : t("新规则", "New")}</td>
           <td className="asset-track-type-cell"><select value={row.transaction_type} onChange={(event) => updateRule(index, (rule) => { rule.transaction_type = event.target.value as "支出" | "收入"; rule.category_key = ""; rule.category = ""; })}><option value="支出">{businessLabel("支出")}</option><option value="收入">{businessLabel("收入")}</option></select></td>
+          <td><input value={row.counterparty ?? ""} onChange={(event) => updateRule(index, (rule) => { rule.counterparty = event.target.value; })} /></td>
           <td><input value={row.product} onChange={(event) => updateRule(index, (rule) => { rule.product = event.target.value; })} /></td>
+          <td><input value={row.rewrite_merchant ?? ""} onChange={(event) => updateRule(index, (rule) => { rule.rewrite_merchant = event.target.value; })} /></td>
+          <td><input value={row.rewrite_product ?? ""} onChange={(event) => updateRule(index, (rule) => { rule.rewrite_product = event.target.value; })} /></td>
           <td className="asset-track-centered-cell"><select value={row.category_key} onChange={(event) => updateRule(index, (rule) => { const category = categories.find((item) => item.category_key === event.target.value); rule.category_key = event.target.value; rule.category = category?.name ?? ""; })}><option value="">{t("请选择", "Select")}</option>{categories.filter((category) => category.transaction_type === row.transaction_type).map((category) => <option key={category.category_key} value={category.category_key} disabled={!category.is_active}>{category.name}{category.is_active ? "" : ` · ${t("停用", "Inactive")}`}</option>)}</select></td>
-          <td className="asset-track-status-cell asset-track-centered-cell">{ruleStatusLabel(row.rule_status)}{row.conflict_rule_ids?.length ? ` · ${row.conflict_rule_ids.length}` : ""}</td><td className="asset-track-count-cell">{row.occurrences ?? "—"}</td><td className="asset-track-date-cell">{row.last_month ?? "—"}</td>
-          <td className="asset-track-actions-cell"><button type="button" onClick={() => onChange(rules.filter((_, item) => item !== index))}>{t("删除", "Delete")}</button></td>
+          <td className="asset-track-count-cell">{row.occurrences ?? "—"}</td><td className="asset-track-date-cell">{row.last_month ?? "—"}</td>
+          <td className="asset-track-actions-cell"><button type="button" onClick={() => void (onRemove
+            ? onRemove(index, row)
+            : onChange(rules.filter((_, item) => item !== index)))}>{t("删除", "Delete")}</button></td>
         </tr>)}</tbody>
       </table>
     </div>}
@@ -87,7 +103,7 @@ export function MatchingRulesTable({
       <button type="button" onClick={() => {
         const category = categories.find((row) => row.is_active && row.transaction_type === "支出");
         pendingRuleKey.current = `new-rule-${rules.length}`;
-        onChange([...rules, { transaction_type: "支出", product: "", category_key: category?.category_key ?? "", category: category?.name ?? "" }]);
+        onChange([...rules, { transaction_type: "支出", match_scope: undefined, counterparty: "", product: "", rewrite_merchant: "", rewrite_product: "", category_key: category?.category_key ?? "", category: category?.name ?? "" }]);
       }}>{t("新增规则", "Add rule")}</button>
       {showSectionActions && <>
         <button type="button" disabled={pageState.kind === "pending"} onClick={() => void onReload()}>

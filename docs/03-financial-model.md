@@ -111,7 +111,8 @@ total_withdraw   = SUM(amount WHERE type == "提现")
 注意：
 - 当前实现把 `代付` 作为实际净支出的抵扣项。
 - 当前导入流程只接受 `支出 / 收入 / 代付 / 加仓 / 提现` 五种类型。
-- `代付` 参与 `total_daifu` 抵扣；`加仓` 与 `提现` 参与理论净支出推导，但不会进入消费分类统计。
+- `代付` 参与 `total_daifu` 抵扣；如果代付带有分类，该分类金额同时作为负数抵扣分类统计；未分类代付只影响净支出，不进入具体分类。
+- `加仓` 与 `提现` 参与理论净支出推导，但不会进入消费分类统计。
 
 ### 4.2 账单草稿导入契约
 
@@ -122,10 +123,11 @@ total_withdraw   = SUM(amount WHERE type == "提现")
 - `收支` 只能使用 `支出`、`收入`、`代付`、`加仓`、`提现`。
 - `金额`允许千分位逗号和 `¥`，导入时转为绝对值，资金语义由 `收支`决定。
 - 没有日期时，当前选中月份的导入预览默认填入该月 1 日。
-- `分类`按现有分类名称匹配；`代付`、`加仓`、`提现`会清空分类，因为特殊类型不使用消费分类。
+- `分类`按现有分类名称匹配；代付允许使用支出类分类，加仓和提现始终清空分类。
 - `收支方向`必须把文件中的每个实际值映射到统一财务类型，不进行隐式猜测。
 - 选择交易状态列后，从文件内容读取不同状态值，只有用户勾选的状态进入草稿。
-- `交易对方`与`商品`独立保存；交易对方只属于流水与统计数据，规则只按收支类型和商品匹配。
+- `交易对方`与`商品`独立保存；交易对方同时属于流水、统计和规则条件，规则按收支类型与
+  三种精确作用域（商品、交易对手、交易对手 + 商品）匹配，固定优先级为组合 > 商品 > 交易对手。
 - 增量模式追加本次全部有效行，不检查重复文件或重复流水；覆盖模式只替换当前流水草稿。
 - 跨月、状态未选中、映射为“忽略”或必要字段无效的行不进入草稿，并在预览中计数。
 - 所有接受行逐项保留；商品汇总是只读视图，不改变数据库事实。
@@ -208,20 +210,24 @@ discrepancy          = total_expense - theoretical_expense
 当前系统区分三个理财相关概念：
 
 ```text
-principal     = 投入本金
-market_value  = 持仓市值
-cash_balance  = 理财账户内流动资金
-inv_position  = market_value + cash_balance
-inv_profit    = inv_position - principal
-inv_roi       = inv_profit / principal * 100
-inv_weight    = market_value / inv_position * 100
+principal                = 月末记录的投入本金
+market_value             = 持仓市值
+cash_balance             = 理财账户内流动资金
+inv_position             = market_value + cash_balance
+flow_adjusted_position  = inv_position - 本月加仓 + 本月提现
+flow_adjusted_principal = principal - 本月加仓 + 本月提现
+inv_profit               = flow_adjusted_position - flow_adjusted_principal
+inv_roi                  = inv_profit / flow_adjusted_principal * 100
+inv_weight               = market_value / inv_position * 100
 ```
 
 注意：
 - `资产大盘 / total_assets` 使用的是 `principal`，不是 `inv_position`。
-- 理财收益通过 `inv_profit` 单独展示。
+- 理财账户状态显示月末实际本金、市值、流动资金和仓位；收益和收益率使用资金流调整后的口径。
 - 这样设计可以避免市值波动直接污染“本金口径”的资产大盘，但也意味着总资产并不等于现金 + 借款净额 + 理财当前市值。
-- 跨月和年度趋势只展示 `principal`（理财投入）；`market_value`、`cash_balance`、`inv_position`、`inv_profit` 和 `inv_roi` 仅用于解释某个月的理财快照，不作为动态资产趋势。
+- 跨月和年度趋势同时展示 `market_net_assets` 与 `cost_assets`（总资产）；其中 `cost_assets` 以 `principal`（理财投入本金）为资产大盘口径，`market_value`、`cash_balance`、`inv_position`、`inv_profit` 和 `inv_roi` 仍主要用于解释理财快照与市场净资产。
+- “对比上月”将 `flow_adjusted_position` 与上月月末 `inv_position` 比较：本月加仓不被当成增长，本月提现也会加回比较基准；上月收益率同样按上月资金流调整后的本金计算。
+- 当前版本没有按日加权资金流，采用月末结算口径；交易日期仍保留在流水中，未来如需更细收益 attribution 再单独升级。
 
 ## 7. 对账差额的解释建议
 
@@ -237,7 +243,7 @@ discrepancy = 实际净支出 - 理论净支出
 
 不要把差额解释成绝对错误；它是排查入口，需要结合资产快照、账单完整性和特殊交易类型判断。
 
-## 8. 当前双资产、借款与阈值口径（v1.6.0）
+## 8. 当前双资产、借款与阈值口径（v1.7.0）
 
 ```text
 cost_assets = cash - debt + principal

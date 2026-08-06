@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
-import type { DebtRecord } from "../types";
+import type {
+  DebtRecord
+} from "../types/month";
 import { t } from "../i18n";
 import { monthEnd } from "../domain/dates";
 import { money } from "../domain/moneyFormat";

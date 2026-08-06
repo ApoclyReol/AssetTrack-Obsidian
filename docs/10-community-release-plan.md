@@ -14,20 +14,21 @@ manifest.json
 styles.css
 ```
 
-插件不依赖 Python、sidecar、平台原生扩展或 CPU 架构包。v1.6.0 已完成自动化构建、
+插件不依赖 Python、sidecar、平台原生扩展或 CPU 架构包。v1.7.0 已完成自动化构建、
 跨平台 CI、标准三文件发布和 attestation；真实 Obsidian smoke 与复制 Vault 回归
 仍按发布日志作为发布后的人工质量门禁持续补充。Linux 验证属于发布后持续质量工作。
 
 ## 稳定兼容边界
 
-- `manifest.json` 最低 Obsidian 版本为 1.13.0；安装或更新 v1.6.0 前要求用户先升级
+- `manifest.json` 最低 Obsidian 版本为 1.13.0；安装或更新 v1.7.0 前要求用户先升级
   到当前最新的 1.13.x 桌面版。
 - 运行时探测 Node ≥22.16、`DatabaseSync` 和 `sqlite.backup`；旧桌面安装器只显示
   升级提示，不修改数据。
 - `versions.json` 声明当前版本最低兼容 Obsidian 版本。
-- 稳定版冻结 schema 9，不包含旧数据库自动迁移路径。
-- v1.6.0 的显示设置保存在插件 `data.json`，导入映射仍保存在设置中，不改变数据库或
-  备份格式；规则工作台的历史统计只读取已保存月份。
+- 稳定版使用 schema 10；schema 9 首次打开时先创建保护备份并执行可回滚迁移，迁移失败
+  不覆盖原数据库。schema 9→10 在同一事务中完成。
+- 显示设置、AI 地址/模型/超时保存在插件 `data.json`，API Key 使用 SecretStorage；分类描述、通用规则、流水来源、
+  理财流水账户和操作日志进入 schema 10 备份，规则工作台的历史统计只读取已保存月份。
 - 设置页使用 Obsidian 1.13 `getSettingDefinitions()`；数据目录选择只保留页面草稿，
   成功创建、载入或迁移后才保存路径。插件代码不枚举 Vault 全部文件。
 - 生产 `main.js` 打包 React、Recharts 和 SheetJS。根目录
@@ -38,14 +39,14 @@ styles.css
 
 1. 补充 Linux 最新 Obsidian 安装器真实 smoke，并记录 Obsidian、安装器和操作
    系统版本。
-2. 在复制 Vault 持续回归 schema 9 备份恢复、数据库切换、锁释放、多 ItemView、
+2. 在复制 Vault 持续回归 schema 10 备份恢复、schema 9→10 迁移、数据库切换、锁释放、多 ItemView、
    弹窗焦点和大文件门禁。
 3. 在正式产物上采集插件加载耗时和大数据量分析性能，优先处理可复现退化。
 4. 保持 Ubuntu、macOS 和 Windows CI 的
    `npm ci → typecheck → lint → test → build → release:check` 全部通过。
 5. 每次发布继续只上传标准三文件，并为每个文件生成 artifact attestation。
-6. v1.6.0 发布后持续记录复制 Vault 升级、中文/英文界面、商品-分类冲突与回溯事务、商品
-   统一、部分覆盖、月流水借款区块、关闭草稿恢复和分类删除弹窗；不能把这些真实 Obsidian smoke
+6. v1.7.0 发布后持续记录复制 Vault 升级、中文/英文界面、商品-分类冲突与回溯事务、商品
+   统一、部分覆盖、批量操作日志、AI SecretStorage、月流水借款区块、关闭草稿恢复和分类删除弹窗；不能把这些真实 Obsidian smoke
    结果冒充为自动测试结果。
 
 真实 smoke 状态只允许记录为 `通过（日期/版本/测试人）`、`失败（issue）` 或

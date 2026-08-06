@@ -11,7 +11,12 @@ import {
   RECOMMENDED_WORKSPACE
 } from "./constants";
 import type AssetTrackPlugin from "./main";
-import type { AccountDefinition, AssetTrackSettings } from "./types";
+import type {
+  AccountDefinition
+} from "./types/configuration";
+import type {
+  AssetTrackSettings
+} from "./types/settings";
 import {
   databaseVaultPath,
   normalizeDataDirectory
@@ -31,7 +36,10 @@ export const DEFAULT_SETTINGS: AssetTrackSettings = {
   baseCurrency: "CNY",
   currencyFormat: "standard",
   reconciliationTolerance: 100,
-  largeExpenseThreshold: 1000
+  largeExpenseThreshold: 1000,
+  aiEndpoint: "",
+  aiModel: "",
+  aiTimeoutMs: 60_000
 };
 
 function message(error: unknown): string {
@@ -179,6 +187,46 @@ export class AssetTrackSettingTab extends PluginSettingTab {
         ]
       },
       {
+        type: "group",
+        heading: t("AI 分类（实验性）", "AI classification (experimental)"),
+        cls: "asset-track-settings",
+        items: [
+          {
+            name: t("API 地址", "API endpoint"),
+            desc: t("使用兼容 OpenAI Chat Completions 的地址；不配置也不影响普通记账。", "Use an OpenAI-compatible Chat Completions endpoint. Leaving it blank does not affect normal accounting."),
+            control: {
+              type: "text",
+              key: "aiEndpoint",
+              placeholder: "https://example.com/v1"
+            }
+          },
+          {
+            name: t("模型名称", "Model name"),
+            control: {
+              type: "text",
+              key: "aiModel",
+              placeholder: "model-name"
+            }
+          },
+          {
+            name: t("请求超时（毫秒）", "Request timeout (ms)"),
+            control: {
+              type: "number",
+              key: "aiTimeoutMs",
+              min: 5_000,
+              step: 1_000,
+              validate: (value: number) => this.validateAiTimeout(value)
+            }
+          },
+          {
+            name: t("API Key", "API key"),
+            desc: t("只保存在 Obsidian SecretStorage，不会写入插件设置、数据库或操作日志。选中的流水会发送到上述第三方 API。", "Stored only in Obsidian SecretStorage. It is not written to plugin settings, the database, or operation logs. Selected transactions are sent to the configured third-party API."),
+            searchable: false,
+            render: (setting) => this.renderAiSecret(setting)
+          }
+        ]
+      },
+      {
         type: "page",
         name: t("备份与恢复", "Backup and restore"),
         desc: t(
@@ -249,6 +297,24 @@ export class AssetTrackSettingTab extends PluginSettingTab {
       return;
     }
 
+    if (key === "aiEndpoint") {
+      this.plugin.settings.aiEndpoint = String(value).trim();
+      await this.plugin.saveSettings();
+      return;
+    }
+
+    if (key === "aiModel") {
+      this.plugin.settings.aiModel = String(value).trim();
+      await this.plugin.saveSettings();
+      return;
+    }
+
+    if (key === "aiTimeoutMs") {
+      this.plugin.settings.aiTimeoutMs = Number(value);
+      await this.plugin.saveSettings();
+      return;
+    }
+
     await super.setControlValue(key, value);
   }
 
@@ -289,6 +355,39 @@ export class AssetTrackSettingTab extends PluginSettingTab {
   private validatePositive(value: number): string | void {
     if (Number.isFinite(value) && value > 0) return;
     return t("请输入大于 0 的有限数字。", "Enter a finite number greater than 0.");
+  }
+
+  private validateAiTimeout(value: number): string | void {
+    if (Number.isFinite(value) && value >= 5_000 && value <= 300_000) return;
+    return t("请输入 5000–300000 之间的超时毫秒数。", "Enter a timeout between 5000 and 300000 milliseconds.");
+  }
+
+  private renderAiSecret(setting: Setting): void {
+    const hasSecret = Boolean(this.plugin.app.secretStorage.getSecret("asset-track-ai-api-key"));
+    setting.setDesc(t(
+      hasSecret ? "已配置 API Key。重新输入会覆盖旧值；清除后 AI 分类不可用。" : "尚未配置 API Key。",
+      hasSecret ? "An API key is configured. Entering a new value replaces it; clearing it disables AI classification." : "No API key is configured."
+    ));
+    setting.addText((text) => {
+      text.setPlaceholder(t("输入后保存", "Enter a key to save"));
+      text.inputEl.type = "password";
+      text.onChange((value) => {
+        const secret = value.trim();
+        if (!secret) return;
+        this.plugin.app.secretStorage.setSecret("asset-track-ai-api-key", secret);
+        text.setValue("");
+        new Notice(t("API Key 已保存到 SecretStorage。", "API key saved to SecretStorage."));
+        this.update();
+      });
+    });
+    setting.addButton((button) => button
+      .setButtonText(t("清除 Key", "Clear key"))
+      .setDestructive()
+      .onClick(() => {
+        this.plugin.app.secretStorage.setSecret("asset-track-ai-api-key", "");
+        new Notice(t("API Key 已清除。", "API key cleared."));
+        this.update();
+      }));
   }
 
   private startDirectoryInspection(directory: string): void {
@@ -433,6 +532,10 @@ export class AssetTrackSettingTab extends PluginSettingTab {
       if (!result.exists) return t(
         "目录中没有数据库，可以创建新数据库。",
         "No database was found in this directory. You can create a new one."
+      );
+      if (result.migration_required) return t(
+        "发现旧版数据库；载入时会先创建保护备份，再自动无损升级到 schema 10。",
+        "An older database was found. Loading it will create a protection backup and automatically upgrade it to schema 10 without changing its financial rows."
       );
       if (result.valid) return t(
         `发现有效的 ${DATABASE_NAME}，可以载入。`,

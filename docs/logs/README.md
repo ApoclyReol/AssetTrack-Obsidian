@@ -3,6 +3,9 @@
 本目录按版本保存已经完成的更新记录。日志用于 handoff 和追溯，不替代
 `docs/00-reading-guide.md` 所列的当前长期文档。
 
+- [Release v1.7.0](release-v1.7.0.md)：升级 schema 10，加入通用规则、三类流水 Tab、
+  理财流水账户、按账户月度分析、汇总选择、批量预览与审计、收入/代付转换和可选 AI 分类建议。
+
 - [Release v1.0.0](release-v1.0.0.md)：纯 TypeScript/schema 9 首个正式版，
   包含账单导入、交易对方规则、月度分析、备份恢复和标准三文件产物。
 - [Release v1.0.1](release-v1.0.1.md)：数据库显式创建/载入、状态机、安全目录

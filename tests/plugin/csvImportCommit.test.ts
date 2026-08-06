@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import type { CsvColumnMapping, Transaction } from "../../src/types";
+import type {
+  CsvColumnMapping
+} from "../../src/types/csv";
+import type {
+  Transaction
+} from "../../src/types/transactions";
 import { prepareCsvImportCommit } from "../../src/ui/csvImportCommit";
 
 const mapping: CsvColumnMapping = {

@@ -1,5 +1,10 @@
 import { useEffect, useRef } from "react";
-import type { CategoryDefinition, ProductHistoryQuery } from "../../types";
+import type {
+  CategoryDefinition
+} from "../../types/configuration";
+import type {
+  ProductHistoryQuery
+} from "../../types/history";
 import { CATEGORY_COLORS } from "../../domain/categoryColors";
 import { businessLabel, t } from "../../i18n";
 import { ActionTableHeader } from "../TablePrimitives";
@@ -65,10 +70,11 @@ export function CategoryDefinitionsTable({
   return <Section>
     {categoryView.length === 0 ? <EmptyState text={t("尚无分类定义。", "No category definitions yet.")} /> : <div ref={tableScrollRef} className="asset-track-table-scroll asset-track-responsive-scroll asset-track-rule-table-scroll">
       <table className="asset-track-category-table"><thead><tr>{[
-        ["name", t("名称", "Name")], ["transaction_type", t("收支", "Type")], ["necessity", t("必要性", "Necessity")], ["pattern", t("消费频率", "Frequency")], ["is_big_ticket", t("大额", "Large")], ["color", t("颜色", "Color")], ["transaction_count", t("流水数", "Transactions")]
+        ["name", t("名称", "Name")], ["description", t("定义说明", "Description")], ["transaction_type", t("收支", "Type")], ["necessity", t("必要性", "Necessity")], ["pattern", t("消费频率", "Frequency")], ["is_big_ticket", t("大额", "Large")], ["color", t("颜色", "Color")], ["transaction_count", t("流水数", "Transactions")]
       ].map(([field, label]) => <th key={field} scope="col" className={field === "is_big_ticket" ? "asset-track-checkbox-heading" : field === "color" ? "asset-track-color-column" : ["transaction_type", "necessity", "pattern"].includes(field) ? "asset-track-type-column" : field === "transaction_count" ? "asset-track-count-column" : undefined}><SortButton field={field} label={label} sort={sort} onSort={onSort} /></th>)}<ActionTableHeader /></tr></thead>
         <tbody>{categoryView.map(({ row, originalIndex: index }) => <tr data-asset-track-row-key={row.category_key} key={row.category_key}>
           <td><input value={row.name} onChange={(event) => updateCategory(index, (category) => { category.name = event.target.value; })} /></td>
+          <td><input value={row.description ?? ""} onChange={(event) => updateCategory(index, (category) => { category.description = event.target.value; })} /></td>
           <td className="asset-track-type-cell"><select value={row.transaction_type} onChange={(event) => updateCategory(index, (category) => { category.transaction_type = event.target.value as "支出" | "收入"; })}><option value="支出">{businessLabel("支出")}</option><option value="收入">{businessLabel("收入")}</option></select></td>
           <td className="asset-track-type-cell"><select value={row.necessity} onChange={(event) => updateCategory(index, (category) => { category.necessity = event.target.value as CategoryDefinition["necessity"]; })}>{["必要", "可控", "不适用"].map((value) => <option key={value} value={value}>{businessLabel(value)}</option>)}</select></td>
           <td className="asset-track-type-cell"><select value={row.pattern} onChange={(event) => updateCategory(index, (category) => { category.pattern = event.target.value as CategoryDefinition["pattern"]; })}>{["周期", "日常", "偶尔", "不适用"].map((value) => <option key={value} value={value}>{businessLabel(value)}</option>)}</select></td>
@@ -83,7 +89,7 @@ export function CategoryDefinitionsTable({
       <button type="button" onClick={() => {
         const categoryKey = `cat-user-${crypto.randomUUID()}`;
         pendingCategoryKey.current = categoryKey;
-        onChange([...categories, { category_key: categoryKey, name: "", transaction_type: "支出", necessity: "必要", pattern: "日常", is_big_ticket: false, color: CATEGORY_RAINBOW[categories.length % CATEGORY_RAINBOW.length], is_active: true, sort_order: categories.length }]);
+        onChange([...categories, { category_key: categoryKey, name: "", description: "", transaction_type: "支出", necessity: "必要", pattern: "日常", is_big_ticket: false, color: CATEGORY_RAINBOW[categories.length % CATEGORY_RAINBOW.length], is_active: true, sort_order: categories.length }]);
       }}>{t("新增分类", "Add category")}</button>
       {showSectionActions && <>
         <button type="button" disabled={pageState.kind === "pending"} onClick={() => void onReload()}>

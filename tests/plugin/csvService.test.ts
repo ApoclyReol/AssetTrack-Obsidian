@@ -32,6 +32,20 @@ describe("TypeScript CSV mapping", () => {
       outside_month: 1,
       status_filtered: 1
     });
+    const repeatedPreview = previewCsv("2026-01", "generic.csv", content, {
+      date_column: "交易时间",
+      product_column: "商品",
+      counterparty_column: "交易对方",
+      amount_column: "交易金额",
+      type_column: "资金流向",
+      status_column: "交易状态",
+      type_values: { "付款": "支出" },
+      included_statuses: ["成功"]
+    });
+    expect(new Set([
+      ...preview.rows.map((row) => row.client_id),
+      ...repeatedPreview.rows.map((row) => row.client_id)
+    ]).size).toBe(preview.rows.length + repeatedPreview.rows.length);
   });
 
   it("decodes GBK and supports ignored directions", () => {

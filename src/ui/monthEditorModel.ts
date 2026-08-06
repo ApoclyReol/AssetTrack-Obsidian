@@ -1,7 +1,8 @@
-import type { MonthSection, MonthWorkspace } from "../types";
-import {
-  AssetTrackError
-} from "../services/AssetTrackService";
+import type {
+  MonthSection,
+  MonthWorkspace
+} from "../types/month";
+import { AssetTrackError } from "../application/errors";
 import { monthEnd, previousMonth } from "../domain/dates";
 import { roundHalfEven, sum } from "../domain/money";
 import { MAX_IMPORT_FILE_BYTES } from "./csvImportCommit";
@@ -34,7 +35,7 @@ export function draftReducer(
 export async function readImportFile(file: File): Promise<ArrayBuffer> {
   if (file.size > MAX_IMPORT_FILE_BYTES) {
     throw new AssetTrackError({
-      code: "IMPORT_FILE_TOO_LARGE",
+      code: "import.file_too_large",
       status: 422,
       params: { limitMiB: 20 }
     });

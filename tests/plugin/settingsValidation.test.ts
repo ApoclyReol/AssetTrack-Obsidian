@@ -34,7 +34,10 @@ describe("settings validation", () => {
       baseCurrency: "CNY",
       currencyFormat: "standard",
       reconciliationTolerance: 100,
-      largeExpenseThreshold: 1000
+      largeExpenseThreshold: 1000,
+      aiEndpoint: "",
+      aiModel: "",
+      aiTimeoutMs: 60000
     });
     expect(result.issues).toHaveLength(3);
   });

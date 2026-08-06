@@ -1,14 +1,24 @@
 import type { DatabaseSync } from "node:sqlite";
 import type {
-  CategoryDefinition,
+  CategoryDefinition
+} from "../types/configuration";
+import type {
   RuleConflictGroup,
-  SavedRule,
+  RuleImpactPreview,
+  SavedRule
+} from "../types/rules";
+import type {
   Transaction
-} from "../types";
+} from "../types/transactions";
 import {
   applyRulesWithIssues,
+  detectRewriteChains,
+  findRuleConflicts,
+  ruleConditionKey,
   normalizeProductKey,
+  normalizeRuleDefinition,
   RuleMatcher,
+  ruleMatchLevel,
   RULE_TYPES,
   type RuleRow
 } from "../domain/rules";
@@ -16,6 +26,7 @@ import { roundHalfEven } from "../domain/money";
 import { buildRuleReport } from "./ruleReporting";
 import {
   contentRevision,
+  RepositoryValidationError,
   rows,
   text,
   transactionFromRow,
@@ -32,10 +43,16 @@ export class RuleReportReadModel {
   constructor(private readonly context: RuleReportReadContext) {}
 
   rules(db: DatabaseSync): { revision: number; rows: Row[] } {
-    const raw = rows(db.prepare("SELECT * FROM auto_rules ORDER BY id").all());
+    const raw = rows(db.prepare(`
+      SELECT r.*,d.is_active AS category_active
+      FROM auto_rules r
+      LEFT JOIN category_definitions d ON d.category_key=r.category_key
+      ORDER BY r.id
+    `).all());
     const transactions = rows(db.prepare(`
-      SELECT month,type,counterparty,product FROM transactions
-      WHERE type IN ('支出','收入')
+      SELECT t.month,t.transaction_date,t.type,t.counterparty,t.product FROM transactions t
+      JOIN month_status m ON m.month=t.month AND m.status='saved'
+      WHERE t.type IN ('支出','收入')
     `).all());
     return buildRuleReport(raw, transactions);
   }
@@ -50,10 +67,14 @@ export class RuleReportReadModel {
     const ruleRows = data.rows.map((row) => ({
       id: Number(row.id),
       transaction_type: text(row.transaction_type),
-      counterparty: "",
+      match_scope: text(row.match_scope) as RuleRow["match_scope"],
+      counterparty: text(row.counterparty),
       product: text(row.product),
       category_key: text(row.category_key),
-      category: text(row.category)
+      category: text(row.category),
+      category_active: row.category_active === undefined ? undefined : Boolean(row.category_active),
+      rewrite_merchant: text(row.rewrite_merchant),
+      rewrite_product: text(row.rewrite_product)
     } satisfies RuleRow));
     return {
       data,
@@ -80,7 +101,11 @@ export class RuleReportReadModel {
       counterparty: text(row.counterparty),
       product: text(row.product),
       category_key: text(row.category_key),
-      category: text(row.category)
+      category: text(row.category),
+      category_active: row.category_active === undefined ? undefined : Boolean(row.category_active),
+      match_scope: text(row.match_scope) as RuleRow["match_scope"],
+      rewrite_merchant: text(row.rewrite_merchant),
+      rewrite_product: text(row.rewrite_product)
     }));
     const result = applyRulesWithIssues(input, resolvedRules);
     return {
@@ -88,6 +113,109 @@ export class RuleReportReadModel {
       rules_revision: ruleReport.revision,
       proposed_rows: result.proposed_rows,
       issues: result.issues as unknown as Array<Record<string, unknown>>
+    };
+  }
+
+  ruleImpactPreview(db: DatabaseSync, rule: RuleRow): RuleImpactPreview {
+    const ruleData = this.normalizedRuleRows(db);
+    const categories = this.context.categoryRows(db);
+    const category = categories.find((item) => item.category_key === text(rule.category_key));
+    const normalized = normalizeRuleDefinition({
+      ...rule,
+      category_key: category?.category_key ?? rule.category_key,
+      category: category?.name ?? rule.category
+    });
+    if (!normalized.value) {
+      throw new RepositoryValidationError({
+        code: "rule.impact_invalid",
+        params: { issues: normalized.issues }
+      });
+    }
+    if (!category) {
+      throw new RepositoryValidationError({ code: "rule.impact_category_missing" });
+    }
+    if (category.transaction_type !== normalized.value.transaction_type) {
+      throw new RepositoryValidationError({ code: "rule.impact_category_type_mismatch" });
+    }
+    if (!category.is_active) {
+      throw new RepositoryValidationError({ code: "rule.impact_category_inactive" });
+    }
+    const candidate = normalized.value;
+    const candidateId = Number(candidate.id);
+    const candidateSet = [
+      ...ruleData.rows.filter((current) => Number(current.id) !== candidateId),
+      candidate
+    ];
+    const conflicts = findRuleConflicts(candidateSet);
+    if (conflicts.length) {
+      const conflict = conflicts[0];
+      throw new RepositoryValidationError({
+        code: "rule.impact_conflict",
+        params: { description: conflict.description, rule_ids: conflict.rule_ids }
+      });
+    }
+    const chains = detectRewriteChains(candidateSet);
+    if (chains.length) {
+      const chain = chains[0];
+      throw new RepositoryValidationError({
+        code: "rule.impact_rewrite_chain",
+        params: { reason: chain.reason, rule_id: chain.rule_id ?? null }
+      });
+    }
+    const conditionKey = ruleConditionKey(candidate);
+    if (!conditionKey) {
+      return {
+        transaction_count: 0,
+        months: [],
+        category_counts: [],
+        existing_rule_ids: [],
+        higher_priority_rule_count: 0
+      };
+    }
+    const historyRows = rows(db.prepare(`
+      SELECT t.month,t.type,t.counterparty,t.product,t.category_key,t.category
+      FROM transactions t
+      JOIN month_status m ON m.month=t.month AND m.status='saved'
+      WHERE t.type IN ('支出','收入')
+      ORDER BY t.month,t.id
+    `).all());
+    const affected = historyRows.filter((row) => ruleConditionKey({
+      transaction_type: text(row.type),
+      match_scope: candidate.match_scope,
+      counterparty: text(row.counterparty),
+      product: text(row.product)
+    }) === conditionKey);
+    const counts = new Map<string, { category_key: string | null; category: string; occurrences: number }>();
+    affected.forEach((row) => {
+      const key = text(row.category_key) || "__uncategorized__";
+      const current = counts.get(key) ?? {
+        category_key: text(row.category_key) || null,
+        category: text(row.category) || "未分类",
+        occurrences: 0
+      };
+      current.occurrences += 1;
+      counts.set(key, current);
+    });
+    const priority: Record<string, number> = { merchant_product: 3, product: 2, merchant: 1 };
+    const candidateLevel = priority[candidate.match_scope] ?? 0;
+    const higherPriority = affected.filter((row) => ruleData.matcher.matchingRules({
+      type: text(row.type),
+      counterparty: text(row.counterparty),
+      product: text(row.product)
+    }).some((candidate) => {
+      const level = ruleMatchLevel(candidate);
+      return level && (priority[level] ?? 0) > candidateLevel;
+    })).length;
+    return {
+      transaction_count: affected.length,
+      months: [...new Set(affected.map((row) => text(row.month)))].sort(),
+      category_counts: [...counts.values()].map((row) => row),
+      existing_rule_ids: ruleData.rows
+        .filter((candidate) => Number(candidate.id) !== candidateId)
+        .filter((candidate) => ruleConditionKey(candidate) === conditionKey)
+        .map((candidate) => Number(candidate.id))
+        .filter((id) => Number.isFinite(id) && id > 0),
+      higher_priority_rule_count: higherPriority
     };
   }
 
@@ -99,23 +227,8 @@ export class RuleReportReadModel {
     const savedRules = ruleData.data.rows as unknown as SavedRule[];
     const savedById = new Map(savedRules.map((rule) => [Number(rule.id), rule]));
     const groups: RuleConflictGroup[] = [];
-    const conditions = new Map<string, RuleRow[]>();
-    for (const rule of ruleData.rows) {
-      const product = normalizeProductKey(rule.product);
-      if (!product) continue;
-      const key = `${rule.transaction_type}\u0000${product}`;
-      conditions.set(key, [...(conditions.get(key) ?? []), rule]);
-    }
-    for (const componentRows of conditions.values()) {
-      if (componentRows.length < 2) continue;
-      const categoryKeys = new Set(componentRows.map((rule) =>
-        normalizeProductKey(rule.category_key) || normalizeProductKey(rule.category)
-      ));
-      const kind: RuleConflictGroup["kind"] = categoryKeys.size > 1
-        ? "same-condition"
-        : "duplicate";
-      const component = componentRows
-        .map((rule) => Number(rule.id))
+    for (const conflict of findRuleConflicts(ruleData.rows)) {
+      const component = conflict.rule_ids
         .filter((id) => Number.isFinite(id) && id > 0)
         .sort((left, right) => left - right);
       const componentRules = component
@@ -126,15 +239,32 @@ export class RuleReportReadModel {
         transactionFromRow(row)
       ).some((rule) => componentRuleIds.has(Number(rule.id))));
       groups.push({
-        conflict_key: `${kind}:${component.join(",")}`,
-        kind,
+        conflict_key: `${conflict.kind}:${component.join(",")}`,
+        kind: conflict.kind,
         rule_ids: component,
         rules: componentRules,
         affected_transaction_count: affected.length,
         affected_months: [...new Set(affected.map((row) => text(row.month)))].sort(),
-        description: kind === "duplicate"
-          ? "同一商品存在多个相同分类的规则"
-          : "同一商品对应多个分类规则"
+        description: conflict.description
+      });
+    }
+    for (const chain of detectRewriteChains(ruleData.rows)) {
+      if (chain.rule_id === null) continue;
+      const component = [chain.rule_id, ...chain.target_rule_ids]
+        .filter((id, index, values) => values.indexOf(id) === index)
+        .sort((left, right) => left - right);
+      const componentRuleIds = new Set(component);
+      const affected = history.filter((row) => ruleData.matcher.matchingRules(
+        transactionFromRow(row)
+      ).some((rule) => componentRuleIds.has(Number(rule.id))));
+      groups.push({
+        conflict_key: `rewrite-chain:${component.join(",")}`,
+        kind: "rewrite-chain",
+        rule_ids: component,
+        rules: component.map((id) => savedById.get(id)).filter((rule): rule is SavedRule => Boolean(rule)),
+        affected_transaction_count: affected.length,
+        affected_months: [...new Set(affected.map((row) => text(row.month)))].sort(),
+        description: chain.reason
       });
     }
     return groups.sort((left, right) =>
@@ -145,12 +275,22 @@ export class RuleReportReadModel {
   }
 
   rawRuleDefinitions(db: DatabaseSync): SavedRule[] {
-    return rows(db.prepare("SELECT * FROM auto_rules ORDER BY id").all()).map((row) => ({
+    return rows(db.prepare(`
+      SELECT r.*,d.is_active AS category_active
+      FROM auto_rules r
+      LEFT JOIN category_definitions d ON d.category_key=r.category_key
+      ORDER BY r.id
+    `).all()).map((row) => ({
       id: Number(row.id),
       transaction_type: text(row.transaction_type) as "支出" | "收入",
+      match_scope: text(row.match_scope) as "product" | "merchant" | "merchant_product",
+      counterparty: text(row.match_scope) === "product" ? "" : text(row.counterparty),
       product: text(row.product),
       category_key: text(row.category_key),
-      category: text(row.category)
+      category: text(row.category),
+      category_active: row.category_active === undefined ? undefined : Boolean(row.category_active),
+      rewrite_merchant: text(row.rewrite_merchant),
+      rewrite_product: text(row.rewrite_product)
     }));
   }
 
@@ -178,9 +318,10 @@ export class RuleReportReadModel {
     const ruleData = this.rules(db);
     const combined = [
       ...rows(db.prepare(`
-        SELECT month,type,category,product FROM transactions
-        WHERE month<>? AND type IN ('支出','收入')
-          AND TRIM(COALESCE(product,''))<>''
+        SELECT t.month,t.type,t.category,t.product FROM transactions t
+        JOIN month_status m ON m.month=t.month AND m.status='saved'
+        WHERE t.month<>? AND t.type IN ('支出','收入')
+          AND TRIM(COALESCE(t.product,''))<>''
       `).all(month)),
       ...draftRows.filter(
         (row) =>

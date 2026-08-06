@@ -3,15 +3,22 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { App } from "obsidian";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AssetTrackService } from "../../src/services/AssetTrackService";
 import type {
-  CategoryDefinition,
-  MonthWorkspace,
+  ConfigurationEditorPort,
+  MonthEditorPort
+} from "../../src/services/ports";
+import type {
+  CategoryDefinition
+} from "../../src/types/configuration";
+import type {
+  MonthWorkspace
+} from "../../src/types/month";
+import type {
   RuleWorkspace
-} from "../../src/types";
+} from "../../src/types/rules";
 import {
   MonthEditor,
-  RulesEditorV2
+  RulesEditor
 } from "../../src/ui/AssetTrackEditorApp";
 import type {
   MonthEditorDraftSnapshot,
@@ -65,7 +72,7 @@ function monthWorkspace(revision: number): MonthWorkspace {
   };
 }
 
-function ruleWorkspace(): RuleWorkspace {
+function createRuleWorkspaceFixture(): RuleWorkspace {
   return {
     categories_revision: 4,
     rules_revision: 5,
@@ -132,6 +139,53 @@ function debtReconciliationWorkspace(): MonthWorkspace {
   };
 }
 
+function monthApi(overrides: Partial<MonthEditorPort> = {}): MonthEditorPort {
+  return {
+    month: vi.fn().mockResolvedValue(monthWorkspace(1)),
+    deleteMonth: vi.fn().mockResolvedValue({}),
+    saveMonth: vi.fn().mockResolvedValue(monthWorkspace(1)),
+    saveMonthSection: vi.fn().mockResolvedValue(monthWorkspace(1)),
+    validateTransactions: vi.fn().mockResolvedValue({ issues: [] }),
+    previewTransactionOperation: vi.fn(),
+    inspectCsv: vi.fn(),
+    previewMappedCsv: vi.fn(),
+    categories: vi.fn().mockResolvedValue({ revision: 1, rows: [] }),
+    ruleWorkspaceShell: vi.fn().mockResolvedValue({
+      categories_revision: 1,
+      rules_revision: 1,
+      categories: [],
+      rules: []
+    }),
+    saveRules: vi.fn().mockResolvedValue(undefined),
+    ...overrides
+  };
+}
+
+function configurationApi(overrides: Partial<ConfigurationEditorPort> = {}): ConfigurationEditorPort {
+  return {
+    ruleWorkspaceShell: vi.fn().mockResolvedValue({
+      categories_revision: 1,
+      rules_revision: 1,
+      categories: [],
+      rules: []
+    }),
+    saveRules: vi.fn().mockResolvedValue(undefined),
+    ruleImpactPreview: vi.fn(),
+    ruleWorkspaceAnalytics: vi.fn().mockResolvedValue({}),
+    productOverview: vi.fn(),
+    productHistoryIndex: vi.fn(),
+    productHistory: vi.fn(),
+    previewCategoryBackfill: vi.fn(),
+    applyCategoryBackfill: vi.fn(),
+    previewProductRename: vi.fn(),
+    applyProductRename: vi.fn(),
+    previewCounterpartyRename: vi.fn(),
+    applyCounterpartyRename: vi.fn(),
+    saveCategories: vi.fn().mockResolvedValue({ revision: 1, rows: [] }),
+    ...overrides
+  };
+}
+
 describe("editor draft restoration", () => {
   it("restores a month draft and reports an external revision change", async () => {
     const snapshot: MonthEditorDraftSnapshot = {
@@ -141,15 +195,20 @@ describe("editor draft restoration", () => {
       categories: [category],
       issues: []
     };
-    const api = {
+    const api = monthApi({
       month: vi.fn().mockResolvedValue(monthWorkspace(4)),
       categories: vi.fn().mockResolvedValue({
         revision: 1,
         rows: [category]
+      }),
+      ruleWorkspaceShell: vi.fn().mockResolvedValue({
+        categories_revision: 4,
+        rules_revision: 5,
+        categories: [category],
+        rules: []
       })
-    } as unknown as AssetTrackService;
-    const onDirty = vi.fn();
-    const onDraftChange = vi.fn();
+    });
+    const onSessionChange = vi.fn();
 
     render(
       <MonthEditor
@@ -161,9 +220,8 @@ describe("editor draft restoration", () => {
         reconciliationTolerance={100}
         onDeleted={vi.fn()}
         onSaved={vi.fn()}
-        onDirty={onDirty}
         initialDraft={snapshot}
-        onDraftChange={onDraftChange}
+        onSessionChange={onSessionChange}
         getCsvMapping={vi.fn()}
         saveCsvMapping={vi.fn()}
       />
@@ -171,15 +229,14 @@ describe("editor draft restoration", () => {
 
     expect(screen.getByDisplayValue("恢复商品")).toBeTruthy();
     expect(screen.getByDisplayValue("恢复借款")).toBeTruthy();
-    await waitFor(() => expect(onDirty).toHaveBeenCalledWith(true));
     await waitFor(() => expect(screen.getByText(
       "草稿已恢复，但其他窗口已修改当前月份；重新加载前不能覆盖保存。"
     )).toBeTruthy());
-    expect(onDraftChange).toHaveBeenCalledWith(snapshot);
+    expect(onSessionChange).toHaveBeenCalledWith(snapshot);
   });
 
   it("restores category and rule drafts without replacing local names", async () => {
-    const workspace = ruleWorkspace();
+    const workspace = createRuleWorkspaceFixture();
     const snapshot: RulesEditorDraftSnapshot = {
       kind: "rules",
       workspace,
@@ -187,7 +244,7 @@ describe("editor draft restoration", () => {
       rule_dirty: false,
       analytics_ready: true
     };
-    const api = {
+    const api = configurationApi({
       ruleWorkspaceShell: vi.fn().mockResolvedValue({
         categories_revision: 4,
         rules_revision: 5,
@@ -203,19 +260,17 @@ describe("editor draft restoration", () => {
         rule_conflicts: [],
         summary: workspace.summary
       })
-    } as unknown as AssetTrackService;
-    const onDirty = vi.fn();
-    const onDraftChange = vi.fn();
+    });
+    const onSessionChange = vi.fn();
 
     render(
-      <RulesEditorV2
+      <RulesEditor
         app={{} as App}
         api={api}
         hostWindow={window}
         dataVersion={0}
-        onDirty={onDirty}
         initialDraft={snapshot}
-        onDraftChange={onDraftChange}
+        onSessionChange={onSessionChange}
         onSaved={vi.fn()}
         onDataChanged={vi.fn()}
         confirmAction={vi.fn()}
@@ -223,8 +278,7 @@ describe("editor draft restoration", () => {
     );
 
     expect(screen.getByDisplayValue("恢复分类")).toBeTruthy();
-    await waitFor(() => expect(onDirty).toHaveBeenCalledWith(true));
-    expect(onDraftChange).toHaveBeenCalledWith(expect.objectContaining({
+    expect(onSessionChange).toHaveBeenCalledWith(expect.objectContaining({
       kind: "rules",
       category_dirty: true,
       rule_dirty: false
@@ -240,13 +294,19 @@ describe("editor draft restoration", () => {
       categories: [],
       issues: []
     };
-    const api = {
+    const api = monthApi({
       month: vi.fn().mockResolvedValue(workspace),
       categories: vi.fn().mockResolvedValue({
         revision: 1,
         rows: []
+      }),
+      ruleWorkspaceShell: vi.fn().mockResolvedValue({
+        categories_revision: 1,
+        rules_revision: 1,
+        categories: [],
+        rules: []
       })
-    } as unknown as AssetTrackService;
+    });
 
     render(
       <MonthEditor
@@ -258,9 +318,8 @@ describe("editor draft restoration", () => {
         reconciliationTolerance={100}
         onDeleted={vi.fn()}
         onSaved={vi.fn()}
-        onDirty={vi.fn()}
         initialDraft={snapshot}
-        onDraftChange={vi.fn()}
+        onSessionChange={vi.fn()}
         getCsvMapping={vi.fn()}
         saveCsvMapping={vi.fn()}
       />

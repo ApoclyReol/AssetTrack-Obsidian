@@ -1,4 +1,9 @@
-import type { CategoryDefinition, Transaction } from "../types";
+import type {
+  CategoryDefinition
+} from "../types/configuration";
+import type {
+  Transaction
+} from "../types/transactions";
 import { normalizeDate } from "./dates";
 
 export type ValidationSeverity = "警告" | "错误";
@@ -70,7 +75,9 @@ export function validateTransactions(
         ));
       }
     }
-    if (!String(row.product ?? "").trim()) {
+    if (!String(row.product ?? "").trim()
+      && String(row.type ?? "").trim() !== "加仓"
+      && String(row.type ?? "").trim() !== "提现") {
       issues.push(issue(
         row,
         index,
@@ -106,17 +113,29 @@ export function validateTransactions(
     }
     const categoryKey = String(row.category_key ?? "").trim();
     const category = String(row.category ?? "").trim();
-    if (type === "支出" || type === "收入") {
+    const categoryType = type === "代付" ? "支出" : type;
+    if (type === "支出" || type === "收入" || type === "代付") {
       const definition = byKey.get(categoryKey) ?? byName.get(category);
       if (!definition) {
+        if (type !== "代付" || category || categoryKey) {
+          issues.push(issue(
+            row,
+            index,
+            "分类",
+            `${type}未选择有效分类`,
+            `请选择一个已启用的${type === "代付" ? "支出" : type}分类`
+          ));
+        }
+      } else if (!definition.is_active) {
         issues.push(issue(
           row,
           index,
           "分类",
-          `${type}未选择有效分类`,
-          `请选择一个已启用的${type}分类`
+          `${type}使用了已停用分类`,
+          `请选择一个已启用的${type}分类`,
+          "错误"
         ));
-      } else if (definition.transaction_type !== type) {
+      } else if (definition.transaction_type !== categoryType) {
         issues.push(issue(
           row,
           index,
@@ -130,8 +149,8 @@ export function validateTransactions(
         row,
         index,
         "分类",
-        "特殊类型流水不能设置分类",
-        "代付、加仓、提现的分类必须为空"
+        "理财流水不能设置分类",
+        "加仓、提现的分类必须为空"
       ));
     }
   });

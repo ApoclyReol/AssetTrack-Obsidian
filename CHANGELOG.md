@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.7.0
+
+### 中文更新
+
+- 规则升级为“仅商品 / 仅交易对手 / 交易对手 + 商品”三种精确匹配范围，固定按组合规则、商品规则、交易对手规则优先匹配；重复条件、无效分类和重写链会在保存前阻止。
+- 账单导入、应用规则、批量修改、收入/代付转换和历史回写统一先生成影响预览，确认后进入草稿，保存时复核月份 revision、规则 revision、前置值和最终流水。
+- 流水页增加出账、入账、理财 Tab，以及逐项、按商品汇总、按交易对手汇总三种视图；支持稳定流水选择、保护范围、批量编辑和汇总组操作，操作审计保存在本地但不再显示独立按钮。
+- 新增本地操作日志，记录来源、业务范围、选择范围、成功/跳过/失败数量、前后字段、规则编号和 AI 批次结果；历史统计只读取已保存月份。
+- 支出与代付支持可追溯的类型转换并保留分类；当前阶段不建立代付与支出的多对多关系，也不计算个人承担额。
+- 分类定义增加描述字段；数据健康直接展示商品-分类冲突；商品总览支持商品/交易对手历史汇总、筛选、编辑和规则创建。
+- 新增可选 AI 分类建议：API Key 使用 Obsidian SecretStorage，只发送选中的可分类流水，结果按已分类、未分类、待确认和失败分组，支持重试，不自动生成永久规则。
+- 加仓和提现可以绑定具体理财账户；月度分析按账户展示本金、本月资金流、市值、流动资金、仓位、收益率和上月对比。
+- 表格列宽、复选框、下拉框和规则最近月份展示进一步统一；固定资产、分类定义和匹配规则表的主要字段更易编辑。
+- 数据库升级至 schema 10，增加理财流水账户字段；schema 9 首次打开会先创建保护备份并执行可回滚的 9→10 迁移。
+
+### English updates
+
+- Matching rules now support three exact scopes: item only, counterparty only, and counterparty + item. Fixed priority is combination, item, then counterparty; duplicate conditions, invalid categories, and rewrite chains are blocked before saving.
+- Imports, rule application, bulk edits, income/daifu conversion, and historical backfills now produce impact previews, enter the draft only after confirmation, and revalidate month revisions, rule revisions, before-values, and final rows at save time.
+- The Transactions page now provides Outgoing, Incoming, and Investment tabs with individual, item-summary, and counterparty-summary views; stable row selection, protected rows, bulk edits, group rule creation, and operation history are supported.
+- Added local operation logs for source, business scope, selection, success/skipped/failed counts, before/after fields, rule IDs, and AI batch results. Historical reports read saved months only.
+- Income and daifu support auditable type conversion. The current release does not add many-to-many daifu/expense links or personal-share calculations.
+- Category definitions now include descriptions. Data health opens item-category conflict results directly; Item overview supports historical item/counterparty summaries, filters, edits, and rule creation.
+- Added optional AI classification suggestions using Obsidian SecretStorage for the API key. Only selected classifiable rows are sent; results are grouped by classified, unclassified, needs review, and error, with retry support and no automatic permanent rules.
+- Investment deposits and withdrawals can now be assigned to investment accounts. Monthly analysis shows account-level principal, monthly flows, market value, liquid funds, position, return, and previous-month comparison.
+- Table proportions, checkboxes, selects, and latest-month rule reporting are further standardized; key fields in fixed assets, category definitions, and matching rules are easier to edit.
+- Database schema 10 adds investment-account links for investment flows. Opening schema 9 creates a protection backup before the rollback-safe 9→10 migration.
+
 ## 1.6.0
 
 ### 中文更新

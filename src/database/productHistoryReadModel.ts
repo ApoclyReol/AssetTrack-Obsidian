@@ -1,14 +1,20 @@
 import type { DatabaseSync } from "node:sqlite";
 import type {
-  CategoryDefinition,
+  CategoryDefinition
+} from "../types/configuration";
+import type {
   HistoricalCategoryCount,
   HistoricalProductStat,
+  RuleMatchLevel
+} from "../types/rules";
+import type {
   ProductHistoryIndexResult,
   ProductHistoryQuery,
-  ProductHistoryResult,
-  RuleMatchLevel,
+  ProductHistoryResult
+} from "../types/history";
+import type {
   Transaction
-} from "../types";
+} from "../types/transactions";
 import { normalizeProductKey, RuleMatcher, ruleMatchLevel } from "../domain/rules";
 import { roundHalfEven } from "../domain/money";
 import { scalarText } from "../domain/text";
@@ -60,6 +66,11 @@ export class ProductHistoryReadModel {
       conditions.push("LOWER(COALESCE(t.product,'')) LIKE LOWER(?)");
       parameters.push(`%${productSearch}%`);
     }
+    const counterpartySearch = scalarText(query.counterparty_search).trim();
+    if (counterpartySearch) {
+      conditions.push("LOWER(COALESCE(t.counterparty,'')) LIKE LOWER(?)");
+      parameters.push(`%${counterpartySearch}%`);
+    }
     const history = rows(db.prepare(`
       SELECT t.id,t.month,t.transaction_date,t.type,t.category_key,t.category,
              t.counterparty,t.product,t.amount,d.is_active AS category_active
@@ -70,10 +81,13 @@ export class ProductHistoryReadModel {
       ORDER BY t.type,t.product,t.month,t.transaction_date,t.id
     `).all(...parameters));
     const normalizedSearch = normalizeProductKey(productSearch);
+    const normalizedCounterpartySearch = normalizeProductKey(counterpartySearch);
+    const groupBy = query.group_by ?? "product";
     return history.filter((row) => {
       if (query.transaction_type && text(row.type) !== query.transaction_type) return false;
       if (query.product_key !== undefined
-        && normalizeProductKey(row.product) !== normalizeProductKey(query.product_key)) return false;
+        && normalizeProductKey(groupBy === "counterparty" ? row.counterparty : row.product)
+          !== normalizeProductKey(query.product_key)) return false;
       if (query.category_key !== undefined) {
         const key = text(row.category_key);
         if (query.category_key === null ? key : key !== query.category_key) return false;
@@ -81,6 +95,7 @@ export class ProductHistoryReadModel {
       if (query.from_month && text(row.month) < query.from_month) return false;
       if (query.to_month && text(row.month) > query.to_month) return false;
       if (normalizedSearch && !normalizeProductKey(row.product).includes(normalizedSearch)) return false;
+      if (normalizedCounterpartySearch && !normalizeProductKey(row.counterparty).includes(normalizedCounterpartySearch)) return false;
       return true;
     });
   }
@@ -126,7 +141,8 @@ export class ProductHistoryReadModel {
     group: Row[],
     ruleMatcher: RuleMatcher,
     ruleStatusById: Map<number, string>,
-    categories: CategoryDefinition[]
+    categories: CategoryDefinition[],
+    groupBy: "product" | "counterparty"
   ): HistoricalProductStat {
     const ordered = [...group].sort((left, right) =>
       text(left.month).localeCompare(text(right.month))
@@ -134,9 +150,13 @@ export class ProductHistoryReadModel {
       || Number(left.id ?? 0) - Number(right.id ?? 0)
     );
     const representative = ordered[0];
-    const variants = this.frequency(group.map((row) => text(row.product)))
+    const productVariants = this.frequency(group.map((row) => text(row.product)))
       .map(([value]) => value)
       .filter(Boolean);
+    const counterpartyVariants = this.frequency(group.map((row) => text(row.counterparty)))
+      .map(([value]) => value)
+      .filter(Boolean);
+    const variants = groupBy === "counterparty" ? counterpartyVariants : productVariants;
     const counterparties = this.frequency(
       group.map((row) => text(row.counterparty)).filter(Boolean)
     ).map(([value]) => value);
@@ -156,13 +176,14 @@ export class ProductHistoryReadModel {
     const matchingRuleIds = new Set<number>();
     const matchingRuleLevels = new Set<RuleMatchLevel>();
     const resolutions = transactions.map((transaction) => {
-      for (const rule of ruleMatcher.matchingRules(transaction)) {
+      const matches = ruleMatcher.matchingRules(transaction);
+      for (const rule of matches) {
         const id = Number(rule.id);
         if (Number.isFinite(id) && id > 0) matchingRuleIds.add(id);
         const level = ruleMatchLevel(rule);
         if (level) matchingRuleLevels.add(level);
       }
-      return ruleMatcher.resolve(transaction);
+      return ruleMatcher.resolveWithMatches(transaction, matches);
     });
     const orderedMatchingRuleIds = ruleMatcher.orderedRuleIds(matchingRuleIds);
     const ruleIds = [...new Set([
@@ -178,6 +199,9 @@ export class ProductHistoryReadModel {
     const unmatchedOccurrences = unmatchedRows.length;
     const conflictedOccurrences = resolutions.filter(
       (resolution) => resolution.status === "conflict"
+    ).length;
+    const higherPriorityCoveredOccurrences = resolutions.filter(
+      (resolution) => (resolution.covered_rule_ids?.length ?? 0) > 0
     ).length;
     const ruleCoverage: HistoricalProductStat["rule_coverage"] =
       matchedOccurrences === ordered.length
@@ -214,15 +238,18 @@ export class ProductHistoryReadModel {
       && unmatchedAssigned[0].occurrences === unmatchedRows.length
       && Boolean(unmatchedRecommended?.category_key);
     const unmatchedVariants = this.frequency(
-      unmatchedRows.map((row) => text(row.product))
+      unmatchedRows.map((row) => text(groupBy === "counterparty" ? row.counterparty : row.product))
     ).map(([value]) => value).filter(Boolean);
-    const suggestedProduct = unmatchedVariants[0] ?? "";
+    const suggestedProduct = groupBy === "product" ? unmatchedVariants[0] ?? "" : "";
+    const suggestedCounterparty = groupBy === "counterparty" ? unmatchedVariants[0] ?? "" : "";
     const ruleSuggestion = !hasRuleConflict
       && unmatchedOccurrences > 0
       && stableUnmatchedCategory
-      && suggestedProduct
+      && (groupBy === "product" ? suggestedProduct : suggestedCounterparty)
       ? {
           transaction_type: text(representative.type) as "支出" | "收入",
+          match_scope: groupBy === "counterparty" ? "merchant" as const : "product" as const,
+          counterparty: suggestedCounterparty,
           product: suggestedProduct,
           category_key: unmatchedRecommended?.category_key ?? "",
           category: unmatchedRecommended?.category ?? "",
@@ -240,8 +267,11 @@ export class ProductHistoryReadModel {
         }
       : undefined;
     return {
+      group_by: groupBy,
       transaction_type: text(representative.type) as "支出" | "收入",
-      product_key: normalizeProductKey(representative.product),
+      product_key: normalizeProductKey(groupBy === "counterparty"
+        ? representative.counterparty
+        : representative.product),
       product: variants[0] ?? "",
       counterparty: counterparties[0] ?? "",
       variants,
@@ -270,6 +300,7 @@ export class ProductHistoryReadModel {
       matched_occurrences: matchedOccurrences,
       unmatched_occurrences: unmatchedOccurrences,
       conflicted_occurrences: conflictedOccurrences,
+      higher_priority_covered_occurrences: higherPriorityCoveredOccurrences,
       rule_suggestion: ruleSuggestion,
       rule_status: ruleStatus,
       history_rule_mismatch: historyRuleMismatch
@@ -282,6 +313,7 @@ export class ProductHistoryReadModel {
       || query.product_key !== undefined
       || query.category_key !== undefined
       || scalarText(query.product_search).trim()
+      || scalarText(query.counterparty_search).trim()
       || query.issue_filter
       || query.from_month
       || query.to_month
@@ -320,6 +352,7 @@ export class ProductHistoryReadModel {
   } {
     const ruleData = this.ruleReports.normalizedRuleRows(db);
     const categories = this.context.categoryRows(db);
+    const groupBy = query.group_by ?? "product";
     const history = this.historyRows(db, {
       ...query,
       product_key: query.product_key === undefined
@@ -328,7 +361,10 @@ export class ProductHistoryReadModel {
     });
     const groups = new Map<string, Row[]>();
     for (const row of history) {
-      const key = [text(row.type), normalizeProductKey(row.product)].join("\u0000");
+      const key = [
+        text(row.type),
+        normalizeProductKey(groupBy === "counterparty" ? row.counterparty : row.product)
+      ].join("\u0000");
       const group = groups.get(key) ?? [];
       group.push(row);
       groups.set(key, group);
@@ -338,7 +374,8 @@ export class ProductHistoryReadModel {
         group,
         ruleData.matcher,
         ruleData.statusById,
-        categories
+        categories,
+        groupBy
       ))
       .filter((stat) =>
         (query.min_occurrences === undefined || stat.occurrences >= query.min_occurrences)
@@ -349,36 +386,39 @@ export class ProductHistoryReadModel {
 
   productHistoryIndex(db: DatabaseSync, query: ProductHistoryQuery): ProductHistoryIndexResult {
     if (!this.hasProductHistoryFilter(query)) {
-      throw new RepositoryValidationError("商品回溯至少选择一个筛选条件后再加载");
+      throw new RepositoryValidationError({ code: "history.filter_required" });
     }
     const data = this.historyGroups(db, query);
     return {
       categories_revision: contentRevision(data.categories as unknown as Row[]),
       rules_revision: data.ruleData.data.revision,
+      group_by: query.group_by ?? "product",
       groups: data.stats
     };
   }
 
-  productOverview(db: DatabaseSync): ProductHistoryIndexResult {
-    const data = this.historyGroups(db, {});
+  productOverview(db: DatabaseSync, query: ProductHistoryQuery = {}): ProductHistoryIndexResult {
+    const data = this.historyGroups(db, query);
     return {
       categories_revision: contentRevision(data.categories as unknown as Row[]),
       rules_revision: data.ruleData.data.revision,
+      group_by: query.group_by ?? "product",
       groups: data.stats
     };
   }
 
   productHistory(db: DatabaseSync, query: ProductHistoryQuery): ProductHistoryResult {
     if (!this.hasProductHistoryFilter(query)) {
-      throw new RepositoryValidationError("商品回溯至少选择一个筛选条件后再加载");
+      throw new RepositoryValidationError({ code: "history.filter_required" });
     }
     const data = this.historyGroups(db, query);
     const { ruleData, history, stats } = data;
+    const groupBy = query.group_by ?? "product";
     const allowedGroups = new Set(stats.map((stat) =>
       `${stat.transaction_type}\u0000${stat.product_key}`
     ));
     const detailRows = history
-      .filter((row) => allowedGroups.has(`${text(row.type)}\u0000${normalizeProductKey(row.product)}`))
+      .filter((row) => allowedGroups.has(`${text(row.type)}\u0000${normalizeProductKey(groupBy === "counterparty" ? row.counterparty : row.product)}`))
       .map((row) => {
       const transaction: Transaction = {
         id: Number(row.id),

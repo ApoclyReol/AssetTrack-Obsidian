@@ -1,13 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
 import type {
   DebtRecord,
-  FixedAsset,
+  FixedAsset
+} from "../types/month";
+import type {
   Transaction
-} from "../types";
+} from "../types/transactions";
 import { finiteNumber } from "../domain/money";
 import { scalarText } from "../domain/text";
 import type { ValidationIssue } from "../domain/validators";
-import { AssetTrackError } from "../services/AssetTrackService";
+import { AssetTrackError, type AssetTrackErrorParams } from "../application/errors";
 
 export type Row = Record<string, unknown>;
 
@@ -19,18 +21,28 @@ export function ruleIndexKey(type: string, value: string): string {
 
 export class RevisionConflictError extends AssetTrackError {
   constructor(expected: number, actual: number) {
-    super(
-      `revision 冲突：草稿基于 ${expected}，当前数据库为 ${actual}`,
-      409,
-      { expected, actual },
-      "revision_conflict"
-    );
+    super({
+      code: "revision_conflict",
+      status: 409,
+      params: { expected, actual }
+    });
   }
 }
 
 export class RepositoryValidationError extends AssetTrackError {
-  constructor(message: string, issues: ValidationIssue[] = []) {
-    super(message, 422, issues.length ? { message, issues } : message, "validation_error");
+  constructor(options: {
+    code: string;
+    params?: AssetTrackErrorParams;
+    issues?: ValidationIssue[];
+  }) {
+    super({
+      code: options.code,
+      status: 422,
+      params: {
+        ...options.params,
+        ...(options.issues?.length ? { issues: options.issues } : {})
+      }
+    });
   }
 }
 
@@ -67,7 +79,12 @@ export function normalizeAsset(source: Partial<FixedAsset>, index: number): Requ
   Pick<FixedAsset, "asset_key" | "asset_name" | "category" | "purchase_price" | "status" | "note">
 > & Pick<FixedAsset, "purchase_date"> {
   const name = text(source.asset_name);
-  if (!name) throw new RepositoryValidationError(`第 ${index + 1} 行的资产名称不能为空`);
+  if (!name) {
+    throw new RepositoryValidationError({
+      code: "fixed_asset.name_required",
+      params: { row: index + 1 }
+    });
+  }
   const status = text(source.status) || "在用";
   return {
     asset_key: text(source.asset_key) || randomUUID().replaceAll("-", ""),
@@ -88,10 +105,12 @@ export function transactionFromRow(row: Row): Transaction {
     id: Number(row.id),
     transaction_date: text(row.transaction_date),
     type: text(row.type),
+    account_key: text(row.account_key) || null,
     category_key: text(row.category_key) || null,
     category: text(row.category),
     counterparty: text(row.counterparty),
     product: text(row.product),
+    source: text(row.source),
     amount: Number(row.amount ?? 0)
   };
 }

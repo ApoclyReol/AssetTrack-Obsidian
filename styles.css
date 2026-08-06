@@ -75,28 +75,28 @@
   background-image: none;
 }
 
-.asset-track-app input:not([type="checkbox"]):not([type="color"]):not([type="range"]),
+.asset-track-app input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
 .asset-track-app textarea,
 .asset-track-app select,
-.asset-track-modal input:not([type="checkbox"]):not([type="color"]):not([type="range"]),
+.asset-track-modal input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
 .asset-track-modal textarea,
 .asset-track-modal select,
-.asset-track-settings input:not([type="checkbox"]):not([type="color"]):not([type="range"]),
+.asset-track-settings input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
 .asset-track-settings textarea,
 .asset-track-settings select,
-.asset-track-setup-guide input:not([type="checkbox"]):not([type="color"]):not([type="range"]),
+.asset-track-setup-guide input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
 .asset-track-setup-guide textarea,
 .asset-track-setup-guide select,
-.asset-track-rule-history-modal input:not([type="checkbox"]):not([type="color"]):not([type="range"]),
+.asset-track-rule-history-modal input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
 .asset-track-rule-history-modal textarea,
 .asset-track-rule-history-modal select,
-.asset-track-product-rename-modal input:not([type="checkbox"]):not([type="color"]):not([type="range"]),
+.asset-track-product-rename-modal input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
 .asset-track-product-rename-modal textarea,
 .asset-track-product-rename-modal select,
-.asset-track-rule-create-modal input:not([type="checkbox"]):not([type="color"]):not([type="range"]),
+.asset-track-rule-create-modal input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
 .asset-track-rule-create-modal textarea,
 .asset-track-rule-create-modal select,
-.asset-track-confirmation-modal input:not([type="checkbox"]):not([type="color"]):not([type="range"]),
+.asset-track-confirmation-modal input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
 .asset-track-confirmation-modal textarea,
 .asset-track-confirmation-modal select {
   min-height: var(--input-height);
@@ -476,9 +476,7 @@
 }
 
 .asset-track-view-switcher {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  display: grid;
   gap: 8px;
   margin: 0 0 16px;
   padding: 10px 12px;
@@ -497,6 +495,82 @@
   font-size: var(--font-ui-small);
 }
 
+.asset-track-transaction-toolbar-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.asset-track-transaction-display,
+.asset-track-transaction-view-tabs,
+.asset-track-transaction-batch-actions,
+.asset-track-transaction-business-tabs {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.asset-track-transaction-display {
+  flex: 1 1 auto;
+}
+
+.asset-track-transaction-view-tabs {
+  flex: 1 1 auto;
+}
+
+.asset-track-transaction-batch-actions {
+  justify-content: flex-end;
+}
+
+.asset-track-transaction-batch-actions > [role="status"] {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.asset-track-transaction-toolbar-hint {
+  display: block;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  overflow-wrap: anywhere;
+}
+
+.asset-track-page-heading-content {
+  min-width: 0;
+}
+
+.asset-track-page-heading-main {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.asset-track-page-heading-main h2 {
+  margin-bottom: 0;
+}
+
+.asset-track-transaction-business-tabs button,
+.asset-track-transaction-view-tabs button {
+  min-width: 0;
+  padding: 5px 10px;
+  white-space: nowrap;
+}
+
+.asset-track-transaction-business-tabs button.is-active,
+.asset-track-transaction-view-tabs button.is-active {
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+}
+
 .asset-track-debt-summary {
   display: flex;
   flex-wrap: wrap;
@@ -511,23 +585,7 @@
 }
 
 .asset-track-summary-details {
-  display: grid;
-  gap: 6px;
-  padding: 6px;
-}
-
-.asset-track-summary-detail-row {
-  display: grid;
-  grid-template-columns:
-    140px minmax(160px, 1fr) minmax(220px, 1fr)
-    120px minmax(150px, 220px);
-  gap: 8px;
-}
-
-.asset-track-summary-detail-row--no-category {
-  grid-template-columns:
-    140px minmax(180px, 1fr) minmax(240px, 1.25fr)
-    120px;
+  min-width: 0;
 }
 
 .asset-track-modal-backdrop {
@@ -583,6 +641,106 @@
   margin: 14px 0;
 }
 
+.asset-track-import-mode label,
+.asset-track-import-statuses label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+:where(
+  .asset-track-app,
+  .asset-track-modal,
+  .asset-track-settings,
+  .asset-track-rule-history-modal,
+  .asset-track-product-rename-modal,
+  .asset-track-rule-create-modal,
+  .asset-track-confirmation-modal,
+  .asset-track-operation-preview-modal,
+  .asset-track-batch-edit-modal
+) input[type="checkbox"] {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  min-height: 16px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border-hover);
+  border-radius: 3px;
+  background: var(--background-modifier-form-field);
+  box-shadow: none !important;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 78% 78%;
+  accent-color: transparent !important;
+}
+
+:where(
+  .asset-track-app,
+  .asset-track-modal,
+  .asset-track-settings,
+  .asset-track-rule-history-modal,
+  .asset-track-product-rename-modal,
+  .asset-track-rule-create-modal,
+  .asset-track-confirmation-modal,
+  .asset-track-operation-preview-modal,
+  .asset-track-batch-edit-modal
+) input[type="checkbox"]:checked {
+  border-color: var(--interactive-accent);
+  background-color: var(--interactive-accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 8.5 6.5 12 13 4.5' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+}
+
+:where(
+  .asset-track-app,
+  .asset-track-modal,
+  .asset-track-settings,
+  .asset-track-rule-history-modal,
+  .asset-track-product-rename-modal,
+  .asset-track-rule-create-modal,
+  .asset-track-confirmation-modal,
+  .asset-track-operation-preview-modal,
+  .asset-track-batch-edit-modal
+) input[type="checkbox"]::before,
+:where(
+  .asset-track-app,
+  .asset-track-modal,
+  .asset-track-settings,
+  .asset-track-rule-history-modal,
+  .asset-track-product-rename-modal,
+  .asset-track-rule-create-modal,
+  .asset-track-confirmation-modal,
+  .asset-track-operation-preview-modal,
+  .asset-track-batch-edit-modal
+) input[type="checkbox"]::after {
+  content: none !important;
+  display: none !important;
+}
+
+:where(
+  .asset-track-app,
+  .asset-track-modal,
+  .asset-track-settings,
+  .asset-track-rule-history-modal,
+  .asset-track-product-rename-modal,
+  .asset-track-rule-create-modal,
+  .asset-track-confirmation-modal,
+  .asset-track-operation-preview-modal,
+  .asset-track-batch-edit-modal
+) input[type="radio"] {
+  appearance: auto;
+  -webkit-appearance: auto;
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  min-height: 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--interactive-accent);
+}
+
 .asset-track-import-warning {
   padding: 10px 12px;
   color: var(--color-orange);
@@ -625,7 +783,6 @@
 
 @media (max-width: 900px) {
   .asset-track-investment-row,
-  .asset-track-summary-details > div,
   .asset-track-mapping-grid {
     grid-template-columns: 1fr 1fr;
   }
@@ -639,14 +796,14 @@
 }
 
 .asset-track-fields input,
-.asset-track-table-scroll input:not([type="checkbox"]):not([type="color"]),
+.asset-track-table-scroll input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
 .asset-track-table-scroll select {
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
 }
 
-.asset-track-table-scroll input:not([type="checkbox"]):not([type="color"]),
+.asset-track-table-scroll input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
 .asset-track-table-scroll select,
 .asset-track-table-scroll button,
 .asset-track-grid > input,
@@ -694,9 +851,12 @@
 .asset-track-filter-grid--overview {
   grid-template-columns:
     minmax(72px, 0.3fr)
-    minmax(110px, 0.5fr)
-    minmax(180px, 1fr)
-    repeat(3, minmax(78px, 0.5fr));
+    minmax(78px, 0.35fr)
+    minmax(144px, 0.4fr)
+    minmax(96px, 0.4fr)
+    minmax(58px, 0.35fr)
+    minmax(58px, 0.35fr)
+    minmax(58px, 0.35fr);
 }
 
 .asset-track-filter-grid label {
@@ -710,9 +870,24 @@
 .asset-track-filter-grid input,
 .asset-track-filter-grid select,
 .asset-track-filter-grid button {
+  width: 100%;
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
+}
+
+.asset-track-readonly-field {
+  display: flex;
+  min-height: var(--input-height);
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  box-sizing: border-box;
+  border: var(--input-border-width) solid var(--background-modifier-border);
+  border-radius: var(--input-radius);
+  color: var(--text-normal);
+  background: var(--background-secondary);
+  text-align: center;
 }
 
 .asset-track-section-actions {
@@ -948,58 +1123,218 @@
   box-sizing: border-box;
 }
 
-.asset-track-summary-table th:nth-child(1),
-.asset-track-summary-table td:nth-child(1) {
-  width: 72px;
-}
-
-.asset-track-summary-table th:nth-child(2),
-.asset-track-summary-table td:nth-child(2) {
-  width: 36%;
-}
-
-.asset-track-summary-table th:nth-child(3),
-.asset-track-summary-table td:nth-child(3) {
-  width: 78px;
-}
-
-.asset-track-summary-table th:nth-child(4),
-.asset-track-summary-table td:nth-child(4) {
-  width: 110px;
-}
-
-.asset-track-summary-table th:nth-child(5),
-.asset-track-summary-table td:nth-child(5) {
-  width: 28%;
-}
-
-.asset-track-summary-table th:nth-child(6),
-.asset-track-summary-table td:nth-child(6) {
-  width: 96px;
-}
-
 .asset-track-summary-category-cell {
   white-space: pre-line;
 }
 
+.asset-track-summary-category-label {
+  display: block;
+}
+
+.asset-track-summary-category-label > span {
+  display: block;
+}
+
+.asset-track-summary-category-cell small {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-muted);
+}
+
+.asset-track-summary-table .asset-track-actions-cell {
+  min-width: 0;
+}
+
+.asset-track-summary-table:not(.asset-track-summary-table--has-category) .asset-track-summary-actions-heading,
+.asset-track-summary-table:not(.asset-track-summary-table--has-category) .asset-track-summary-actions-cell,
+.asset-track-summary-detail-table:not(.asset-track-summary-detail-table--has-category) .asset-track-summary-actions-heading,
+.asset-track-summary-detail-table:not(.asset-track-summary-detail-table--has-category) .asset-track-summary-actions-cell {
+  width: 17%;
+}
+
+.asset-track-summary-table--has-category .asset-track-summary-actions-heading,
+.asset-track-summary-table--has-category .asset-track-summary-actions-cell,
+.asset-track-summary-detail-table--has-category .asset-track-summary-actions-heading,
+.asset-track-summary-detail-table--has-category .asset-track-summary-actions-cell {
+  width: 14%;
+}
+
+.asset-track-summary-table:not(.asset-track-summary-table--has-category) th:nth-child(1),
+.asset-track-summary-table:not(.asset-track-summary-table--has-category) td:nth-child(1) {
+  width: 13%;
+}
+
+.asset-track-summary-table:not(.asset-track-summary-table--has-category) th:nth-child(2),
+.asset-track-summary-table:not(.asset-track-summary-table--has-category) td:nth-child(2) {
+  width: 36%;
+}
+
+.asset-track-summary-table:not(.asset-track-summary-table--has-category) th:nth-child(3),
+.asset-track-summary-table:not(.asset-track-summary-table--has-category) td:nth-child(3) {
+  width: 13%;
+}
+
+.asset-track-summary-table:not(.asset-track-summary-table--has-category) th:nth-child(4),
+.asset-track-summary-table:not(.asset-track-summary-table--has-category) td:nth-child(4) {
+  width: 21%;
+}
+
+.asset-track-summary-table:not(.asset-track-summary-table--has-category) th:nth-child(5),
+.asset-track-summary-table:not(.asset-track-summary-table--has-category) td:nth-child(5) {
+  width: 17%;
+}
+
+.asset-track-summary-table--has-category th:nth-child(1),
+.asset-track-summary-table--has-category td:nth-child(1) {
+  width: 12%;
+}
+
+.asset-track-summary-table--has-category th:nth-child(2),
+.asset-track-summary-table--has-category td:nth-child(2) {
+  width: 29%;
+}
+
+.asset-track-summary-table--has-category th:nth-child(3),
+.asset-track-summary-table--has-category td:nth-child(3) {
+  width: 12%;
+}
+
+.asset-track-summary-table--has-category th:nth-child(4),
+.asset-track-summary-table--has-category td:nth-child(4) {
+  width: 16%;
+}
+
+.asset-track-summary-table--has-category th:nth-child(5),
+.asset-track-summary-table--has-category td:nth-child(5) {
+  width: 17%;
+}
+
+.asset-track-summary-table--has-category th:nth-child(6),
+.asset-track-summary-table--has-category td:nth-child(6) {
+  width: 14%;
+}
+
+.asset-track-summary-detail-table--has-category col:nth-child(1) {
+  width: 12%;
+}
+
+.asset-track-summary-detail-table--has-category col:nth-child(2) {
+  width: 29%;
+}
+
+.asset-track-summary-detail-table--has-category col:nth-child(3) {
+  width: 12%;
+}
+
+.asset-track-summary-detail-table--has-category col:nth-child(4) {
+  width: 16%;
+}
+
+.asset-track-summary-detail-table--has-category col:nth-child(5) {
+  width: 17%;
+}
+
+.asset-track-summary-detail-table--has-category col:nth-child(6) {
+  width: 14%;
+}
+
+.asset-track-summary-detail-table:not(.asset-track-summary-detail-table--has-category) col:nth-child(1) {
+  width: 13%;
+}
+
+.asset-track-summary-detail-table:not(.asset-track-summary-detail-table--has-category) col:nth-child(2) {
+  width: 36%;
+}
+
+.asset-track-summary-detail-table:not(.asset-track-summary-detail-table--has-category) col:nth-child(3) {
+  width: 13%;
+}
+
+.asset-track-summary-detail-table:not(.asset-track-summary-detail-table--has-category) col:nth-child(4) {
+  width: 21%;
+}
+
+.asset-track-summary-detail-table:not(.asset-track-summary-detail-table--has-category) col:nth-child(5) {
+  width: 17%;
+}
+
+.asset-track-summary-details {
+  min-width: 0;
+  padding: 0;
+  overflow-x: auto;
+}
+
+.asset-track-summary-detail-table {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  table-layout: fixed;
+}
+
+.asset-track-summary-detail-table input,
+.asset-track-summary-detail-table select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.asset-track-summary-detail-content-heading,
+.asset-track-summary-detail-content {
+  display: grid;
+  min-width: 0;
+  grid-template-columns:
+    minmax(120px, 1.4fr)
+    minmax(88px, 0.65fr)
+    minmax(76px, 0.65fr)
+    minmax(104px, 1.3fr);
+  align-items: center;
+  gap: 4px;
+}
+
+.asset-track-summary-detail-content-heading > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.asset-track-summary-detail-content-cell {
+  min-width: 0;
+  vertical-align: middle;
+}
+
+.asset-track-fixed-assets-table th:nth-child(1),
+.asset-track-fixed-assets-table td:nth-child(1) {
+  width: 20%;
+}
+
+.asset-track-fixed-assets-table th:nth-child(2),
+.asset-track-fixed-assets-table td:nth-child(2) {
+  width: 18%;
+}
+
 .asset-track-fixed-assets-table th:nth-child(3),
 .asset-track-fixed-assets-table td:nth-child(3) {
-  width: 108px;
+  width: 17%;
 }
 
 .asset-track-fixed-assets-table th:nth-child(4),
 .asset-track-fixed-assets-table td:nth-child(4) {
-  width: 96px;
+  width: 12%;
 }
 
 .asset-track-fixed-assets-table th:nth-child(5),
 .asset-track-fixed-assets-table td:nth-child(5) {
-  width: 88px;
+  width: 10%;
+}
+
+.asset-track-fixed-assets-table th:nth-child(6),
+.asset-track-fixed-assets-table td:nth-child(6) {
+  width: 15%;
 }
 
 .asset-track-fixed-assets-table th:nth-child(7),
 .asset-track-fixed-assets-table td:nth-child(7) {
-  width: 88px;
+  width: 8%;
 }
 
 .asset-track-debt-table th:nth-child(1),
@@ -1025,11 +1360,14 @@
 
 .asset-track-category-table th:nth-child(1),
 .asset-track-category-table td:nth-child(1) {
-  width: 18%;
+  width: 11%;
 }
 
 .asset-track-category-table th:nth-child(2),
-.asset-track-category-table td:nth-child(2),
+.asset-track-category-table td:nth-child(2) {
+  width: 21%;
+}
+
 .asset-track-category-table th:nth-child(3),
 .asset-track-category-table td:nth-child(3),
 .asset-track-category-table th:nth-child(4),
@@ -1067,7 +1405,7 @@
   text-align: center;
 }
 
-.asset-track-category-table input:not([type="checkbox"]):not([type="color"]),
+.asset-track-category-table input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
 .asset-track-category-table select {
   width: 100%;
   min-width: 0;
@@ -1108,27 +1446,38 @@
   width: 72px;
 }
 
-.asset-track-rules-table th:nth-child(5),
-.asset-track-rules-table td:nth-child(5) {
-  width: 108px;
+.asset-track-rules-table th:nth-child(2),
+.asset-track-rules-table td:nth-child(2) {
+  width: 7%;
 }
 
+.asset-track-rules-table th:nth-child(3),
+.asset-track-rules-table td:nth-child(3),
+.asset-track-rules-table th:nth-child(4),
+.asset-track-rules-table td:nth-child(4),
+.asset-track-rules-table th:nth-child(5),
+.asset-track-rules-table td:nth-child(5),
 .asset-track-rules-table th:nth-child(6),
 .asset-track-rules-table td:nth-child(6) {
-  width: 78px;
+  width: 11%;
 }
 
 .asset-track-rules-table th:nth-child(7),
 .asset-track-rules-table td:nth-child(7) {
-  width: 104px;
+  width: 14%;
 }
 
-.asset-track-rules-table th:nth-child(4),
-.asset-track-rules-table td:nth-child(4) {
-  width: 150px;
+.asset-track-rules-table th:nth-child(8),
+.asset-track-rules-table td:nth-child(8) {
+  width: 7%;
 }
 
-.asset-track-rule-table-scroll input:not([type="checkbox"]):not([type="color"]),
+.asset-track-rules-table th:nth-child(9),
+.asset-track-rules-table td:nth-child(9) {
+  width: 16%;
+}
+
+.asset-track-rule-table-scroll input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
 .asset-track-rule-table-scroll select {
   width: 100%;
   min-width: 0;
@@ -1264,6 +1613,32 @@
   display: grid;
   gap: 4px;
   margin-bottom: 10px;
+}
+
+.asset-track-rule-history-filter-heading-main {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.asset-track-overview-dimension-tabs {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.asset-track-overview-dimension-tabs button {
+  min-width: 0;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
+.asset-track-overview-dimension-tabs button.is-active {
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
 }
 
 .asset-track-rule-history-filter-heading span,
@@ -1704,13 +2079,13 @@
     minmax(0, 1fr)
     minmax(0, 1.1fr)
     minmax(64px, 0.85fr)
-    minmax(56px, 0.6fr);
+    minmax(150px, 1.7fr);
   align-items: center;
   gap: 6px;
   min-width: 0;
   width: 100%;
   box-sizing: border-box;
-  height: var(--asset-track-virtual-row-height);
+  height: auto;
   min-height: var(--asset-track-virtual-row-height);
   padding: 4px 7px;
   border-bottom: 1px solid var(--background-modifier-border);
@@ -1723,7 +2098,81 @@
     minmax(0, 1.35fr)
     minmax(0, 1.35fr)
     minmax(64px, 0.85fr)
-    minmax(56px, 0.6fr);
+    minmax(150px, 1.7fr);
+}
+
+.asset-track-grid--outgoing {
+  grid-template-columns:
+    minmax(0, 0.55fr)
+    minmax(0, 1fr)
+    minmax(0, 1.25fr)
+    minmax(0, 1fr)
+    minmax(0, 1.1fr)
+    minmax(64px, 0.85fr)
+    minmax(92px, 0.75fr);
+}
+
+.asset-track-grid--incoming {
+  grid-template-columns:
+    minmax(0, 0.55fr)
+    minmax(0, 1fr)
+    minmax(0, 1.25fr)
+    minmax(0, 1fr)
+    minmax(0, 1.1fr)
+    minmax(64px, 0.85fr)
+    minmax(123px, 1.2fr);
+}
+
+.asset-track-grid--incoming.asset-track-grid--no-category {
+  grid-template-columns:
+    minmax(0, 0.55fr)
+    minmax(0, 1fr)
+    minmax(0, 1.35fr)
+    minmax(0, 1.35fr)
+    minmax(64px, 0.85fr)
+    minmax(123px, 1.2fr);
+}
+
+.asset-track-grid--investment {
+  grid-template-columns:
+    minmax(0, 0.55fr)
+    minmax(0, 1.36fr)
+    minmax(0, 0.84fr)
+    minmax(64px, 0.85fr)
+    minmax(72px, 0.8fr);
+}
+
+.asset-track-investment-tables {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.asset-track-investment-tables > .asset-track-section {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.asset-track-virtual-table,
+.asset-track-summary-table,
+.asset-track-summary-detail-table {
+  font-size: var(--font-ui-small);
+}
+
+.asset-track-grid > input,
+.asset-track-grid > select,
+.asset-track-grid > button,
+.asset-track-grid .asset-track-sort,
+.asset-track-transaction-actions > button,
+.asset-track-rule-indicator,
+.asset-track-rule-indicator button,
+.asset-track-summary-detail-table input,
+.asset-track-summary-detail-table select,
+.asset-track-summary-detail-table button {
+  font: inherit;
+  font-size: var(--font-ui-small);
+  line-height: 1.35;
 }
 
 .asset-track-grid > input,
@@ -2026,6 +2475,24 @@
   gap: 10px;
 }
 
+.asset-track-investment-account + .asset-track-investment-account {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.asset-track-investment-account h4 {
+  margin: 0 0 6px;
+  color: var(--text-normal);
+  font-size: var(--font-ui-medium);
+}
+
+.asset-track-investment-account strong small {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-weight-normal);
+}
+
 .asset-track-analysis-list > div {
   display: flex;
   justify-content: space-between;
@@ -2101,9 +2568,14 @@
 
 @media (max-width: 720px) {
   .asset-track-toolbar-main,
-  .asset-track-month-header {
+  .asset-track-month-header,
+  .asset-track-transaction-toolbar-row {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .asset-track-transaction-batch-actions {
+    justify-content: flex-start;
   }
 
   .asset-track-context-row {
@@ -2130,8 +2602,7 @@
   .asset-track-mapping-grid,
   .asset-track-investment-row,
   .asset-track-month-metrics,
-  .asset-track-summary-detail-row,
-  .asset-track-summary-detail-row--no-category {
+  .asset-track-investment-tables {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -2147,4 +2618,521 @@
     grid-column: 1 / -1;
   }
 
+}
+
+/*
+ * Transaction operations and configuration workspaces
+ *
+ * These surfaces are intentionally scoped to Asset Track containers and use
+ * Obsidian variables so light, dark, and community themes can provide the
+ * actual palette.
+ */
+.asset-track-view-switcher {
+  align-items: center;
+}
+
+.asset-track-view-switcher > [role="tablist"] {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.asset-track-view-switcher > [role="tablist"] + [role="tablist"] {
+  padding-left: 10px;
+  border-left: 1px solid var(--background-modifier-border);
+}
+
+.asset-track-view-switcher > [role="tablist"] > button,
+.asset-track-view-switcher > button {
+  min-width: 0;
+  min-height: var(--input-height);
+  padding: 5px 10px;
+  white-space: nowrap;
+}
+
+.asset-track-view-switcher > [role="status"] {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.asset-track-view-switcher > span:not([role]) {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  overflow-wrap: anywhere;
+}
+
+.asset-track-grid > .asset-track-row-number {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.asset-track-grid .asset-track-selection-checkbox,
+.asset-track-summary-detail-index .asset-track-selection-checkbox {
+  flex: 0 0 18px;
+  align-self: center;
+  margin: 0;
+}
+
+.asset-track-transaction-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.asset-track-transaction-actions > button {
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px 7px;
+  white-space: normal;
+}
+
+.asset-track-summary-table .asset-track-actions-cell .asset-track-transaction-actions > button,
+.asset-track-summary-table .asset-track-actions-cell .asset-track-transaction-actions > .asset-track-rule-indicator {
+  flex: 1 1 100%;
+  width: 100%;
+  min-width: 0;
+}
+
+.asset-track-summary-table .asset-track-actions-cell .asset-track-rule-indicator > button {
+  width: 100%;
+}
+
+.asset-track-rule-indicator {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.asset-track-rule-indicator small {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.asset-track-rule-indicator .asset-track-rule-button {
+  font-size: inherit;
+  padding: 4px 7px;
+}
+
+.asset-track-rule-indicator button {
+  width: 100%;
+  min-width: 0;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: var(--font-ui-small);
+  line-height: 1.35;
+}
+
+.asset-track-rule-indicator.is-matched {
+  color: var(--color-green);
+}
+
+.asset-track-rule-indicator.is-conflict {
+  color: var(--color-red);
+}
+
+.asset-track-rule-indicator.is-unmatched,
+.asset-track-rule-indicator.is-no-rule {
+  color: var(--color-orange);
+}
+
+.asset-track-summary-detail-index {
+  min-width: 0;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.asset-track-summary-detail-index-content {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.asset-track-app .asset-track-table-scroll select,
+.asset-track-app .asset-track-grid > select,
+.asset-track-app .asset-track-summary-detail-table select {
+  border-color: var(--background-modifier-border-hover);
+  background: var(--background-secondary);
+}
+
+.asset-track-app .asset-track-table-scroll input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
+.asset-track-app .asset-track-grid > input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
+.asset-track-app .asset-track-summary-detail-table input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]) {
+  background: var(--background-modifier-form-field);
+}
+
+.asset-track-app .asset-track-table-scroll input:focus-visible,
+.asset-track-app .asset-track-table-scroll select:focus-visible,
+.asset-track-app .asset-track-grid > input:focus-visible,
+.asset-track-app .asset-track-grid > select:focus-visible,
+.asset-track-app .asset-track-summary-detail-table input:focus-visible,
+.asset-track-app .asset-track-summary-detail-table select:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
+.asset-track-app .asset-track-table-scroll input[type="checkbox"],
+.asset-track-app .asset-track-grid input[type="checkbox"] {
+  accent-color: var(--interactive-accent);
+  vertical-align: middle;
+}
+
+.asset-track-app .asset-track-checkbox-cell > input[type="checkbox"] {
+  display: block;
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.asset-track-operation-preview-modal,
+.asset-track-batch-edit-modal {
+  width: min(680px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  min-width: 0;
+  box-sizing: border-box;
+  overflow-x: hidden;
+}
+
+.asset-track-operation-preview-modal .modal-content,
+.asset-track-batch-edit-modal .modal-content {
+  width: 100%;
+  max-width: 100%;
+  max-height: 78vh;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 8px;
+  background: transparent;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.asset-track-operation-preview-modal input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
+.asset-track-operation-preview-modal textarea,
+.asset-track-operation-preview-modal select,
+.asset-track-batch-edit-modal input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
+.asset-track-batch-edit-modal textarea,
+.asset-track-batch-edit-modal select {
+  min-height: var(--input-height);
+  padding: 4px 8px;
+  box-sizing: border-box;
+  border: var(--input-border-width) solid var(--background-modifier-border);
+  border-radius: var(--input-radius);
+  background: var(--background-modifier-form-field);
+  color: var(--text-normal);
+  font: inherit;
+  line-height: 1.3;
+  box-shadow: var(--input-shadow);
+}
+
+.asset-track-operation-preview-modal select,
+.asset-track-batch-edit-modal select {
+  border-color: var(--background-modifier-border-hover);
+  background: var(--background-secondary);
+}
+
+.asset-track-operation-preview-modal button,
+.asset-track-batch-edit-modal button {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+}
+
+.asset-track-operation-preview-modal button:not(:disabled),
+.asset-track-batch-edit-modal button:not(:disabled) {
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    color 140ms ease,
+    transform 140ms ease;
+}
+
+.asset-track-operation-preview-modal button:not(:disabled):hover,
+.asset-track-batch-edit-modal button:not(:disabled):hover {
+  color: var(--text-normal);
+  border-color: var(--interactive-accent);
+  background: var(--background-modifier-hover);
+  box-shadow: 0 0 0 1px var(--interactive-accent);
+  transform: translateY(-1px);
+}
+
+.asset-track-operation-preview-modal button.mod-cta:not(:disabled):hover,
+.asset-track-batch-edit-modal button.mod-cta:not(:disabled):hover {
+  color: var(--text-on-accent);
+  background: var(--interactive-accent-hover);
+}
+
+.asset-track-operation-preview-modal button.mod-warning:not(:disabled):hover {
+  color: var(--text-on-accent);
+  border-color: var(--color-red);
+  background: var(--color-red);
+}
+
+.asset-track-operation-preview-modal button:focus-visible,
+.asset-track-batch-edit-modal button:focus-visible,
+.asset-track-operation-preview-modal input:focus-visible,
+.asset-track-batch-edit-modal input:focus-visible,
+.asset-track-operation-preview-modal select:focus-visible,
+.asset-track-batch-edit-modal select:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+.asset-track-operation-preview,
+.asset-track-batch-edit-modal-content {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+}
+
+.asset-track-operation-preview > p,
+.asset-track-batch-edit-modal-content > p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.asset-track-operation-preview > p:first-child,
+.asset-track-batch-edit-modal-content > p:first-child {
+  color: var(--text-muted);
+}
+
+.asset-track-batch-edit-modal-content label {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.asset-track-batch-edit-modal-content label input,
+.asset-track-batch-edit-modal-content label select {
+  width: 100%;
+  min-width: 0;
+}
+
+.asset-track-batch-edit-warning {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  color: var(--color-orange);
+  border: 1px solid rgba(var(--color-orange-rgb), 0.35);
+  border-radius: var(--radius-s);
+  background: rgba(var(--color-orange-rgb), 0.08);
+}
+
+.asset-track-batch-edit-warning span {
+  color: var(--text-normal);
+}
+
+.asset-track-operation-preview-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.asset-track-operation-preview-metrics > span {
+  display: grid;
+  min-width: 0;
+  min-height: 42px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.asset-track-operation-preview-list {
+  display: grid;
+  max-height: 38vh;
+  min-width: 0;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.asset-track-operation-preview-list > strong {
+  color: var(--text-normal);
+}
+
+.asset-track-operation-preview-list > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding: 7px 0;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.asset-track-operation-preview-list > div:first-of-type {
+  border-top: 0;
+}
+
+.asset-track-operation-preview-list small {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.asset-track-ai-result-summary {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+}
+
+.asset-track-ai-result-summary > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.asset-track-ai-result-summary span,
+.asset-track-ai-result-summary small {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.asset-track-operation-preview-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.asset-track-operation-preview-actions button,
+.asset-track-batch-edit-modal-content .asset-track-rule-create-actions button {
+  min-width: min(132px, 100%);
+}
+
+.asset-track-operation-retry-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+}
+
+.asset-track-operation-retry-actions strong {
+  margin-right: auto;
+  color: var(--text-normal);
+}
+
+.asset-track-counterparty-rename-content {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+}
+
+.asset-track-settings .setting-item-control {
+  min-width: min(240px, 100%);
+  max-width: 100%;
+  gap: 8px;
+}
+
+.asset-track-settings .setting-item-control > input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
+.asset-track-settings .setting-item-control > select,
+.asset-track-settings .setting-item-control > textarea {
+  min-width: min(180px, 100%);
+  max-width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+}
+
+.asset-track-settings .setting-item-control > input[type="password"] {
+  letter-spacing: 0.08em;
+}
+
+.asset-track-settings .setting-item-description {
+  max-width: 70ch;
+  line-height: 1.45;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .asset-track-operation-preview-modal button,
+  .asset-track-batch-edit-modal button {
+    transition: none;
+  }
+
+  .asset-track-operation-preview-modal button:not(:disabled):hover,
+  .asset-track-batch-edit-modal button:not(:disabled):hover {
+    transform: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .asset-track-view-switcher {
+    align-items: stretch;
+  }
+
+  .asset-track-view-switcher > [role="tablist"] {
+    width: 100%;
+  }
+
+  .asset-track-view-switcher > [role="tablist"] + [role="tablist"] {
+    padding-top: 8px;
+    padding-left: 0;
+    border-top: 1px solid var(--background-modifier-border);
+    border-left: 0;
+  }
+
+  .asset-track-view-switcher > [role="tablist"] > button,
+  .asset-track-view-switcher > button {
+    flex: 1 1 auto;
+  }
+
+  .asset-track-operation-preview-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .asset-track-operation-preview-actions,
+  .asset-track-batch-edit-modal-content .asset-track-rule-create-actions,
+  .asset-track-operation-retry-actions {
+    justify-content: stretch;
+  }
+
+  .asset-track-operation-preview-actions button,
+  .asset-track-batch-edit-modal-content .asset-track-rule-create-actions button,
+  .asset-track-operation-retry-actions button {
+    flex: 1 1 140px;
+  }
+
+  .asset-track-operation-retry-actions strong {
+    flex: 1 0 100%;
+  }
 }

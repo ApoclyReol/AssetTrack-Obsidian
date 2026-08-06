@@ -2,7 +2,7 @@
 
 > 文档角色：开发与维护。本文服务源码修改、测试、构建和代码评审，不承担用户使用说明。
 
-## v1.6.0 维护边界
+## v1.7.0 维护边界
 
 - 金额展示统一调用 `src/domain/moneyFormat.ts`。
 - 分析阈值来自 `AssetTrackSettings`，Repository 不复制界面常量。
@@ -42,16 +42,18 @@
 - 导入、规则、资产和分析修改必须说明对数据覆盖、冲突、对账差额和用户确认的影响。
   有质检错误时阻止写入，警告保留但必须可见；涉及历史事实的修改先预览、校验 revision，
   再由单个 SQLite 事务提交。
-- 新功能不能引入账户注册、联网同步、遥测或未经用户确认的 AI 财务事实。AI 若未来
-  用于映射、归一化或异常解释，只能生成建议，不能直接写库。
+- 新功能不能引入账户注册、联网同步或遥测。AI 分类已作为可选建议层实现：API Key
+  只能放在 SecretStorage，必须先预览和确认，不能直接写库、自动创建规则或绕过普通保存。
 
 ## 源码边界
 
 ```text
 src/domain/              财务计算、账单解析、规则和质检
-src/database/            schema 9、DatabaseManager 和 Repository
+src/application/         跨层结构化错误协议
+src/database/            schema 10、DatabaseManager 和 Repository
 src/services/            UI Service、备份恢复和原生对话框
-src/ui/、src/views/      React 与 ItemView
+src/types/               按领域拆分的持久化、分析和操作协议
+src/ui/、src/views/      React、能力端口适配与 ItemView
 tests/plugin/            TypeScript、SQLite、golden 和备份测试
 scripts/                 构建、安装和冒烟
 docs/                    长期文档与 release 日志
@@ -116,16 +118,18 @@ build/
 - 项目不使用 `dist/` 或 `out/`，`build/` 根目录只保留标准三文件；
 - `release:check` 验证版本、许可证、标准三文件和生产 bundle。
 
-测试覆盖 schema 9、中文路径、WAL、整体事务、revision、冻结 golden、
+测试覆盖 schema 10、schema 9→10 迁移、中文路径、WAL、整体事务、revision、冻结 golden、
 CSV/XLSX/XLS、备份恢复、5 万笔流水和数据库锁释放。恢复和写入只能使用隔离
 Vault 与合成数据库。
 
 ## 数据库版本边界
 
-当前开发、测试、备份和恢复统一使用 schema 9。schema 8 私有数据过渡已完成，
-仓库不再保留一次性迁移脚本或双 schema 生产路径。若未来确需迁移真实数据库，
-应在仓库外按根目录 `AGENTS.md` 的正式数据修改协议建立独立、可审计的一次性
-工具，不把兼容代码并入插件运行链。
+当前开发、测试、备份和恢复统一使用 schema 10。打开 schema 9 时由
+`DatabaseManager` 创建经过校验的 `before-schema10-*.db` 保护备份，并在同一可回滚
+事务中完成 9→10。schema 10 在 `transactions` 增加可空
+`account_key`，并将既有加仓/提现流水无损回填到首个理财账户；非理财流水保持为空。迁移完成后
+比较保留表行数、规则行数、外键、完整性和保护备份可读性。schema 8 私有数据过渡已完成，仓库
+不再保留 schema 8 运行路径。
 
 长期文档按 `docs/00-*.md` 至当前编号文档维护；每次发行的详细 handoff 写入
 `docs/logs/release-vN.N.N.md`。
@@ -134,12 +138,14 @@ Vault 与合成数据库。
 
 | 修改目标 | 主要入口 | 重点测试 |
 | --- | --- | --- |
-| 财务公式与对账 | `src/domain/calculator.ts`、`src/database/analysisReadModel.ts`、`src/database/AssetTrackRepository.ts` | `tests/plugin/databaseRepository.test.ts`、`analysisModel.test.ts` |
-| schema 与结构校验 | `src/database/schema.ts`、`DatabaseManager.ts` | `schemaValidation.test.ts`、`databaseRepository.test.ts` |
-| 月份校验和保存 | `AssetTrackRepository.saveMonth()`、`saveMonthSection()`、`src/ui/MonthEditor.tsx`、`src/ui/month/` | `databaseRepository.test.ts`、`monthDebtAndSpecialRows.test.tsx`、`editorDraftRecovery.test.tsx` |
+| 财务公式与对账 | `src/domain/calculator.ts`、`src/database/analysisReadModel.ts`、`src/database/AssetTrackRepository.ts` | `databaseAnalysis.test.ts`、`analysisModel.test.ts` |
+| schema 与结构校验 | `src/database/schema.ts`、`DatabaseManager.ts` | `schemaValidation.test.ts`、`databaseLifecycle.test.ts` |
+| 月份校验和保存 | `AssetTrackRepository.saveMonth()`、`saveMonthSection()`、`src/ui/MonthEditor.tsx`、`src/ui/month/` | `databaseMonth.test.ts`、`monthDebtAndSpecialRows.test.tsx`、`editorDraftRecovery.test.tsx` |
 | 账单解析与字段映射 | `src/domain/csv.ts` | `csvService.test.ts` |
 | 导入交互与草稿提交 | `CsvImportDialog.tsx`、`csvImportCommit.ts` | `csvImportDialog.test.tsx`、`csvImportCommit.test.ts` |
-| 规则工作台、商品统一与历史迁移 | `src/ui/RulesEditor.tsx`、`src/ui/rules/`、`src/ui/configuration/`、`RuleHistoryModal.tsx`、`ProductRenameModal.tsx`、`RuleCreationModal.tsx`、`src/database/ruleReportReadModel.ts`、`productHistoryReadModel.ts`、`ruleHistoryReadModel.ts`、`AssetTrackRepository.ts`、`configurationWriteRepository.ts`、`historyWriteRepository.ts` | `databaseRepository.test.ts`、`ruleHistoryModal.test.tsx`、`tablePrimitives.test.tsx` |
+| 规则工作台、商品统一与历史迁移 | `src/ui/RulesEditor.tsx`、`src/ui/rules/`、`src/ui/configuration/`、`RuleHistoryModal.tsx`、`RuleCreationModal.tsx`、`src/database/ruleReportReadModel.ts`、`productHistoryReadModel.ts`、`ruleHistoryReadModel.ts`、`AssetTrackRepository.ts`、`configurationWriteRepository.ts`、`historyWriteRepository.ts` | `databaseRules.test.ts`、`databaseHistory.test.ts`、`ruleHistoryModal.test.tsx`、`tablePrimitives.test.tsx` |
+| 流水 Tab、汇总、多选与批量操作 | `src/domain/transactionOperations.ts`、`src/ui/MonthEditor.tsx`、`src/ui/month/MonthEditorTransactionsSection.tsx`、`TransactionTables.tsx`、`TransactionOperationModal.tsx`、`TransactionBatchEditModal.tsx` | `transactionOperations.test.ts`、`transactionGrouping.test.ts`、`databaseOperations.test.ts` |
+| AI 分类建议 | `src/services/aiClassification.ts`、`src/settings.ts`、`src/ui/TransactionOperationModal.tsx` | `aiClassification.test.ts`、SecretStorage 与真实 API 人工 smoke |
 | ItemView 草稿恢复 | `src/ui/editorDraft.ts`、`src/views/AssetTrackEditorView.ts`、`src/main.ts` | `editorDraft.test.ts`、`editorDraftRecovery.test.tsx`、`assetTrackEditorView.test.ts` |
 | 备份与恢复 | `src/services/BackupService.ts` | `backupService.test.ts` |
 | 数据目录生命周期 | `src/main.ts`、`src/services/workspacePath.ts` | `workspacePath.test.ts`、`settingsValidation.test.ts` |

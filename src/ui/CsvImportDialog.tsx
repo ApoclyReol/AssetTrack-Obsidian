@@ -11,7 +11,7 @@ import type {
   CsvImportPreview,
   CsvInspection,
   ImportMode
-} from "../types";
+} from "../types/csv";
 import { scalarText } from "../domain/text";
 import { businessLabel, displayError, t } from "../i18n";
 import { StaticTableHeader } from "./TablePrimitives";

@@ -10,7 +10,9 @@ import {
 } from "../constants";
 import { AssetTrackEditorApp } from "../ui/AssetTrackEditorApp";
 import type AssetTrackPlugin from "../main";
-import type { CsvColumnMapping } from "../types";
+import type {
+  CsvColumnMapping
+} from "../types/csv";
 import { chooseAction, confirmAction, type ChoiceAction } from "../ui/ConfirmModal";
 import { displayError, t } from "../i18n";
 import { AssetTrackErrorBoundary } from "../ui/AssetTrackErrorBoundary";
@@ -31,17 +33,11 @@ export class AssetTrackEditorView extends ItemView {
     mode: "analysis",
     analysisMode: "annual"
   };
-  private dirty = false;
-  private draftSnapshot: EditorDraftSnapshot | null = null;
-  private readonly onDirtyChange = (dirty: boolean): void => {
-    this.dirty = dirty;
-    if (!dirty) this.draftSnapshot = null;
-  };
-  private readonly onDraftSnapshotChange = (
+  private sessionSnapshot: EditorDraftSnapshot | null = null;
+  private readonly onSessionChange = (
     snapshot: EditorDraftSnapshot | null
   ): void => {
-    this.draftSnapshot = snapshot;
-    this.dirty = snapshot !== null;
+    this.sessionSnapshot = snapshot;
   };
   private readonly onStateChange = (
     mode: EditorMode,
@@ -105,7 +101,7 @@ export class AssetTrackEditorView extends ItemView {
     result: ViewStateResult
   ): Promise<void> {
     if (
-      this.dirty
+      this.sessionSnapshot !== null
       && !await this.confirmAction(
         t("放弃未保存草稿？", "Discard unsaved changes?"),
         t(
@@ -117,8 +113,7 @@ export class AssetTrackEditorView extends ItemView {
     ) {
       return;
     }
-    this.draftSnapshot = null;
-    this.dirty = false;
+    this.sessionSnapshot = null;
     const requestedMode = typeof state.mode === "string" ? state.mode : "";
     const requestedAnalysisMode =
       typeof state.analysisMode === "string" ? state.analysisMode : "";
@@ -153,8 +148,7 @@ export class AssetTrackEditorView extends ItemView {
     if (typeof token !== "string") return;
     const snapshot = this.plugin.takeDraftRecovery(token);
     if (!snapshot) return;
-    this.draftSnapshot = snapshot;
-    this.dirty = true;
+    this.sessionSnapshot = snapshot;
     this.state = {
       ...this.state,
       mode: snapshot.kind,
@@ -168,7 +162,7 @@ export class AssetTrackEditorView extends ItemView {
   }
 
   hasUnsavedChanges(): boolean {
-    return this.dirty;
+    return this.sessionSnapshot !== null;
   }
 
   async onOpen(): Promise<void> {
@@ -231,14 +225,13 @@ export class AssetTrackEditorView extends ItemView {
           initialMode: this.state.mode ?? "analysis",
           initialAnalysisMode: this.state.analysisMode ?? "annual",
           initialMonth: this.state.month,
-          initialDraft: this.draftSnapshot ?? undefined,
+          initialDraft: this.sessionSnapshot ?? undefined,
           hostWindow: this.contentEl.ownerDocument.defaultView
             ?? this.containerEl.ownerDocument.defaultView
             ?? activeWindow,
           confirmAction: this.confirmAction,
           chooseAction: this.chooseAction,
-          onDirtyChange: this.onDirtyChange,
-          onDraftSnapshotChange: this.onDraftSnapshotChange,
+          onSessionChange: this.onSessionChange,
           onStateChange: this.onStateChange,
           notifyDataChanged: this.notifyDataChanged,
           subscribeDataChanges: this.subscribeDataChanges,
@@ -250,7 +243,7 @@ export class AssetTrackEditorView extends ItemView {
   }
 
   async onClose(): Promise<void> {
-    if (this.dirty) {
+    if (this.sessionSnapshot !== null) {
       const discard = await this.confirmAction(
         t("关闭并放弃草稿？", "Close and discard the draft?"),
         t(
@@ -260,7 +253,7 @@ export class AssetTrackEditorView extends ItemView {
         t("关闭并放弃", "Close and discard")
       );
       if (!discard) {
-        const snapshot = this.draftSnapshot;
+        const snapshot = this.sessionSnapshot;
         const hostWindow = this.containerEl.ownerDocument.defaultView;
         hostWindow?.setTimeout(
           () => void (snapshot
@@ -273,11 +266,11 @@ export class AssetTrackEditorView extends ItemView {
           0
         );
       } else {
-        this.draftSnapshot = null;
+        this.sessionSnapshot = null;
       }
     }
     this.root?.unmount();
     this.root = null;
-    this.dirty = false;
+    this.sessionSnapshot = null;
   }
 }

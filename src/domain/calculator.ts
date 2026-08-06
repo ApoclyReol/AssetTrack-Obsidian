@@ -1,9 +1,15 @@
 import type {
-  AnnualRow,
-  CategoryDefinition,
-  ReconciliationExplanation,
+  AnnualRow
+} from "../types/analysis";
+import type {
+  CategoryDefinition
+} from "../types/configuration";
+import type {
+  ReconciliationExplanation
+} from "../types/month";
+import type {
   Transaction
-} from "../types";
+} from "../types/transactions";
 import { previousMonth, shiftMonth } from "./dates";
 import { roundHalfEven, sum } from "./money";
 
@@ -47,21 +53,24 @@ export function calculateMonthly(
   };
   const bigTickets: MonthlyCalculation["big_tickets"] = [];
   for (const row of rows) {
-    if (row.type !== "支出") continue;
+    if (row.type !== "支出" && row.type !== "代付") continue;
     const category = LEGACY_CATEGORY_ALIASES[row.category] ?? row.category ?? "";
-    categorySummary[category] = (categorySummary[category] ?? 0) + Number(row.amount || 0);
-    const definition = metadata.get(category);
     const amount = Number(row.amount || 0);
+    const signedAmount = row.type === "代付" ? -amount : amount;
+    if (category) {
+      categorySummary[category] = (categorySummary[category] ?? 0) + signedAmount;
+    }
+    const definition = metadata.get(category);
     if (definition?.is_big_ticket || amount >= largeExpenseThreshold) {
-      bigTickets.push({ product: row.product, amount, category });
+      if (row.type === "支出") bigTickets.push({ product: row.product, amount, category });
     }
     const necessity = definition?.necessity ?? "必要";
     const pattern = definition?.pattern ?? "偶尔";
-    if (necessity === "必要") structure.necessary += amount;
-    if (necessity === "可控") structure.controlled += amount;
-    if (pattern === "周期") structure.periodic += amount;
-    if (pattern === "日常") structure.daily += amount;
-    if (pattern === "偶尔") structure.occasional += amount;
+    if (necessity === "必要") structure.necessary += signedAmount;
+    if (necessity === "可控") structure.controlled += signedAmount;
+    if (pattern === "周期") structure.periodic += signedAmount;
+    if (pattern === "日常") structure.daily += signedAmount;
+    if (pattern === "偶尔") structure.occasional += signedAmount;
   }
   const allOut = sum(rows.filter((row) => row.type === "支出").map((row) => row.amount));
   const daifu = sum(rows.filter((row) => row.type === "代付").map((row) => row.amount));
@@ -106,13 +115,27 @@ export function buildAnnualRows(inputs: AnnualInput[]): ExtendedAnnualRow[] {
     .sort((left, right) => left.month.localeCompare(right.month))
     .map((input, index, all) => {
       const position = input.market_value + input.investment_cash;
-      const profit = position - input.principal;
+      // Month-end balances already include this month's deposits and withdrawals.
+      // Add withdrawals back and remove deposits so the displayed return measures
+      // investment performance rather than cash movement.
+      const flowAdjustedPosition = position
+        - input.monthly.total_deposit
+        + input.monthly.total_withdraw;
+      const flowAdjustedPrincipal = input.principal
+        - input.monthly.total_deposit
+        + input.monthly.total_withdraw;
+      const profit = flowAdjustedPosition - flowAdjustedPrincipal;
       const totalAssets = input.cash - input.debt + input.principal;
       const marketNetAssets = input.cash - input.debt + position;
       const previous = index > 0 ? all[index - 1] : null;
       const previousPosition = previous
         ? previous.market_value + previous.investment_cash : 0;
-      const previousProfit = previousPosition - (previous?.principal ?? 0);
+      const previousProfit = previous
+        ? previousPosition
+          - previous.principal
+          - previous.monthly.total_deposit
+          + previous.monthly.total_withdraw
+        : 0;
       const consecutive = Boolean(previous && previousMonth(input.month) === previous.month);
       const debtChange = consecutive ? input.debt - (previous?.debt ?? 0) : null;
       const theoretical = consecutive
@@ -137,7 +160,7 @@ export function buildAnnualRows(inputs: AnnualInput[]): ExtendedAnnualRow[] {
         market_net_assets: roundHalfEven(marketNetAssets),
         total_assets: roundHalfEven(totalAssets),
         inv_profit: roundHalfEven(profit),
-        inv_roi: roundHalfEven(input.principal > 0 ? profit / input.principal * 100 : 0),
+        inv_roi: roundHalfEven(flowAdjustedPrincipal > 0 ? profit / flowAdjustedPrincipal * 100 : 0),
         inv_weight: roundHalfEven(position > 0 ? input.market_value / position * 100 : 0),
         total_income: input.monthly.total_income,
         total_expense: input.monthly.total_expense,

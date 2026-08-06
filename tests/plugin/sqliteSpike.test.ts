@@ -61,7 +61,7 @@ describe("node:sqlite technical spike", () => {
     }
     const analyticsStarted = performance.now();
     const productOverview = repository.productOverview();
-    const ruleInsights = repository.ruleInsights(2);
+    const ruleInsights = repository.ruleWorkspaceAnalytics(2);
     const analyticsElapsed = performance.now() - analyticsStarted;
     expect(productOverview.groups).toHaveLength(200);
     expect(ruleInsights.historical_products).toHaveLength(200);

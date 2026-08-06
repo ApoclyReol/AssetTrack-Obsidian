@@ -41,7 +41,7 @@ npm run release:check
 
 ```text
 src/domain/                             财务计算、账单解析、规则和校验
-src/database/                           schema 9、连接管理和 Repository
+src/database/                           schema 10、连接管理和 Repository
 src/services/                           本地 Service、备份恢复
 src/ui/、src/views/                     React 界面与 ItemView
 scripts/                                插件构建、安装和冒烟
@@ -52,21 +52,27 @@ docs/                                   当前架构、用户、开发与发行�
 ## 当前 handoff
 
 - Asset Track 已在 Community Plugins 上线，社区目录是推荐安装与更新方式；
-  v1.4.1 已正式发布，要求 Obsidian 1.13.0+，并在发布声明中要求用户使用当前
-  最新的 1.13.x 桌面版；保持 schema 9 和核心对账口径，在 v1.2.0 的金额、
-  资产与分析基础上增加导入容错、警告保存、规则工作台、商品回溯和统一表格布局。
+  v1.7.0 是本轮规则、流水聚合与批量操作更新，要求 Obsidian 1.13.0+，并在发布
+  声明中要求用户使用当前最新的 1.13.x 桌面版；继续保持核心对账口径，在既有
+  月度结算基础上增加通用规则、三类流水 Tab、汇总选择、操作日志和可选 AI 建议。
 - 确认操作使用 Obsidian 原生 Modal，CSV 映射窗口支持焦点陷阱、Escape 和状态
   播报；流水逐项表按可视行渲染，分块编号为线性预计算。
-- schema 8 私有数据已在 2026-07-28 使用一次性离线流程迁移并核验；迁移工具及
-  旧 Python/sidecar 目录不再保留在开发仓库。当前源码、测试和文档只维护
-  schema 9 正式路径。
-- 流水按类型分块编号并完整展开；新流水分类为空。月度分析增加理财环比，分类
+- schema 8 私有数据已在 2026-07-28 使用一次性离线流程迁移并核验；schema 9 到
+  schema 10 的在线迁移包含保护备份、规则作用域/规范化唯一键、分类描述、流水来源、
+  理财流水账户和操作日志。迁移工具及旧 Python/sidecar 目录不在开发仓库中；当前源码、
+  测试和文档只维护 schema 10 正式路径。
+- 流水按类型分块编号并完整展开；人工新建流水分类为空，导入确认阶段会对新导入行生成
+  规则预览。月度分析增加理财环比，分类
   对比排除大额分类，异常变化使用 30% 与 100 元双阈值；对账差额绝对值小于
   100 元显示为平账。
 - 插件实例共享 `DatabaseManager`、Repository、Service、写入队列和数据变更事件；
   每个 ItemView 仍独立保存草稿与 dirty 状态。
-- 继续维护前先读 `docs/00-reading-guide.md`；本次实现、兼容边界、测试和后续
-  注意事项详见 `docs/logs/release-v1.4.1.md`。
+- 记录 → 流水按出账、入账、理财分 Tab，并支持逐项、商品汇总、交易对手汇总；批量
+  规则、编辑、类型转换和 AI 建议都先预览，确认后进入当前草稿，保存时写入同一事务
+  的操作日志。P3 代付与支出关系模型仍未实现。
+- 继续维护前先读 `docs/00-reading-guide.md`、`docs/01-product-requirements.md` 和
+  `docs/09-roadmap.md`；本次实现、兼容边界、测试和后续注意事项详见
+  `docs/logs/release-v1.7.0.md`。
 - 后续每次正式更新都在 `docs/logs/` 新增 `release-vN.N.N.md`，并同步修改受影响
   的编号长期文档，不把当前事实只留在 release 日志中。
 

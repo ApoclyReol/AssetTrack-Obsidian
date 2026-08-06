@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { AnnualRow, CategoryDefinition } from "../../src/types";
+import type {
+  AnnualRow
+} from "../../src/types/analysis";
+import type {
+  CategoryDefinition
+} from "../../src/types/configuration";
 import { ANALYSIS_MODES, EDITOR_MODES } from "../../src/constants";
 import { explainReconciliation } from "../../src/domain/calculator";
 import {

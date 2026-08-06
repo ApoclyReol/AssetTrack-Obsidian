@@ -1,13 +1,16 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import * as XLSX from "xlsx";
 import type {
   CsvColumnMapping,
   CsvImportPreview,
-  CsvInspection,
+  CsvInspection
+} from "../types/csv";
+import type {
   Transaction
-} from "../types";
+} from "../types/transactions";
 import { scalarText } from "./text";
 import { normalizeDate } from "./dates";
+import { AssetTrackError } from "../application/errors";
 
 const ALLOWED_TYPES = new Set(["支出", "收入", "代付", "加仓", "提现"]);
 
@@ -69,7 +72,7 @@ function csvObjects(content: Buffer): {
   rows: Array<Record<string, string>>;
 } {
   const parsed = parseRows(decodeCsv(content));
-  if (!parsed.length) throw new Error("CSV 没有可识别的表头");
+  if (!parsed.length) throw new AssetTrackError({ code: "csv.header_missing", status: 422 });
   const headers = parsed[0]
     .map((header) => header.trim().replace(/^\ufeff/, ""))
     .filter((header) => header && !header.startsWith("Unnamed:"));
@@ -89,12 +92,12 @@ function workbookObjects(content: Buffer): {
     raw: false
   });
   const sheetName = workbook.SheetNames[0];
-  if (!sheetName) throw new Error("工作簿中没有可读取的工作表");
+  if (!sheetName) throw new AssetTrackError({ code: "csv.worksheet_missing", status: 422 });
   const values = XLSX.utils.sheet_to_json<Array<string | number | boolean>>(
     workbook.Sheets[sheetName],
     { header: 1, raw: false, defval: "", blankrows: false }
   );
-  if (!values.length) throw new Error("工作表没有可识别的表头");
+  if (!values.length) throw new AssetTrackError({ code: "csv.worksheet_header_missing", status: 422 });
   const headers = values[0]
     .map((value) => String(value).trim())
     .filter((header) => header && !header.startsWith("Unnamed:"));
@@ -115,7 +118,7 @@ function sourceObjects(filename: string, content: Buffer): {
   if (extension === "xlsx" || extension === "xls") {
     return workbookObjects(content);
   }
-  throw new Error("当前导入入口支持 CSV、XLSX 和 XLS 文件");
+  throw new AssetTrackError({ code: "csv.extension_unsupported", status: 422 });
 }
 
 export function inspectCsv(
@@ -195,7 +198,11 @@ export function previewCsv(
   for (const [field, label] of required) {
     const selected = scalarText(mapping[field]).trim();
     if (!selected || (selected !== "__month_start__" && !headers.includes(selected))) {
-      throw new Error(`请选择有效的${label}列`);
+      throw new AssetTrackError({
+        code: "csv.mapping_required",
+        status: 422,
+        params: { field, label }
+      });
     }
   }
   for (const field of [
@@ -210,7 +217,11 @@ export function previewCsv(
         category_column: "分类",
         status_column: "交易状态"
       };
-      throw new Error(`选择的${labels[field]}列不存在`);
+      throw new AssetTrackError({
+        code: "csv.mapping_missing",
+        status: 422,
+        params: { field, label: labels[field] }
+      });
     }
   }
   const examples: Record<string, Array<Record<string, unknown>>> = {
@@ -280,13 +291,14 @@ export function previewCsv(
       if (examples.invalid.length < 3) examples.invalid.push({ row: rowNumber, reason: "金额为空或无法识别" });
       return;
     }
-    const category = ["代付", "加仓", "提现"].includes(type)
+    const category = ["加仓", "提现"].includes(type)
       ? ""
       : mapping.category_column
         ? source[mapping.category_column]?.trim() ?? ""
         : "";
     rows.push({
-      client_id: `import:${sourceIndex}`,
+      client_id: `import:${randomUUID()}:${sourceIndex}`,
+      source: filename,
       transaction_date: date,
       product,
       amount: Math.abs(amount),

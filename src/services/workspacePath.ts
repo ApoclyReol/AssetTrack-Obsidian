@@ -4,6 +4,8 @@ import {
   relative,
   resolve
 } from "node:path";
+import { AssetTrackError } from "../application/errors";
+import { displayError } from "../i18n";
 
 export interface WorkspacePathValidation {
   valid: boolean;
@@ -22,10 +24,10 @@ export function normalizeDataDirectory(value: string): string {
     || WINDOWS_DRIVE_PATH.test(trimmed)
     || UNC_PATH.test(trimmed)
   ) {
-    throw new Error("Asset-track 数据目录必须是 Vault 内的相对路径");
+    throw new AssetTrackError({ code: "workspace.relative_required", status: 422 });
   }
   if (trimmed.includes("\u0000")) {
-    throw new Error("Asset-track 数据目录包含无效字符");
+    throw new AssetTrackError({ code: "workspace.invalid_character", status: 422 });
   }
   const normalized = trimmed
     .replaceAll("\\", "/")
@@ -33,7 +35,7 @@ export function normalizeDataDirectory(value: string): string {
     .replace(/\/{2,}/g, "/");
   if (!normalized) return "";
   if (normalized.split("/").some((part) => part === "." || part === "..")) {
-    throw new Error("Asset-track 数据目录不能包含 . 或 ..");
+    throw new AssetTrackError({ code: "workspace.dot_segment", status: 422 });
   }
   return normalized;
 }
@@ -49,7 +51,7 @@ export function validateDataDirectory(value: string): WorkspacePathValidation {
     return {
       valid: false,
       normalized: "",
-      error: error instanceof Error ? error.message : String(error)
+      error: displayError(error)
     };
   }
 }
@@ -67,17 +69,17 @@ export function assertPathInsideVault(
   ) {
     return;
   }
-  throw new Error("Asset-track 数据路径超出当前 Vault");
+  throw new AssetTrackError({ code: "workspace.outside_vault", status: 422 });
 }
 
 export function databaseVaultPath(dataDirectory: string): string {
   const normalized = normalizeDataDirectory(dataDirectory);
-  if (!normalized) throw new Error("尚未选择 Asset-track 数据目录");
+  if (!normalized) throw new AssetTrackError({ code: "workspace.data_directory_required", status: 422 });
   return `${normalized}/${DATABASE_NAME}`;
 }
 
 export function backupsVaultPath(dataDirectory: string): string {
   const normalized = normalizeDataDirectory(dataDirectory);
-  if (!normalized) throw new Error("尚未选择 Asset-track 数据目录");
+  if (!normalized) throw new AssetTrackError({ code: "workspace.data_directory_required", status: 422 });
   return `${normalized}/backups`;
 }

@@ -1,8 +1,10 @@
 import type {
   CsvColumnMapping,
-  ImportMode,
+  ImportMode
+} from "../types/csv";
+import type {
   Transaction
-} from "../types";
+} from "../types/transactions";
 
 export const MAX_IMPORT_FILE_BYTES = 20 * 1024 * 1024;
 

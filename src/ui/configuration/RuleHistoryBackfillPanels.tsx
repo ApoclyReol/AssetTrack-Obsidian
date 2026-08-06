@@ -1,9 +1,13 @@
 import type {
   CategoryBackfillPreview,
-  CategoryDefinition,
-  HistoricalProductStat,
   ProductHistoryTransaction
-} from "../../types";
+} from "../../types/history";
+import type {
+  CategoryDefinition
+} from "../../types/configuration";
+import type {
+  HistoricalProductStat
+} from "../../types/rules";
 import { businessLabel, t } from "../../i18n";
 import { money } from "../../domain/moneyFormat";
 import { StaticTableHeader } from "../TablePrimitives";
@@ -151,15 +155,19 @@ export function ProductHistoryDetailPanel({
   onPreview,
   onApply
 }: ProductHistoryDetailPanelProps) {
+  const isCounterpartyGroup = selectedGroup.group_by === "counterparty";
+  const groupLabel = isCounterpartyGroup
+    ? t("交易对手", "Counterparty")
+    : t("商品", "Item");
   return <div className="asset-track-rule-history-detail">
     <div className="asset-track-rule-history-detail-header">
       <div>
-        <h3>{selectedGroup.product || t("（空商品）", "(empty item)")} · {businessLabel(selectedGroup.transaction_type)}</h3>
+        <h3>{selectedGroup.product || (isCounterpartyGroup ? t("（空交易对手）", "(empty counterparty)") : t("（空商品）", "(empty item)"))} · {businessLabel(selectedGroup.transaction_type)}</h3>
         <p>{selectedGroup.rule_status === "冲突"
           ? t("当前规则存在冲突，请先处理规则后再修改历史分类。", "These rules conflict. Resolve them before editing historical categories.")
           : t("请选择需要修改分类的流水，再指定目标分类。", "Select transactions whose category should change, then choose the target category.")}</p>
       </div>
-      <button type="button" onClick={detailOnly ? onClose : onBack}>{detailOnly ? t("关闭", "Close") : t("返回商品列表", "Back to item list")}</button>
+      <button type="button" onClick={detailOnly ? onClose : onBack}>{detailOnly ? t("关闭", "Close") : t(`返回${groupLabel}列表`, `Back to ${groupLabel.toLocaleLowerCase()} list`)}</button>
     </div>
     <div className="asset-track-rule-history-selection-actions">
       <button type="button" disabled={!detailRows.length} onClick={onToggleAllVisible}>
@@ -169,7 +177,7 @@ export function ProductHistoryDetailPanel({
     </div>
     <div className="asset-track-table-scroll asset-track-history-detail-scroll">
       <table className="asset-track-history-detail-table"><thead><tr>
-        <StaticTableHeader label={t("日期", "Date")} className="asset-track-date-column" /><StaticTableHeader label={t("选择", "Select")} className="asset-track-checkbox-heading" /><StaticTableHeader label={t("交易对方", "Counterparty")} /><StaticTableHeader label={t("商品", "Item")} /><StaticTableHeader label={t("原分类", "Original category")} /><StaticTableHeader label={t("金额", "Amount")} className="asset-track-amount-column" /><StaticTableHeader label={t("规则解释", "Rule explanation")} />
+        <StaticTableHeader label={t("日期", "Date")} className="asset-track-date-column" /><StaticTableHeader label={t("选择", "Select")} className="asset-track-checkbox-heading" /><StaticTableHeader label={t("交易对手", "Counterparty")} /><StaticTableHeader label={t("商品", "Item")} /><StaticTableHeader label={t("原分类", "Original category")} /><StaticTableHeader label={t("金额", "Amount")} className="asset-track-amount-column" /><StaticTableHeader label={t("规则解释", "Rule explanation")} />
       </tr></thead><tbody>{detailRows.map((row) => <tr key={row.id}>
         <td className="asset-track-date-cell">{row.transaction_date}</td>
         <td><input type="checkbox" checked={selectedIds.has(row.id)} onChange={() => onToggleSelected(row.id)} aria-label={t(`选择 ${row.transaction_date} ${row.counterparty || "流水"}`, `Select ${row.transaction_date} ${row.counterparty || "transaction"}`)} /></td>

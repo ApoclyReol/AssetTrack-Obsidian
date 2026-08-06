@@ -1,16 +1,23 @@
 import type { DatabaseSync } from "node:sqlite";
 import type {
   AnnualFixedAsset,
+  CurrentAsset,
+  MonthOverview
+} from "../types/month";
+import type {
   AnnualCostAudit,
   AnnualOverview,
+  RecurringExpenseSummary
+} from "../types/analysis";
+import type {
   CashAccountBalance,
   CategoryDefinition,
-  CurrentAsset,
-  InvestmentAccountBalance,
-  MonthOverview,
-  RecurringExpenseSummary,
+  InvestmentAccountAnalysis,
+  InvestmentAccountBalance
+} from "../types/configuration";
+import type {
   Transaction
-} from "../types";
+} from "../types/transactions";
 import {
   buildAnnualRows,
   calculateMonthly,
@@ -231,6 +238,10 @@ export class AnalysisReadModel {
     const marketValue = sum(investments.map((account) => account.market_value));
     const investmentCash = sum(investments.map((account) => account.cash_balance));
     const position = marketValue + investmentCash;
+    const aggregateDeposit = monthly.total_deposit;
+    const aggregateWithdraw = monthly.total_withdraw;
+    const flowAdjustedPosition = position - aggregateDeposit + aggregateWithdraw;
+    const flowAdjustedPrincipal = principal - aggregateDeposit + aggregateWithdraw;
     const previous = rowIndex > 0 ? allRows[rowIndex - 1] : null;
     const previousValue = previousMonth(month);
     const previousTransactions = previousValue
@@ -255,6 +266,76 @@ export class AnalysisReadModel {
       && Number(previousInvestment.count) > 0
       ? Number(previousInvestment.position ?? 0)
       : null;
+    const previousInvestmentAccounts = previousValue
+      ? this.context.investmentAccounts(db, previousValue)
+      : [];
+    const previousInvestmentByKey = new Map(
+      previousInvestmentAccounts.map((account) => [account.account_key, account])
+    );
+    const investmentAccounts: InvestmentAccountAnalysis[] = investments.map((account) => {
+      const accountTransactions = transactions.filter(
+        (transaction) => transaction.account_key === account.account_key
+          && (transaction.type === "加仓" || transaction.type === "提现")
+      );
+      const deposit = sum(accountTransactions
+        .filter((transaction) => transaction.type === "加仓")
+        .map((transaction) => transaction.amount));
+      const withdraw = sum(accountTransactions
+        .filter((transaction) => transaction.type === "提现")
+        .map((transaction) => transaction.amount));
+      const accountPosition = account.market_value + account.cash_balance;
+      const flowAdjustedAccountPosition = accountPosition - deposit + withdraw;
+      const flowAdjustedAccountPrincipal = account.principal - deposit + withdraw;
+      const accountRoi = flowAdjustedAccountPrincipal > 0
+        ? (flowAdjustedAccountPosition - flowAdjustedAccountPrincipal) / flowAdjustedAccountPrincipal * 100
+        : 0;
+      const previousAccount = previousInvestmentByKey.get(account.account_key);
+      const previousAccountPosition = previousAccount
+        ? previousAccount.market_value + previousAccount.cash_balance
+        : null;
+      const previousAccountTransactions = previousTransactions.filter(
+        (transaction) => transaction.account_key === account.account_key
+          && (transaction.type === "加仓" || transaction.type === "提现")
+      );
+      const previousDeposit = sum(previousAccountTransactions
+        .filter((transaction) => transaction.type === "加仓")
+        .map((transaction) => transaction.amount));
+      const previousWithdraw = sum(previousAccountTransactions
+        .filter((transaction) => transaction.type === "提现")
+        .map((transaction) => transaction.amount));
+      const previousAccountAdjustedPosition = previousAccountPosition === null
+        ? null
+        : previousAccountPosition - previousDeposit + previousWithdraw;
+      const previousAccountAdjustedPrincipal = previousAccount
+        ? previousAccount.principal - previousDeposit + previousWithdraw
+        : null;
+      const previousAccountRoi = previousAccount && previousAccountAdjustedPrincipal !== null && previousAccountAdjustedPrincipal > 0
+        ? (previousAccountAdjustedPosition! - previousAccountAdjustedPrincipal) / previousAccountAdjustedPrincipal * 100
+        : previousAccount ? 0 : null;
+      return {
+        account_key: account.account_key,
+        name: account.name ?? account.account_key,
+        principal: roundHalfEven(account.principal),
+        deposit: roundHalfEven(deposit),
+        withdraw: roundHalfEven(withdraw),
+        market_value: roundHalfEven(account.market_value),
+        cash_balance: roundHalfEven(account.cash_balance),
+        position: roundHalfEven(accountPosition),
+        profit: roundHalfEven(flowAdjustedAccountPosition - flowAdjustedAccountPrincipal),
+        roi_percent: roundHalfEven(accountRoi, 1),
+        comparison: {
+          available: previousAccountPosition !== null,
+          previous_position: previousAccountPosition === null ? null : roundHalfEven(previousAccountPosition),
+          amount_delta: previousAccountPosition === null
+            ? null : roundHalfEven(flowAdjustedAccountPosition - previousAccountPosition),
+          percent_delta: previousAccountPosition === null || previousAccountPosition === 0
+            ? null : roundHalfEven((flowAdjustedAccountPosition - previousAccountPosition) / previousAccountPosition * 100, 1),
+          previous_roi_percent: previousAccountRoi === null ? null : roundHalfEven(previousAccountRoi, 1),
+          roi_delta_percent: previousAccountRoi === null
+            ? null : roundHalfEven(accountRoi - previousAccountRoi, 1)
+        }
+      };
+    });
     const comparison = [...new Set([
       ...Object.keys(monthly.category_summary),
       ...Object.keys(previousMonthly.category_summary)
@@ -297,23 +378,24 @@ export class AnalysisReadModel {
         market_value: marketValue,
         cash_balance: investmentCash,
         position: roundHalfEven(position),
-        profit: roundHalfEven(position - principal),
-        roi_percent: principal > 0
-          ? roundHalfEven((position - principal) / principal * 100, 1) : 0,
+        profit: roundHalfEven(flowAdjustedPosition - flowAdjustedPrincipal),
+        roi_percent: flowAdjustedPrincipal > 0
+          ? roundHalfEven((flowAdjustedPosition - flowAdjustedPrincipal) / flowAdjustedPrincipal * 100, 1) : 0,
         comparison: {
           available: previousPosition !== null,
           previous_position: previousPosition,
           amount_delta: previousPosition === null
             ? null
-            : roundHalfEven(position - previousPosition),
+            : roundHalfEven(flowAdjustedPosition - previousPosition),
           percent_delta: previousPosition === null || previousPosition === 0
             ? null
             : roundHalfEven(
-              (position - previousPosition) / previousPosition * 100,
+              (flowAdjustedPosition - previousPosition) / previousPosition * 100,
               1
             )
         }
       },
+      investment_accounts: investmentAccounts,
       reconciliation: {
         available: row.theoretical_expense !== null,
         actual: {
@@ -455,7 +537,9 @@ export class AnalysisReadModel {
   }
 
   annual(db: DatabaseSync, year: string): AnnualOverview {
-    if (!/^\d{4}$/.test(year)) throw new RepositoryValidationError("年份必须是 YYYY");
+    if (!/^\d{4}$/.test(year)) {
+      throw new RepositoryValidationError({ code: "analysis.year_invalid", params: { year } });
+    }
     const full = this.annualRows(db);
     const annual = full.filter((row) => row.month.startsWith(year));
     if (!annual.length) {

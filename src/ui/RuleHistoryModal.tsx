@@ -13,6 +13,12 @@ export {
   type ProductRenameGroup,
   type ProductRenameModalOptions
 } from "./ProductRenameModal";
+export {
+  CounterpartyRenameContent,
+  CounterpartyRenameModal,
+  type CounterpartyRenameGroup,
+  type CounterpartyRenameModalOptions
+} from "./CounterpartyRenameModal";
 export { RuleCreationModal, type RuleCreationModalOptions } from "./RuleCreationModal";
 
 export class RuleHistoryModal extends Modal {
@@ -46,6 +52,7 @@ export class RuleHistoryModal extends Modal {
       onSaved: this.options.onSaved,
       onDataChanged: this.options.onDataChanged,
       onOpenProductRename: this.options.onOpenProductRename,
+      onOpenCounterpartyRename: this.options.onOpenCounterpartyRename,
       onClose: () => this.close()
     }));
   }

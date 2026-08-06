@@ -1,5 +1,5 @@
 import type { AnalysisMode } from "../constants";
-import type { AssetTrackService } from "../services/AssetTrackService";
+import type { AnalysisPort } from "../services/ports";
 import { t } from "../i18n";
 import { Empty } from "./AnalysisPrimitives";
 import { AnnualAnalysis } from "./AnalysisAnnual";
@@ -13,7 +13,7 @@ export function AnalysisView({
   dataVersion,
   reconciliationTolerance
 }: {
-  api: AssetTrackService;
+  api: AnalysisPort;
   month: string;
   mode: AnalysisMode;
   year: string;

@@ -2,11 +2,16 @@ import { describe, expect, it } from "vitest";
 import {
   applyRules,
   applyRulesWithIssues,
+  detectRewriteChains,
+  findRuleConflicts,
+  inferRuleScopeFromConditions,
   RuleMatcher,
   resolveRule,
   rulesEquivalent
 } from "../../src/domain/rules";
-import type { Transaction } from "../../src/types";
+import type {
+  Transaction
+} from "../../src/types/transactions";
 
 describe("product-only matching rules", () => {
   it("matches by product and ignores transaction counterparties", () => {
@@ -143,14 +148,137 @@ describe("product-only matching rules", () => {
     };
     expect(matcher.matchingRules(row).map((rule) => rule.id)).toEqual([30, 10]);
     expect(matcher.resolve(row)).toMatchObject({
-      status: "matched",
+      status: "conflict",
       level: "product",
       rule_ids: [30, 10],
-      category_key: "cat-food"
+      reason: "商品规则存在重复规则"
     });
     expect(matcher.resolve({ ...row, product: "" })).toMatchObject({
       status: "none",
       rule_ids: []
     });
+  });
+});
+
+describe("current schema rule scopes", () => {
+  const rules = [
+    {
+      id: 1,
+      transaction_type: "支出",
+      match_scope: "merchant_product" as const,
+      counterparty: "咖啡店",
+      product: "拿铁",
+      category_key: "cat-combo",
+      category: "组合分类",
+      rewrite_product: "咖啡"
+    },
+    {
+      id: 2,
+      transaction_type: "支出",
+      match_scope: "product" as const,
+      counterparty: "",
+      product: "拿铁",
+      category_key: "cat-product",
+      category: "商品分类"
+    },
+    {
+      id: 3,
+      transaction_type: "支出",
+      match_scope: "merchant" as const,
+      counterparty: "咖啡店",
+      product: "",
+      category_key: "cat-merchant",
+      category: "交易对手分类"
+    }
+  ];
+
+  it("derives the scope from the visible matching fields", () => {
+    expect(inferRuleScopeFromConditions({ counterparty: "", product: "拿铁" })).toBe("product");
+    expect(inferRuleScopeFromConditions({ counterparty: "咖啡店", product: "" })).toBe("merchant");
+    expect(inferRuleScopeFromConditions({ counterparty: "咖啡店", product: "拿铁" })).toBe("merchant_product");
+    expect(inferRuleScopeFromConditions({ counterparty: "", product: "" })).toBeNull();
+  });
+
+  it("uses combination, then product, then merchant precedence", () => {
+    expect(resolveRule({
+      transaction_date: "2026-01-01",
+      type: "支出",
+      category: "",
+      category_key: null,
+      counterparty: "咖啡店",
+      product: "拿铁",
+      amount: 20
+    }, rules)).toMatchObject({
+      status: "matched",
+      level: "merchant_product",
+      selected_rule_id: 1,
+      category_key: "cat-combo",
+      covered_rule_ids: [2, 3]
+    });
+  });
+
+  it("applies rewrites once and does not match the rewritten value again", () => {
+    const result = applyRules([{
+      transaction_date: "2026-01-01",
+      type: "支出",
+      category: "",
+      category_key: null,
+      counterparty: "咖啡店",
+      product: "拿铁",
+      amount: 20
+    }], [
+      ...rules,
+      {
+        id: 4,
+        transaction_type: "支出",
+        match_scope: "product" as const,
+        product: "咖啡",
+        counterparty: "",
+        category_key: "cat-second",
+        category: "第二轮分类"
+      }
+    ]);
+    expect(result[0]).toMatchObject({
+      product: "咖啡",
+      category_key: "cat-combo"
+    });
+  });
+
+  it("does not apply a rule whose category is inactive", () => {
+    const row: Transaction = {
+      transaction_date: "2026-01-01",
+      type: "支出",
+      category: "原分类",
+      category_key: null,
+      counterparty: "咖啡店",
+      product: "拿铁",
+      amount: 20
+    };
+    expect(resolveRule(row, [{ ...rules[1], category_active: false }])).toMatchObject({
+      status: "none",
+      rule_ids: []
+    });
+  });
+
+  it("reports duplicate conditions and rewrite chains", () => {
+    expect(findRuleConflicts([
+      rules[1],
+      { ...rules[1], id: 5, category_key: "cat-other", category: "其他分类" }
+    ])).toMatchObject([{ kind: "same-condition", rule_ids: [2, 5] }]);
+    expect(detectRewriteChains([
+      rules[0],
+      {
+        id: 6,
+        transaction_type: "支出",
+        match_scope: "product" as const,
+        product: "咖啡",
+        counterparty: "",
+        category_key: "cat-second",
+        category: "第二轮分类"
+      }
+    ])).toMatchObject([{
+      rule_id: 1,
+      target_rule_ids: [6]
+    }]);
   });
 });

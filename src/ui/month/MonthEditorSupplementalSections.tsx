@@ -1,7 +1,7 @@
 import type {
   DebtRecord,
   FixedAsset
-} from "../../types";
+} from "../../types/month";
 import { MonthDebtSection } from "../MonthDebtSection";
 import { FixedAssetTable } from "../TransactionTables";
 

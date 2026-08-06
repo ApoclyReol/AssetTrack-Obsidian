@@ -18,7 +18,7 @@ import {
   BACKUP_FORMAT_VERSION,
   REQUIRED_TABLES
 } from "../database/schema";
-import { AssetTrackError } from "./AssetTrackService";
+import { AssetTrackError } from "../application/errors";
 import { loadSqliteModule } from "./desktopRuntime";
 import { scalarText } from "../domain/text";
 
@@ -35,14 +35,14 @@ const CONFIG = [
     filename: "transactions_backup.csv",
     columns: [
       "month", "transaction_date", "type", "category_key",
-      "category", "counterparty", "product", "amount"
+      "category", "counterparty", "product", "source", "amount"
     ]
   },
   {
     name: "category_definitions",
     filename: "category_definitions_backup.csv",
     columns: [
-      "category_key", "name", "transaction_type", "necessity", "pattern",
+      "category_key", "name", "description", "transaction_type", "necessity", "pattern",
       "is_big_ticket", "color", "is_active", "sort_order"
     ]
   },
@@ -80,7 +80,9 @@ const CONFIG = [
     name: "auto_rules",
     filename: "auto_rules_backup.csv",
     columns: [
-      "transaction_type", "counterparty", "product", "category_key", "category"
+      "id", "transaction_type", "match_scope", "counterparty", "product",
+      "match_counterparty_key", "match_product_key", "rewrite_merchant",
+      "rewrite_product", "category_key", "category"
     ]
   },
   {
@@ -89,6 +91,15 @@ const CONFIG = [
     columns: [
       "month", "status", "locked_at", "updated_at",
       "fixed_assets_initialized", "revision"
+    ]
+  },
+  {
+    name: "operation_logs",
+    filename: "operation_logs_backup.csv",
+    columns: [
+      "id", "operation_id", "created_at", "actor", "operation_type", "source_page",
+      "business_tab", "selection_json", "total_count", "success_count",
+      "skipped_count", "failure_count", "details_json"
     ]
   }
 ] as const;
@@ -126,8 +137,12 @@ export interface BackupValidation {
   required_tables: string[];
 }
 
-function fail(message: string): never {
-  throw new AssetTrackError(message, 422, message, "backup_validation_error");
+function fail(code: string, params: Record<string, unknown> = {}): never {
+  throw new AssetTrackError({
+    code,
+    status: 422,
+    params
+  });
 }
 
 function timestamp(date = new Date()): string {
@@ -297,15 +312,15 @@ function unzip(buffer: Buffer, destination: string): void {
       break;
     }
   }
-  if (endOffset < 0) fail("ZIP 目录无效");
+  if (endOffset < 0) fail("backup.zip.directory_invalid");
   const count = buffer.readUInt16LE(endOffset + 10);
   const centralOffset = buffer.readUInt32LE(endOffset + 16);
-  if (count > MAX_MEMBERS) fail("ZIP 文件数量超过安全上限");
+  if (count > MAX_MEMBERS) fail("backup.zip.member_limit", { limit: MAX_MEMBERS });
   let cursor = centralOffset;
   let total = 0;
   const root = resolve(destination);
   for (let index = 0; index < count; index += 1) {
-    if (buffer.readUInt32LE(cursor) !== 0x02014b50) fail("ZIP 中央目录无效");
+    if (buffer.readUInt32LE(cursor) !== 0x02014b50) fail("backup.zip.central_directory_invalid");
     const method = buffer.readUInt16LE(cursor + 10);
     const compressedSize = buffer.readUInt32LE(cursor + 20);
     const size = buffer.readUInt32LE(cursor + 24);
@@ -315,20 +330,20 @@ function unzip(buffer: Buffer, destination: string): void {
     const localOffset = buffer.readUInt32LE(cursor + 42);
     const name = buffer.subarray(cursor + 46, cursor + 46 + nameLength).toString("utf8");
     total += size;
-    if (total > MAX_UNCOMPRESSED) fail("ZIP 解压后体积超过安全上限");
+    if (total > MAX_UNCOMPRESSED) fail("backup.zip.uncompressed_limit", { limit: MAX_UNCOMPRESSED });
     const output = resolve(destination, name);
     if (output !== root && !output.startsWith(`${root}${sep}`)) {
-      fail(`ZIP 包含非法路径：${name}`);
+      fail("backup.zip.unsafe_path", { path: name });
     }
-    if (buffer.readUInt32LE(localOffset) !== 0x04034b50) fail("ZIP 本地目录无效");
+    if (buffer.readUInt32LE(localOffset) !== 0x04034b50) fail("backup.zip.local_directory_invalid");
     const localNameLength = buffer.readUInt16LE(localOffset + 26);
     const localExtraLength = buffer.readUInt16LE(localOffset + 28);
     const start = localOffset + 30 + localNameLength + localExtraLength;
     const compressed = buffer.subarray(start, start + compressedSize);
     const data = method === 8
       ? inflateRawSync(compressed)
-      : method === 0 ? compressed : fail(`ZIP 压缩算法不受支持：${method}`);
-    if (data.length !== size) fail(`ZIP 文件大小不匹配：${name}`);
+      : method === 0 ? compressed : fail("backup.zip.compression_unsupported", { method });
+    if (data.length !== size) fail("backup.zip.size_mismatch", { path: name });
     mkdirSync(dirname(output), { recursive: true });
     writeFileSync(output, data);
     cursor += 46 + nameLength + extraLength + commentLength;
@@ -338,7 +353,7 @@ function unzip(buffer: Buffer, destination: string): void {
 function validateSqlite(path: string): BackupValidation["schema"] {
   const inspection = DatabaseManager.inspect(path);
   if (!inspection.valid || !inspection.validation) {
-    fail(inspection.error ?? "SQLite schema 校验失败");
+    fail("backup.schema_invalid", { reason: inspection.error ?? null });
   }
   return {
     valid: true,
@@ -384,7 +399,7 @@ async function materialize(source: string): Promise<{
   cleanup(): void;
 }> {
   const resolved = resolve(source);
-  if (!existsSync(resolved)) fail(`备份来源不存在：${resolved}`);
+  if (!existsSync(resolved)) fail("backup.source_missing", { path: resolved });
   if (statSync(resolved).isDirectory()) {
     return { root: resolved, cleanup: () => undefined };
   }
@@ -401,7 +416,7 @@ async function materialize(source: string): Promise<{
         sourceDb.close();
       }
     } else {
-      fail(`不支持的备份来源：${resolved}`);
+      fail("backup.source_unsupported", { path: resolved });
     }
     return {
       root: temporary,
@@ -507,7 +522,7 @@ export class BackupService {
     try {
       const databasePath = join(materialized.root, DATABASE_NAME);
       if (!existsSync(databasePath)) {
-        fail("完整备份缺少 accounting_system.db");
+        fail("backup.database_missing");
       }
       const schema = validateSqlite(databasePath);
       const manifestPath = join(materialized.root, MANIFEST_NAME);
@@ -517,24 +532,24 @@ export class BackupService {
         try {
           manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Manifest;
         } catch (error) {
-          fail(`manifest.json 无法读取：${String(error)}`);
+          fail("backup.manifest_unreadable", { cause: String(error) });
         }
         if (manifest.format_version !== BACKUP_FORMAT_VERSION) {
-          fail("不支持的备份格式版本");
+          fail("backup.format_unsupported", { version: manifest.format_version });
         }
         if (JSON.stringify(manifest.required_tables) !== JSON.stringify(REQUIRED_TABLES)) {
-          fail("manifest 的必需表清单不完整或顺序不匹配");
+          fail("backup.manifest_tables_invalid");
         }
         if (
           JSON.stringify(Object.keys(manifest.tables).sort())
           !== JSON.stringify([...REQUIRED_TABLES].sort())
         ) {
-          fail("manifest 的表摘要不完整");
+          fail("backup.manifest_summary_invalid");
         }
         for (const [filename, metadata] of Object.entries(manifest.files)) {
           const path = join(materialized.root, filename);
           if (!existsSync(path) || sha256File(path) !== metadata.sha256) {
-            fail(`文件校验失败：${filename}`);
+            fail("backup.file_digest_mismatch", { filename });
           }
         }
       }
@@ -550,13 +565,13 @@ export class BackupService {
           if (!manifest) continue;
           const metadata = manifest.tables[config.name];
           const csvPath = join(materialized.root, metadata.filename);
-          if (!existsSync(csvPath)) fail(`备份缺少 CSV：${basename(csvPath)}`);
+          if (!existsSync(csvPath)) fail("backup.csv_missing", { filename: basename(csvPath) });
           const csv = parseCsv(csvPath);
           if (JSON.stringify(csv.headers) !== JSON.stringify(config.columns)) {
-            fail(`CSV 字段不匹配：${basename(csvPath)}`);
+            fail("backup.csv_columns_mismatch", { filename: basename(csvPath) });
           }
           if (csv.rows.length !== databaseCount || metadata.rows !== databaseCount) {
-            fail(`数据库、CSV 与 manifest 行数不一致：${config.name}`);
+            fail("backup.row_count_mismatch", { table: config.name });
           }
           const databaseDigest = tableDigest(db, config.name, config.columns);
           const csvDigest = canonicalDigest(
@@ -567,7 +582,7 @@ export class BackupService {
             databaseDigest !== csvDigest
             || ![databaseDigest, csvDigest].includes(metadata.content_sha256)
           ) {
-            fail(`数据库与 CSV 内容摘要不一致：${config.name}`);
+            fail("backup.content_digest_mismatch", { table: config.name });
           }
         }
         return {

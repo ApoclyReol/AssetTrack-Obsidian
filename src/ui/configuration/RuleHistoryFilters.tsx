@@ -1,10 +1,14 @@
-import type { CategoryDefinition } from "../../types";
+import type {
+  CategoryDefinition
+} from "../../types/configuration";
 import { businessLabel, t } from "../../i18n";
 import { issueLabel } from "./ruleHistoryPrimitives";
 import type { HistoryFilters } from "./ruleHistoryTypes";
 
 export interface RuleHistoryFiltersProps {
   categories: CategoryDefinition[];
+  groupBy?: "product" | "counterparty";
+  onGroupBy?: (groupBy: "product" | "counterparty") => void;
   filters: HistoryFilters;
   overview: boolean;
   hideIssueFilter: boolean;
@@ -16,6 +20,8 @@ export interface RuleHistoryFiltersProps {
 
 export function RuleHistoryFilters({
   categories,
+  groupBy = "product",
+  onGroupBy,
   filters,
   overview,
   hideIssueFilter,
@@ -26,12 +32,22 @@ export function RuleHistoryFilters({
 }: RuleHistoryFiltersProps) {
   return <div className="asset-track-rule-history-filters">
     <div className="asset-track-rule-history-filter-heading">
-      <strong>{overview
-        ? t("筛选商品总览", "Filter item overview")
-        : t("默认显示商品-分类冲突", "Item-category conflicts are shown by default")}</strong>
-      <span>{overview
-        ? t("可按收支、分类、商品和时间筛选。", "Filter by type, category, item, and time.")
-        : t("筛选条件变化后会自动刷新统计。", "Statistics refresh automatically when filters change.")}</span>
+      <div className="asset-track-rule-history-filter-heading-main">
+        <strong>{overview
+          ? t("筛选", "Filter")
+          : t("默认显示商品-分类冲突", "Item-category conflicts are shown by default")}</strong>
+        {overview && <div className="asset-track-overview-dimension-tabs" role="tablist" aria-label={t("统计口径", "Overview dimension")}>
+          {(["product", "counterparty"] as const).map((value) => <button
+            key={value}
+            type="button"
+            role="tab"
+            aria-selected={groupBy === value}
+            className={groupBy === value ? "is-active" : ""}
+            onClick={() => onGroupBy?.(value)}
+          >{value === "product" ? t("按商品", "By item") : t("按交易对手", "By counterparty")}</button>)}
+        </div>}
+      </div>
+      {!overview && <span>{t("筛选条件变化后会自动刷新统计。", "Statistics refresh automatically when filters change.")}</span>}
     </div>
     <div className={`asset-track-filter-grid${overview ? " asset-track-filter-grid--overview" : ""}`}>
       <label className="asset-track-rule-history-filter-type">{t("收支", "Type")}
@@ -61,6 +77,9 @@ export function RuleHistoryFilters({
       <label className="asset-track-rule-history-filter-search">{t("商品搜索", "Item search")}
         <input placeholder={t("搜索商品名", "Search item name")} value={filters.product_search} onChange={(event) => onUpdate({ product_search: event.target.value })} />
       </label>
+      {overview && <label className="asset-track-rule-history-filter-search">{t("交易对手搜索", "Counterparty search")}
+        <input placeholder={t("搜索交易对手", "Search counterparty")} value={filters.counterparty_search ?? ""} onChange={(event) => onUpdate({ counterparty_search: event.target.value })} />
+      </label>}
       <label className="asset-track-rule-history-filter-year">{t("起始年份", "From year")}
         <input type="number" min="2000" max="2100" placeholder={t("例如 2026", "e.g. 2026")} value={filters.from_month.slice(0, 4)} onChange={(event) => onUpdate({ from_month: event.target.value ? `${event.target.value}-01` : "" })} />
       </label>

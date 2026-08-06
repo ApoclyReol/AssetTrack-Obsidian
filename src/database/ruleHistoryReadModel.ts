@@ -1,20 +1,26 @@
 import type { DatabaseSync } from "node:sqlite";
 import type {
-  CategoryDefinition,
+  CategoryDefinition
+} from "../types/configuration";
+import type {
   HistoricalCategoryCount,
-  ProductHistoryIndexResult,
-  ProductHistoryQuery,
-  ProductHistoryResult,
   RuleCandidate,
   RuleConflictGroup,
+  RuleImpactPreview,
   RuleHealthSummary,
-  RuleInsights,
+  HistoricalProductStat,
   RuleWorkspaceAnalytics,
   RuleWorkspaceShell,
-  RuleWorkspace,
-  SavedRule,
+  SavedRule
+} from "../types/rules";
+import type {
+  ProductHistoryIndexResult,
+  ProductHistoryQuery,
+  ProductHistoryResult
+} from "../types/history";
+import type {
   Transaction
-} from "../types";
+} from "../types/transactions";
 import { contentRevision, text, type Row } from "./repositoryPrimitives";
 import {
   RuleReportReadModel,
@@ -52,38 +58,15 @@ export class RuleHistoryReadModel {
     return this.reports.rulesPreview(db, month, input);
   }
 
+  ruleImpactPreview(db: DatabaseSync, rule: Parameters<RuleReportReadModel["ruleImpactPreview"]>[1]): RuleImpactPreview {
+    return this.reports.ruleImpactPreview(db, rule);
+  }
+
   historicalCategoryCounts(
     group: Row[],
     categories: CategoryDefinition[]
   ): HistoricalCategoryCount[] {
     return this.products.historicalCategoryCounts(group, categories);
-  }
-
-  ruleInsights(db: DatabaseSync, minOccurrences = 2): RuleInsights {
-    const data = this.buildRuleInsights(db, minOccurrences);
-    return {
-      rules_revision: data.rules.revision,
-      categories_revision: data.categoriesRevision,
-      min_occurrences: data.threshold,
-      recommendations: data.recommendations,
-      historical_products: data.historicalProducts,
-      rule_conflicts: data.ruleConflicts,
-      summary: data.summary
-    };
-  }
-
-  ruleWorkspace(db: DatabaseSync, minOccurrences = 2): RuleWorkspace {
-    const data = this.buildRuleInsights(db, minOccurrences);
-    return {
-      categories_revision: data.categoriesRevision,
-      rules_revision: data.rules.revision,
-      categories: data.categories,
-      rules: data.rules.rows as unknown as SavedRule[],
-      recommendations: data.recommendations,
-      historical_products: data.historicalProducts,
-      rule_conflicts: data.ruleConflicts,
-      summary: data.summary
-    };
   }
 
   ruleWorkspaceShell(db: DatabaseSync): RuleWorkspaceShell {
@@ -98,6 +81,7 @@ export class RuleHistoryReadModel {
       categories: data.categories,
       rules: data.rules.rows as unknown as SavedRule[],
       recommendations: data.recommendations,
+      historical_products: data.historicalProducts,
       rule_conflicts: data.ruleConflicts,
       summary: data.summary
     };
@@ -107,8 +91,8 @@ export class RuleHistoryReadModel {
     return this.products.productHistoryIndex(db, query);
   }
 
-  productOverview(db: DatabaseSync): ProductHistoryIndexResult {
-    return this.products.productOverview(db);
+  productOverview(db: DatabaseSync, query: ProductHistoryQuery = {}): ProductHistoryIndexResult {
+    return this.products.productOverview(db, query);
   }
 
   productHistory(db: DatabaseSync, query: ProductHistoryQuery): ProductHistoryResult {
@@ -132,7 +116,7 @@ export class RuleHistoryReadModel {
     rules: ReturnType<RuleReportReadModel["rules"]>;
     categories: CategoryDefinition[];
     categoriesRevision: number;
-    historicalProducts: RuleInsights["historical_products"];
+    historicalProducts: HistoricalProductStat[];
     recommendations: RuleCandidate[];
     ruleConflicts: RuleConflictGroup[];
     summary: RuleHealthSummary;
@@ -229,7 +213,14 @@ export class RuleHistoryReadModel {
       uncategorized_transactions: history.filter((row) => !text(row.category_key)).length,
       stable_products_without_rule: historicalProducts.filter((row) =>
         Boolean(row.rule_suggestion)
-      ).length
+      ).length,
+      fully_covered_groups: historicalProducts.filter((row) => row.rule_coverage === "full").length,
+      partially_covered_groups: historicalProducts.filter((row) => row.rule_coverage === "partial").length,
+      uncovered_groups: historicalProducts.filter((row) => row.rule_coverage === "none").length,
+      higher_priority_covered_transactions: historicalProducts.reduce(
+        (total, row) => total + (row.higher_priority_covered_occurrences ?? 0),
+        0
+      )
     };
     return {
       threshold,

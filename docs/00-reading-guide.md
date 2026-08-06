@@ -32,14 +32,13 @@
 | 09 | [路线图](09-roadmap.md) | 查看当前验证和后续方向 |
 | 10 | [发布后质量与功能路线](10-community-release-plan.md) | 跟踪发布后质量与功能演进 |
 | 11 | [规则中心与容错导入架构补充](11-rule-center-architecture.md) | 核对导入、质检和规则洞察接口 |
-| 15 | [规则、流水聚合与批量操作需求](15-rules-and-transaction-operations-requirements.md) | 评审规则泛化、流水 UI 重组、批量操作、AI 与未来代付方向 |
 | logs | [发行日志索引](logs/README.md) | 查看历史版本变化和发布 handoff |
 
 ## 更新日志
 
 每个发行版本新增一份 `docs/logs/release-vN.N.N.md`，记录用户可见变化、数据兼容
 边界、验证结果和后续 handoff。当前版本详见
-[Release v1.6.0](logs/release-v1.6.0.md)，历史索引见
+[Release v1.7.0](logs/release-v1.7.0.md)，历史索引见
 [logs/README](logs/README.md)。
 
 ## 事实优先级
@@ -51,9 +50,9 @@
 3. `docs/logs/` 历史版本记录。
 
 产品定位以[产品理念](12-product-philosophy.md)为上位叙事，以
-`01-product-requirements.md`为当前需求约束。后续功能评审先检查这两份文档和
-[路线图](09-roadmap.md)，再进入界面或数据库设计；不要只根据某个发行日志或单个
-页面的现状推导产品方向。
+`01-product-requirements.md`和[路线图](09-roadmap.md)
+为当前需求约束。后续功能评审先检查这些文档和[财务计算口径](03-financial-model.md)，再进入界面或
+数据库设计；不要只根据某个发行日志或单个页面的现状推导产品方向。
 
 更新功能时应同步修改受影响的编号文档、`CHANGELOG.md` 和对应 release 日志；其中
 当前代码、编号文档和测试仍优先于历史日志，不要只在日志中记录当前行为。

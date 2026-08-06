@@ -1,3 +1,5 @@
+import { vi } from "vitest";
+
 let language = "zh-CN";
 
 export function getLanguage(): string {
@@ -7,6 +9,8 @@ export function getLanguage(): string {
 export function setTestLanguage(value: string): void {
   language = value;
 }
+
+export const requestUrl = vi.fn();
 
 export class Modal {
   constructor(_app?: unknown) {}

@@ -6,23 +6,23 @@ import {
 } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type {
-  HistoricalProductStat,
+  HistoricalProductStat
+} from "../types/rules";
+import type {
   ProductRenamePreview,
   ProductHistoryTransaction
-} from "../types";
+} from "../types/history";
 
 export type ProductRenameGroup = Pick<HistoricalProductStat, "transaction_type" | "product_key" | "product">;
-import {
-  AssetTrackError,
-  type AssetTrackService
-} from "../services/AssetTrackService";
+import type { ConfigurationEditorPort } from "../services/ports";
+import { AssetTrackError } from "../application/errors";
 import { displayError, t } from "../i18n";
 import { money } from "../domain/moneyFormat";
 import { StaticTableHeader } from "./TablePrimitives";
 
 export interface ProductRenameModalOptions {
   app: App;
-  api: AssetTrackService;
+  api: ConfigurationEditorPort;
   group: ProductRenameGroup;
   onSaved: () => void;
   onDataChanged: () => void;

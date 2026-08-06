@@ -1,9 +1,15 @@
 import type {
-  AnnualRow,
-  CategoryDefinition,
-  MonthOverview,
+  AnnualRow
+} from "../types/analysis";
+import type {
+  CategoryDefinition
+} from "../types/configuration";
+import type {
+  MonthOverview
+} from "../types/month";
+import type {
   Transaction
-} from "../types";
+} from "../types/transactions";
 import { money } from "../domain/moneyFormat";
 
 export const INFLOW_COLOR = "var(--asset-track-inflow)";

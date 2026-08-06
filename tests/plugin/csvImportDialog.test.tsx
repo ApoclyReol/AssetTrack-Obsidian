@@ -3,7 +3,9 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type { CsvInspection } from "../../src/types";
+import type {
+  CsvInspection
+} from "../../src/types/csv";
 import { CsvImportDialog } from "../../src/ui/CsvImportDialog";
 import { setTestLanguage } from "../mocks/obsidian";
 

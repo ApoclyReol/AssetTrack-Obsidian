@@ -22,9 +22,11 @@ import {
 } from "./services/AssetTrackService";
 import { LocalAssetTrackService } from "./services/LocalAssetTrackService";
 import type {
-  AssetTrackSettings,
+  AssetTrackSettings
+} from "./types/settings";
+import type {
   CsvMappingProfile
-} from "./types";
+} from "./types/csv";
 import {
   assertPathInsideVault,
   databaseVaultPath,
@@ -37,6 +39,7 @@ import {
   AssetTrackEditorView,
   type AssetTrackViewState
 } from "./views/AssetTrackEditorView";
+import { AssetTrackError } from "./application/errors";
 import { t } from "./i18n";
 import {
   DRAFT_RECOVERY_EPHEMERAL_KEY,
@@ -49,6 +52,10 @@ const electronShell = loadElectronModule().shell;
 export type DatabaseState = "unconfigured" | "initializing" | "ready" | "error";
 export type DirectorySwitchMode = "migrate" | "load";
 
+function canLoadDatabase(inspection: DatabaseInspection): boolean {
+  return inspection.valid || inspection.migration_required === true;
+}
+
 interface ServiceContext {
   manager: DatabaseManager;
   api: AssetTrackService;
@@ -58,7 +65,7 @@ export default class AssetTrackPlugin extends Plugin {
   settings: AssetTrackSettings = { ...DEFAULT_SETTINGS, csvMappings: [] };
   api!: AssetTrackService;
   databaseState: DatabaseState = "unconfigured";
-  databaseError: string | null = null;
+  databaseError: unknown = null;
   settingsIssues: string[] = [];
   private databaseManager: DatabaseManager | null = null;
   private readonly dataListeners = new Set<() => void>();
@@ -139,7 +146,7 @@ export default class AssetTrackPlugin extends Plugin {
   async inspectDataDirectory(value: string): Promise<DatabaseInspection> {
     const dataDirectory = normalizeDataDirectory(value);
     if (!dataDirectory) {
-      throw new Error(t("请选择 Asset-track 数据目录", "Select an Asset Track data directory."));
+      throw new AssetTrackError({ code: "workspace.data_directory_required", status: 422 });
     }
     return DatabaseManager.inspect(this.fullDatabasePath(dataDirectory));
   }
@@ -152,7 +159,7 @@ export default class AssetTrackPlugin extends Plugin {
     ) {
       await this.loadDatabase(this.settings.dataDirectory).catch((error) => {
         this.databaseState = "error";
-        this.databaseError = error instanceof Error ? error.message : String(error);
+        this.databaseError = error;
         void this.refreshViews();
       });
     }
@@ -160,49 +167,37 @@ export default class AssetTrackPlugin extends Plugin {
 
   async createDatabase(value: string): Promise<void> {
     if (this.isDatabaseReady()) {
-      throw new Error(t(
-        "数据库已在运行；请使用迁移当前库或载入目标库",
-        "A database is already open. Migrate the current database or load the target database."
-      ));
+      throw new AssetTrackError({ code: "database.already_open", status: 409 });
     }
     const dataDirectory = normalizeDataDirectory(value);
-    if (!dataDirectory) throw new Error(t(
-      "请选择 Asset-track 数据目录",
-      "Select an Asset Track data directory."
-    ));
+    if (!dataDirectory) throw new AssetTrackError({ code: "workspace.data_directory_required", status: 422 });
     const inspection = await this.inspectDataDirectory(dataDirectory);
     if (inspection.exists) {
-      throw new Error(t(
-        "所选目录已有 accounting_system.db，请使用载入数据库",
-        "The selected directory already contains accounting_system.db. Use Load database."
-      ));
+      throw new AssetTrackError({ code: "database.file_exists_use_load", status: 409 });
     }
     await this.activateInitialDatabase(dataDirectory, true);
   }
 
   async loadDatabase(value: string): Promise<void> {
     const dataDirectory = normalizeDataDirectory(value);
-    if (!dataDirectory) throw new Error(t(
-      "请选择 Asset-track 数据目录",
-      "Select an Asset Track data directory."
-    ));
+    if (!dataDirectory) throw new AssetTrackError({ code: "workspace.data_directory_required", status: 422 });
     if (this.isDatabaseReady()) {
       if (dataDirectory === this.settings.dataDirectory) return;
-      throw new Error(t(
-        "数据库已在运行；请使用迁移当前库或载入目标库",
-        "A database is already open. Migrate the current database or load the target database."
-      ));
+      throw new AssetTrackError({ code: "database.already_open", status: 409 });
     }
     const inspection = await this.inspectDataDirectory(dataDirectory);
-    if (!inspection.exists || !inspection.valid) {
-      const error = inspection.error ?? t(
-        "所选目录没有 accounting_system.db",
-        "The selected directory does not contain accounting_system.db."
-      );
+    if (!inspection.exists || !canLoadDatabase(inspection)) {
+      const error = inspection.exists
+        ? new AssetTrackError({
+            code: "database.invalid_database",
+            status: 422,
+            params: { details: inspection.error ?? "" }
+          })
+        : new AssetTrackError({ code: "database.file_missing", status: 404 });
       this.databaseState = "error";
       this.databaseError = error;
       await this.refreshViews();
-      throw new Error(error);
+      throw error;
     }
     await this.activateInitialDatabase(dataDirectory, false);
   }
@@ -213,18 +208,12 @@ export default class AssetTrackPlugin extends Plugin {
   ): Promise<void> {
     const currentManager = this.databaseManager;
     if (!currentManager || !this.isDatabaseReady()) {
-      throw new Error(t("当前数据库尚未就绪", "The current database is not ready."));
+      throw new AssetTrackError({ code: "database.not_ready", status: 409 });
     }
     const dataDirectory = normalizeDataDirectory(value);
-    if (!dataDirectory) throw new Error(t(
-      "请选择 Asset-track 数据目录",
-      "Select an Asset Track data directory."
-    ));
+    if (!dataDirectory) throw new AssetTrackError({ code: "workspace.data_directory_required", status: 422 });
     if (dataDirectory === this.settings.dataDirectory) {
-      throw new Error(t(
-        "所选目录就是当前数据目录",
-        "The selected directory is already in use."
-      ));
+      throw new AssetTrackError({ code: "database.directory_in_use", status: 409 });
     }
     const dirty = this.app.workspace
       .getLeavesOfType(VIEW_TYPE_ASSET_TRACK)
@@ -232,23 +221,20 @@ export default class AssetTrackPlugin extends Plugin {
         leaf.view instanceof AssetTrackEditorView
         && leaf.view.hasUnsavedChanges()
       );
-    if (dirty) throw new Error(t(
-      "当前编辑器存在未保存草稿，不能切换数据目录",
-      "The editor has unsaved changes, so the data directory cannot be switched."
-    ));
+    if (dirty) throw new AssetTrackError({ code: "database.unsaved_changes", status: 409 });
 
     const inspection = await this.inspectDataDirectory(dataDirectory);
     if (mode === "migrate" && inspection.exists) {
-      throw new Error(t(
-        "目标目录已有 accounting_system.db，迁移不会覆盖",
-        "The target directory already contains accounting_system.db. Migration will not overwrite it."
-      ));
+      throw new AssetTrackError({ code: "database.migration_target_exists", status: 409 });
     }
-    if (mode === "load" && (!inspection.exists || !inspection.valid)) {
-      throw new Error(inspection.error ?? t(
-        "目标目录没有可载入的数据库",
-        "The target directory does not contain a database that can be loaded."
-      ));
+    if (mode === "load" && (!inspection.exists || !canLoadDatabase(inspection))) {
+      throw inspection.exists
+        ? new AssetTrackError({
+            code: "database.invalid_database",
+            status: 422,
+            params: { details: inspection.error ?? "" }
+          })
+        : new AssetTrackError({ code: "database.file_missing", status: 404 });
     }
     await this.createProtectionBackup("before-switch");
     const targetPath = this.fullDatabasePath(dataDirectory);
@@ -256,10 +242,13 @@ export default class AssetTrackPlugin extends Plugin {
       mkdirSync(dirname(targetPath), { recursive: true });
       await currentManager.snapshot(targetPath);
       const copied = DatabaseManager.inspect(targetPath);
-      if (!copied.valid) throw new Error(copied.error ?? t(
-        "迁移数据库校验失败",
-        "Migrated database validation failed."
-      ));
+      if (!copied.valid) {
+        throw new AssetTrackError({
+          code: "database.migration_validation_failed",
+          status: 422,
+          params: { details: copied.error ?? "" }
+        });
+      }
     }
     const next = this.buildService(dataDirectory);
     try {
@@ -286,10 +275,7 @@ export default class AssetTrackPlugin extends Plugin {
   private filesystemAdapter(): FileSystemAdapter {
     const adapter = this.app.vault.adapter;
     if (!(adapter instanceof FileSystemAdapter)) {
-      throw new Error(t(
-        "Asset Track 仅支持桌面文件系统 Vault",
-        "Asset Track supports desktop filesystem vaults only."
-      ));
+      throw new AssetTrackError({ code: "filesystem.desktop_vault_required", status: 422 });
     }
     return adapter;
   }
@@ -320,11 +306,14 @@ export default class AssetTrackPlugin extends Plugin {
     let next: ServiceContext | null = null;
     try {
       const inspection = await this.inspectDataDirectory(dataDirectory);
-      if (!createIfMissing && (!inspection.exists || !inspection.valid)) {
-        throw new Error(inspection.error ?? t(
-          "所选目录没有有效数据库",
-          "The selected directory does not contain a valid database."
-        ));
+      if (!createIfMissing && (!inspection.exists || !canLoadDatabase(inspection))) {
+        throw inspection.exists
+          ? new AssetTrackError({
+              code: "database.invalid_database",
+              status: 422,
+              params: { details: inspection.error ?? "" }
+            })
+          : new AssetTrackError({ code: "database.file_missing", status: 404 });
       }
       next = this.buildService(dataDirectory);
       await next.api.meta();
@@ -340,7 +329,7 @@ export default class AssetTrackPlugin extends Plugin {
     } catch (error) {
       if (next) await next.api.close();
       this.databaseState = "error";
-      this.databaseError = error instanceof Error ? error.message : String(error);
+      this.databaseError = error;
       await this.refreshViews();
       throw error;
     }
@@ -354,10 +343,7 @@ export default class AssetTrackPlugin extends Plugin {
   }
 
   private async createProtectionBackup(prefix: string): Promise<string> {
-    if (!this.databaseManager) throw new Error(t(
-      "数据库尚未就绪",
-      "The database is not ready."
-    ));
+    if (!this.databaseManager) throw new AssetTrackError({ code: "database.not_ready", status: 409 });
     const adapter = this.filesystemAdapter();
     const directory = adapter.getFullPath(
       backupsVaultPath(this.settings.dataDirectory)
@@ -368,10 +354,13 @@ export default class AssetTrackPlugin extends Plugin {
     );
     await this.databaseManager.snapshot(target);
     const validation = DatabaseManager.inspect(target);
-    if (!validation.valid) throw new Error(validation.error ?? t(
-      "保护备份校验失败",
-      "Protection backup validation failed."
-    ));
+    if (!validation.valid) {
+      throw new AssetTrackError({
+        code: "database.protection_backup_invalid",
+        status: 422,
+        params: { details: validation.error ?? "" }
+      });
+    }
     return target;
   }
 
@@ -415,10 +404,7 @@ export default class AssetTrackPlugin extends Plugin {
   }
 
   async openDataDirectory(): Promise<void> {
-    if (!this.settings.dataDirectory) throw new Error(t(
-      "尚未选择数据目录",
-      "No data directory has been selected."
-    ));
+    if (!this.settings.dataDirectory) throw new AssetTrackError({ code: "workspace.data_directory_required", status: 422 });
     electronShell.showItemInFolder(
       this.filesystemAdapter().getFullPath(this.settings.dataDirectory)
     );

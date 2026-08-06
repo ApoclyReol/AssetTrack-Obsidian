@@ -1,4 +1,6 @@
-import type { MonthWorkspace } from "../../types";
+import type {
+  MonthWorkspace
+} from "../../types/month";
 import { t } from "../../i18n";
 import {
   NumberField,

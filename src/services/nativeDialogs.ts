@@ -2,6 +2,7 @@ import {
   loadElectronModule,
   type DesktopOpenDialogOptions
 } from "./desktopRuntime";
+import { AssetTrackError } from "../application/errors";
 import { t } from "../i18n";
 
 const electron = loadElectronModule();
@@ -11,10 +12,7 @@ async function choose(
 ): Promise<string | null> {
   const dialog = electron.remote?.dialog;
   if (!dialog) {
-    throw new Error(t(
-      "当前 Obsidian 桌面运行时无法打开系统文件选择器",
-      "The current desktop runtime cannot open the system file picker."
-    ));
+    throw new AssetTrackError({ code: "native.file_picker_unavailable", status: 503 });
   }
   const result = await dialog.showOpenDialog(options);
   if (result.canceled || !result.filePaths.length) return null;
