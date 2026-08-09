@@ -41,6 +41,10 @@ hash、schema、行数和 SQLite `integrity_check`；验证通过后才创建恢
 - 插件延迟打开数据库；运行时缺少 Node ≥22.16、`DatabaseSync` 或
   `sqlite.backup` 时只显示兼容提示，不创建或修改数据库。
 
+Obsidian 的 **Direct Filesystem Access** 警告是能力级提示：它说明插件使用了本地文件
+访问能力，但不代表插件存在恶意读写、静默扫描或上传行为。Asset Track 使用该能力的目的
+是维护用户明确选择的数据目录、SQLite 一致性、迁移/恢复保护快照和手动备份管理。
+
 ## 问题报告
 
 报告问题时只提供版本、最小复现和经过人工检查的脱敏信息。不要在公开 issue 中

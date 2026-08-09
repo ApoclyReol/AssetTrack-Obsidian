@@ -10,6 +10,7 @@ export interface ConfigurationSession {
   categoryDirty: boolean;
   ruleDirty: boolean;
   dirtyFlagsRef: MutableRefObject<ConfigurationDirtyFlags>;
+  draftGeneration: MutableRefObject<number>;
   lastDataVersion: { current: number };
   skipNextDataVersion: { current: boolean };
   restoredDraft: { current: RulesEditorDraftSnapshot | null };
@@ -39,6 +40,7 @@ export function useConfigurationSession(
   };
   const [dirtyFlags, setDirtyFlagsState] = useState(initialDirtyFlags);
   const dirtyFlagsRef = useRef<ConfigurationDirtyFlags>(initialDirtyFlags);
+  const draftGeneration = useRef(0);
   const lastDataVersion = useRef(dataVersion);
   const skipNextDataVersion = useRef(false);
   const restoredDraft = useRef(initialDraft ? clone(initialDraft) : null);
@@ -48,8 +50,14 @@ export function useConfigurationSession(
     setDirtyFlagsState(nextDirtyFlags);
     dirtyFlagsRef.current = nextDirtyFlags;
   }, []);
-  const markCategoryDirty = useCallback(() => setDirtyFlags(true, dirtyFlagsRef.current.rule), [setDirtyFlags]);
-  const markRuleDirty = useCallback(() => setDirtyFlags(dirtyFlagsRef.current.category, true), [setDirtyFlags]);
+  const markCategoryDirty = useCallback(() => {
+    draftGeneration.current += 1;
+    setDirtyFlags(true, dirtyFlagsRef.current.rule);
+  }, [setDirtyFlags]);
+  const markRuleDirty = useCallback(() => {
+    draftGeneration.current += 1;
+    setDirtyFlags(dirtyFlagsRef.current.category, true);
+  }, [setDirtyFlags]);
   const updateCategories = useCallback((categories: CategoryDefinition[]) => {
     setWorkspace((current) => current ? { ...current, categories } : current);
     markCategoryDirty();
@@ -75,6 +83,7 @@ export function useConfigurationSession(
     categoryDirty: dirtyFlags.category,
     ruleDirty: dirtyFlags.rule,
     dirtyFlagsRef,
+    draftGeneration,
     lastDataVersion,
     skipNextDataVersion,
     restoredDraft,

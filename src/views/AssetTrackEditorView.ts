@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, type ViewStateResult } from "obsidian";
+import { ItemView, Notice, WorkspaceLeaf, type ViewStateResult } from "obsidian";
 import { createRoot, type Root } from "react-dom/client";
 import { createElement } from "react";
 import {
@@ -256,13 +256,33 @@ export class AssetTrackEditorView extends ItemView {
         const snapshot = this.sessionSnapshot;
         const hostWindow = this.containerEl.ownerDocument.defaultView;
         hostWindow?.setTimeout(
-          () => void (snapshot
-            ? this.plugin.reopenEditorWithDraft(this.state, snapshot)
-            : this.plugin.openEditor(
+          () => {
+            if (!snapshot) {
+              void this.plugin.openEditor(
                 this.state.mode,
                 this.state.month,
                 this.state.analysisMode
-              )),
+              ).catch((error: unknown) => {
+                new Notice(t(
+                  `编辑器重新打开失败：${displayError(error)}`,
+                  `The editor could not be reopened: ${displayError(error)}`
+                ));
+              });
+              return;
+            }
+            void this.plugin.reopenEditorWithDraft(this.state, snapshot).catch((error: unknown) => {
+              // Reopening is normally a single workspace operation, but a
+              // closing leaf can race with another workspace layout change.
+              // Retry once while the in-memory snapshot is still available so
+              // a transient layout failure cannot silently discard the draft.
+              void this.plugin.reopenEditorWithDraft(this.state, snapshot).catch((retryError: unknown) => {
+                new Notice(t(
+                  `草稿仍未重新打开：${displayError(retryError || error)}`,
+                  `The draft could not be reopened: ${displayError(retryError || error)}`
+                ));
+              });
+            });
+          },
           0
         );
       } else {

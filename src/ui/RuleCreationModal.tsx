@@ -12,7 +12,7 @@ import type {
 } from "../types/rules";
 import { AssetTrackError } from "../application/errors";
 import { businessLabel, displayError, t } from "../i18n";
-import { inferRuleScopeFromConditions } from "../domain/rules";
+import { inferRuleScopeFromConditions, ruleCategoryType } from "../domain/rules";
 
 export interface RuleCreationModalOptions {
   app: App;
@@ -59,7 +59,7 @@ function RuleCreationContent({
     product
   });
   const availableCategories = categories.filter((category) =>
-    category.is_active && category.transaction_type === transactionType
+    category.is_active && category.transaction_type === ruleCategoryType(transactionType)
   );
 
   const buildRule = (): SavedRule | null => {
@@ -117,6 +117,7 @@ function RuleCreationContent({
       }}>
         <option value="支出">{businessLabel("支出")}</option>
         <option value="收入">{businessLabel("收入")}</option>
+        <option value="代付">{businessLabel("代付")}</option>
       </select>
     </label>
     <label>{t("匹配范围", "Match scope")}

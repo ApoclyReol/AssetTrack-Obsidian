@@ -23,6 +23,7 @@ import type {
   MonthEditorPort,
   RuleWritePort
 } from "../services/ports";
+import type { SavedRule } from "../types/rules";
 import { createTransactionDraft } from "./analysisModel";
 import { CsvImportDialog } from "./CsvImportDialog";
 import { t } from "../i18n";
@@ -34,7 +35,6 @@ import {
   number,
   type SortState,
   Status,
-  IssueList,
   messageFor,
   transactionAmount
 } from "./editorPrimitives";
@@ -49,7 +49,7 @@ import { MonthEditorTransactionsSection } from "./month/MonthEditorTransactionsS
 import { MonthEditorSupplementalSections } from "./month/MonthEditorSupplementalSections";
 import { RuleCreationModal } from "./RuleCreationModal";
 import { transactionKey as operationTransactionKey } from "../domain/transactionOperations";
-import { resolveRule } from "../domain/rules";
+import { resolveRule, ruleCategoryType } from "../domain/rules";
 import type { EditorSession } from "./editorSession";
 import { useMonthEditorSession } from "./month/useMonthEditorSession";
 import { useTransactionOperations } from "./month/useTransactionOperations";
@@ -79,6 +79,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
   onMetricsChange?: (metrics: MonthMetrics | null) => void;
   onDeleted: (next: string) => Promise<void>;
   onSaved: () => Promise<void>;
+  onDataChanged?: () => void;
   initialDraft?: MonthEditorDraftSnapshot;
   onSessionChange: (snapshot: EditorDraftSnapshot | null) => void;
   getCsvMapping: (signature: string) => CsvColumnMapping | undefined;
@@ -99,6 +100,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
   onMetricsChange,
   onDeleted,
   onSaved,
+  onDataChanged,
   initialDraft,
   onSessionChange,
   getCsvMapping,
@@ -128,7 +130,6 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
     rulesRevision,
     setRulesRevision,
     issues,
-    setIssues,
     state,
     setState,
     dirtySections,
@@ -139,6 +140,9 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
     mark,
     reloadCurrentSection,
     save,
+    saveAll,
+    discardAll,
+    acknowledgeDataChange,
     hasUnsavedChanges,
     getDraftSnapshot
   } = session;
@@ -160,12 +164,11 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
   const csv = useCsvImportSession({
     api,
     month,
+    activeSection,
     draft,
-    rulesRevision,
-    setIssues,
     setState,
-    operations,
-    getCsvMapping,
+    mark,
+    invalidatePendingOperationLogs: operations.invalidatePendingOperationLogs,
     saveCsvMapping
   });
   const [summarySort, setSummarySort] = useState<SortState>({
@@ -179,7 +182,9 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
     openImport: () => undefined,
     applyRules: async () => undefined,
     save: async () => false,
+    saveAll: async () => false,
     discard: async () => undefined,
+    discardAll: async () => undefined,
     getDraftSnapshot: () => null,
     hasUnsavedChanges: () => false
   });
@@ -188,7 +193,9 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
     openImport: () => actionRef.current.openImport(),
     applyRules: () => actionRef.current.applyRules(),
     save: () => actionRef.current.save(),
+    saveAll: () => actionRef.current.saveAll(),
     discard: () => actionRef.current.discard(),
+    discardAll: () => actionRef.current.discardAll(),
     getDraftSnapshot: () => actionRef.current.getDraftSnapshot(),
     hasUnsavedChanges: () => actionRef.current.hasUnsavedChanges()
   }), [ref]);
@@ -198,6 +205,40 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
   const emptyMonth = isEmptyMonthDraft(draft, dirtySections.length > 0);
   const showAllSections = activeSection === undefined;
 
+  const updatedTransactionRow = (
+    row: Transaction,
+    field: keyof Transaction,
+    value: string
+  ): Transaction => {
+    const next = {
+      ...row,
+      [field]: field === "amount" ? transactionAmount(value) : value
+    };
+    if (field === "type" && ["代付", "加仓", "提现"].includes(value)) {
+      if (value !== "代付") {
+        next.category = "";
+        next.category_key = null;
+      }
+    }
+    if (field === "type" && ["加仓", "提现"].includes(value)) {
+      next.account_key = next.account_key
+        ?? draft.investment_accounts.find((account) => account.is_active)?.account_key
+        ?? draft.investment_accounts[0]?.account_key
+        ?? null;
+    } else if (field === "type" && !["加仓", "提现"].includes(value)) {
+      next.account_key = null;
+    }
+    if (next.type === "加仓" || next.type === "提现") {
+      next.counterparty = next.type;
+      next.product = next.account_key ?? next.type;
+    }
+    if (field === "category_key") {
+      next.category =
+        categories.find((category) => category.category_key === value)?.name ?? "";
+    }
+    return next;
+  };
+
   const updateTransaction = (
     index: number,
     field: keyof Transaction,
@@ -205,35 +246,26 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
   ) => {
     const rows = draft.transactions.map((row, rowIndex) => {
       if (rowIndex !== index) return row;
-      const next = {
-        ...row,
-        [field]: field === "amount" ? transactionAmount(value) : value
-      };
-      if (field === "type" && ["代付", "加仓", "提现"].includes(value)) {
-        if (value !== "代付") {
-          next.category = "";
-          next.category_key = null;
-        }
-      }
-      if (field === "type" && ["加仓", "提现"].includes(value)) {
-        next.account_key = next.account_key
-          ?? draft.investment_accounts.find((account) => account.is_active)?.account_key
-          ?? draft.investment_accounts[0]?.account_key
-          ?? null;
-      } else if (field === "type" && !["加仓", "提现"].includes(value)) {
-        next.account_key = null;
-      }
-      if (next.type === "加仓" || next.type === "提现") {
-        next.counterparty = next.type;
-        next.product = next.account_key ?? next.type;
-      }
-      if (field === "category_key") {
-        next.category =
-          categories.find((category) => category.category_key === value)?.name ?? "";
-      }
-      return next;
+      return updatedTransactionRow(row, field, value);
     });
     operations.protectTransaction(index);
+    operations.invalidatePendingOperationLogs();
+    mark({ ...draft, transactions: rows }, "transactions");
+  };
+
+  const updateTransactionGroup = (
+    indexes: readonly number[],
+    field: keyof Transaction,
+    value: string
+  ) => {
+    const targetIndexes = new Set(indexes);
+    const rows = draft.transactions.map((row, rowIndex) =>
+      targetIndexes.has(rowIndex)
+        ? updatedTransactionRow(row, field, value)
+        : row
+    );
+    targetIndexes.forEach((index) => operations.protectTransaction(index));
+    operations.invalidatePendingOperationLogs();
     mark({ ...draft, transactions: rows }, "transactions");
   };
 
@@ -272,6 +304,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
   };
 
   const deleteTransaction = (index: number) => {
+    operations.invalidatePendingOperationLogs();
     mark({
       ...draft,
       transactions: draft.transactions.filter((_, item) => item !== index)
@@ -279,6 +312,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
   };
 
   const addTransaction = (title: string) => {
+    operations.invalidatePendingOperationLogs();
     const transaction = createTransactionDraft(title, month, categories);
     if (title === "加仓" || title === "提现") {
       transaction.account_key = draft.investment_accounts.find((account) => account.is_active)?.account_key
@@ -328,18 +362,20 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
 
   const openRuleCreationForRow = (
     row: Transaction,
+    rowIndex: number,
     preferredScope?: "product" | "merchant" | "merchant_product"
   ) => {
-    if (!app || (row.type !== "支出" && row.type !== "收入")) return;
+    if (!app || (row.type !== "支出" && row.type !== "收入" && row.type !== "代付")) return;
+    const ruleTransactionType = row.type;
     const category = categories.find((item) => item.category_key === row.category_key
-      && item.transaction_type === row.type);
+      && item.transaction_type === ruleCategoryType(ruleTransactionType));
     const matchScope = preferredScope
       ?? (row.counterparty?.trim() ? "merchant_product" : "product");
     new RuleCreationModal({
       app,
       categories,
       initial: {
-        transaction_type: row.type,
+        transaction_type: ruleTransactionType,
         match_scope: matchScope,
         counterparty: matchScope === "product" ? "" : row.counterparty ?? "",
         product: matchScope === "merchant" ? "" : row.product,
@@ -349,39 +385,54 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
       onConfirm: async (rule) => {
         const shell = await api.ruleWorkspaceShell();
         const nextRules = [...shell.rules, rule].map((item) => ({ ...item }));
-        const selectedKey = operationTransactionKey(
-          row,
-          draft.transactions.indexOf(row)
-        );
-        await (api as MonthEditorPort & RuleWritePort).saveRules(shell.rules_revision, nextRules, {
+        const selectedKey = operationTransactionKey(row, rowIndex);
+        const saved = await (api as MonthEditorPort & RuleWritePort).saveRules(shell.rules_revision, nextRules, {
           source_page: "记录/流水",
           operation_type: "create-rule",
           selection: [selectedKey],
           metadata: { rule_id: rule.id ?? null }
         });
-        const updatedShell = await api.ruleWorkspaceShell();
-        setRules(updatedShell.rules);
-        setRulesRevision(updatedShell.rules_revision);
-        new Notice(t("规则已保存；历史流水未自动改写。", "Rule saved; historical transactions were not rewritten."));
+        // The rule revision is part of any pending transaction-operation
+        // preview. A directly created rule invalidates those previews even
+        // though the current draft rows themselves remain usable.
+        operations.invalidatePendingOperationLogs();
+        acknowledgeDataChange();
+        onDataChanged?.();
+        setRules(saved.rows as unknown as SavedRule[]);
+        setRulesRevision(saved.revision);
+        try {
+          const updatedShell = await api.ruleWorkspaceShell();
+          setRules(updatedShell.rules);
+          setRulesRevision(updatedShell.rules_revision);
+          new Notice(t("规则已保存；历史流水未自动改写。", "Rule saved; historical transactions were not rewritten."));
+        } catch (error) {
+          new Notice(t(
+            `规则已保存，但规则列表刷新失败：${messageFor(error)}`,
+            `Rule saved, but the rule list could not refresh: ${messageFor(error)}`
+          ));
+        }
       }
     }).open();
   };
 
   const openRuleCreationForGroup = (group: TransactionGroup) => {
-    const row = group.indexes.map((index) => draft.transactions[index]).find(Boolean);
+    const rowIndex = group.indexes.find((index) => Boolean(draft.transactions[index]));
+    if (rowIndex === undefined) return;
+    const row = draft.transactions[rowIndex];
     if (!row) return;
     openRuleCreationForRow(
       row,
+      rowIndex,
       group.groupBy === "product" ? "product" : "merchant"
     );
   };
 
-  const renderRuleControls = ({ row }: { row: Transaction }) => {
-    if (row.type !== "支出" && row.type !== "收入") return null;
+  const renderRuleControls = ({ row, index }: { row: Transaction; index: number }) => {
+    if (row.type !== "支出" && row.type !== "收入" && row.type !== "代付") return null;
     const explanation = resolveRule(row, rules);
     if (explanation.status === "none") {
       return <span className="asset-track-rule-indicator is-no-rule">
-        <button className="asset-track-rule-button" type="button" onClick={() => openRuleCreationForRow(row)}>{t("新建规则", "New rule")}</button>
+        <button className="asset-track-rule-button" type="button" onClick={() => openRuleCreationForRow(row, index)}>{t("新建规则", "New rule")}</button>
       </span>;
     }
     const label = explanation.status === "matched"
@@ -436,7 +487,9 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
     openImport: csv.openImport,
     applyRules: operations.applyRules,
     save,
+    saveAll,
     discard: reloadCurrentSection,
+    discardAll,
     getDraftSnapshot,
     hasUnsavedChanges
   };
@@ -492,9 +545,6 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
       <span className="asset-track-sr-only" role="status" aria-live="polite">
         {state.kind === "error" ? state.message : ""}
       </span>
-      {issues.length > 0 && (
-        <IssueList issues={issues} rows={draft.transactions} />
-      )}
       {(showAllSections || activeSection === "assets") && <MonthEditorAssetsSection
         draft={draft}
         onCashBalanceChange={updateCashBalance}
@@ -504,12 +554,14 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
         month={month}
         draft={draft}
         categories={categories}
+        issues={issues}
         rules={rules}
         summarySort={summarySort}
         expandedGroup={expandedGroup}
         onSummarySort={setSummarySort}
         onExpandedGroupChange={setExpandedGroup}
         onUpdate={updateTransaction}
+        onUpdateGroup={updateTransactionGroup}
         onDelete={deleteTransaction}
         onAdd={addTransaction}
         businessTab={operations.businessTab}
@@ -525,7 +577,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
             type="button"
             disabled={state.kind === "pending" || keys.size === 0}
             onClick={() => void operations.executeAiClassification(currentTab, keys)}
-          >{t("AI 分类", "AI classify")}</button>}
+          >{t("AI 分类建议", "AI classification suggestions")}</button>}
           {(currentTab === "outgoing" || currentTab === "incoming") && <>
             <button
               type="button"
@@ -557,6 +609,28 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
                 (row) => row.type === "支出" || row.type === "收入" || row.type === "代付"
               )}
             >{t("修改分类", "Edit category")}</button>
+          </>}
+          {currentTab === "incoming" && <>
+            <button
+              type="button"
+              disabled={state.kind === "pending" || keys.size === 0}
+              onClick={() => void operations.executeSelectedOperation(
+                "income-to-daifu",
+                currentTab,
+                keys,
+                (row) => row.type === "收入"
+              )}
+            >{t("收入转代付", "Income to daifu")}</button>
+            <button
+              type="button"
+              disabled={state.kind === "pending" || keys.size === 0}
+              onClick={() => void operations.executeSelectedOperation(
+                "daifu-to-income",
+                currentTab,
+                keys,
+                (row) => row.type === "代付"
+              )}
+            >{t("代付转收入", "Daifu to income")}</button>
           </>}
         </>}
         renderRuleControls={renderRuleControls}

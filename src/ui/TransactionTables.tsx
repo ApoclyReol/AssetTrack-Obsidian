@@ -23,6 +23,7 @@ import type {
 import type {
   TransactionBusinessTab
 } from "../types/operations";
+import { scalarText } from "../domain/text";
 import { businessLabel, t } from "../i18n";
 import { money } from "../domain/moneyFormat";
 import {
@@ -43,6 +44,7 @@ import {
 import {
   Section,
   SortButton,
+  issueIsBlocking,
   sortRows,
   type SortState
 } from "./editorPrimitives";
@@ -78,7 +80,7 @@ function transactionTypeUsesCategory(type: string): boolean {
 }
 
 function transactionTypeUsesRules(type: string): boolean {
-  return CATEGORY_TRANSACTION_TYPES.has(type);
+  return CATEGORY_TRANSACTION_TYPES.has(type) || type === "代付";
 }
 
 function categoryTypeForTransaction(type: string): string {
@@ -109,6 +111,68 @@ function summarySortValue(group: TransactionGroup, key: string): unknown {
   return group[key as keyof TransactionGroup];
 }
 
+function fixedAssetFieldLabel(field: keyof FixedAsset): string {
+  switch (field) {
+    case "asset_name": return t("名称", "name");
+    case "category": return t("类别", "category");
+    case "purchase_date": return t("购置日", "purchase date");
+    case "purchase_price": return t("购买价", "purchase price");
+    case "status": return t("状态", "status");
+    case "note": return t("备注", "notes");
+    default: return t("字段", "field");
+  }
+}
+
+function groupIssuesByRow(
+  issues: Array<Record<string, unknown>>
+): Map<number, Array<Record<string, unknown>>> {
+  const groups = new Map<number, Array<Record<string, unknown>>>();
+  issues.forEach((issue) => {
+    const rowIndex = Number(issue.row_index);
+    if (!Number.isInteger(rowIndex) || rowIndex < 0) return;
+    const current = groups.get(rowIndex);
+    if (current) current.push(issue);
+    else groups.set(rowIndex, [issue]);
+  });
+  return groups;
+}
+
+function issueSummaryText(issues: Array<Record<string, unknown>>): string {
+  return issues
+    .map((issue) => {
+      const field = scalarText(issue.field) || t("字段", "Field");
+      const reason = scalarText(issue.issue ?? issue.reason) || t("无效", "Invalid");
+      return `${field}：${reason}`;
+    })
+    .join(t("；", "; "));
+}
+
+function RowIssueMarker({
+  issues,
+  label
+}: {
+  issues: Array<Record<string, unknown>> | undefined;
+  label: string;
+}) {
+  if (!issues?.length) return null;
+  const blocking = issues.filter(issueIsBlocking).length;
+  const severity = blocking > 0 ? t("错误", "Error") : t("提醒", "Warning");
+  const summary = issueSummaryText(issues);
+  return (
+    <span
+      className={`asset-track-row-issue-marker ${blocking > 0 ? "is-error" : "is-warning"}`}
+      title={`${label} · ${severity} ${issues.length}：${summary}`}
+      aria-label={`${label} · ${severity} ${issues.length}：${summary}`}
+    >
+      {blocking > 0 ? "!" : "?"}
+    </span>
+  );
+}
+
+function stableGroupKey(group: TransactionGroup): string {
+  return `${group.type}:${group.groupBy}:${group.indexes.join(",")}`;
+}
+
 export interface TransactionRuleControlContext {
   row: Transaction;
   index: number;
@@ -125,11 +189,11 @@ export type TransactionRowActions = (
 
 export interface TransactionTableProps {
   title: string;
-  month: string;
   rows: Transaction[];
   visibleIndexes: number[];
   categories: CategoryDefinition[];
   investmentAccounts?: InvestmentAccountBalance[];
+  issues?: Array<Record<string, unknown>>;
   onUpdate: (index: number, field: keyof Transaction, value: string) => void;
   onDelete: (index: number) => void;
   onAdd: () => void;
@@ -142,14 +206,16 @@ export interface TransactionTableProps {
 export interface TransactionSummaryTableProps {
   rows: Transaction[];
   categories: CategoryDefinition[];
-  investmentAccounts?: InvestmentAccountBalance[];
+  issues?: Array<Record<string, unknown>>;
   businessTab?: TransactionBusinessTab;
   rules?: SavedRule[];
+  groups?: TransactionGroup[];
   sort: SortState;
   onSort: (sort: SortState) => void;
   expanded: string;
   onExpanded: (key: string) => void;
   onUpdate: (index: number, field: keyof Transaction, value: string) => void;
+  onUpdateGroup?: (indexes: readonly number[], field: keyof Transaction, value: string) => void;
   onDelete: (index: number) => void;
   groupBy?: TransactionGroupBy;
   visibleIndexes?: readonly number[];
@@ -167,6 +233,7 @@ export function TransactionTable({
   visibleIndexes,
   categories,
   investmentAccounts = [],
+  issues = [],
   onUpdate,
   onDelete,
   onAdd,
@@ -186,6 +253,7 @@ export function TransactionTable({
   const previousRowCount = useRef(rows.length);
   const pendingFocusKey = useRef<string | null>(null);
   const usesCategory = transactionTypeUsesCategory(title);
+  const issuesByRow = useMemo(() => groupIssuesByRow(issues), [issues]);
   const usesInvestmentAccount = title === "加仓" || title === "提现";
   const businessClass = title === "支出"
     ? " asset-track-grid--outgoing"
@@ -283,8 +351,6 @@ export function TransactionTable({
         ref={virtualTableRef}
         className="asset-track-virtual-table"
         style={{ "--asset-track-virtual-row-height": `${rowHeight}px` } as CSSProperties}
-        role="table"
-        aria-rowcount={sorted.length + 1}
         onScroll={(event) => {
           setViewport({
             scrollTop: event.currentTarget.scrollTop,
@@ -317,7 +383,7 @@ export function TransactionTable({
               key={`top-${block}`}
             />
           ))}
-          {visibleRows.map(({ row: originalIndex }, visibleIndex) => {
+          {visibleRows.map(({ row: originalIndex }) => {
             const row = rows[originalIndex];
             const blockNumber = blockNumbers[originalIndex];
             const stableKey = transactionKey(row);
@@ -331,8 +397,6 @@ export function TransactionTable({
                 className={gridClassName}
                 data-asset-track-row-key={tableRowKey(row, originalIndex)}
                 key={tableReactKey(row, originalIndex)}
-                role="row"
-                aria-rowindex={range.start + visibleIndex + 2}
               >
                 <span className="asset-track-row-number">
                   {selectedTransactionKeys && onToggleTransaction && (
@@ -347,7 +411,11 @@ export function TransactionTable({
                       }}
                     />
                   )}
-                  {blockNumber}
+                  <span>{blockNumber}</span>
+                  <RowIssueMarker
+                    issues={issuesByRow.get(originalIndex)}
+                    label={t(`${title}第 ${blockNumber} 行`, `${displayTitle} row ${blockNumber}`)}
+                  />
                 </span>
                 <input
                   aria-label={t(`${title}第 ${blockNumber} 行日期`, `${displayTitle} row ${blockNumber} date`)}
@@ -372,9 +440,9 @@ export function TransactionTable({
                   </select>
                 )}
                 {!usesInvestmentAccount && <input
-                  aria-label={t(`${title}第 ${blockNumber} 行交易对方`, `${displayTitle} row ${blockNumber} counterparty`)}
+                  aria-label={t(`${title}第 ${blockNumber} 行交易对手`, `${displayTitle} row ${blockNumber} counterparty`)}
                   value={row.counterparty ?? ""}
-                  placeholder={t("交易对方", "Counterparty")}
+                  placeholder={t("交易对手", "Counterparty")}
                   onChange={(event) => onUpdate(originalIndex, "counterparty", event.target.value)}
                 />}
                 {!usesInvestmentAccount && usesCategory && (
@@ -443,13 +511,16 @@ export function TransactionTable({
 export function TransactionSummaryTable({
   rows,
   categories,
+  issues = [],
   businessTab,
   rules = [],
+  groups: providedGroups,
   sort,
   onSort,
   expanded,
   onExpanded,
   onUpdate,
+  onUpdateGroup,
   onDelete,
   groupBy = "product",
   visibleIndexes,
@@ -461,8 +532,9 @@ export function TransactionSummaryTable({
   renderTransactionActions
 }: TransactionSummaryTableProps) {
   const effectiveSort = sort && SUMMARY_SORT_FIELDS.has(sort.key) ? sort : null;
+  const issuesByRow = useMemo(() => groupIssuesByRow(issues), [issues]);
   const groups = sortRows(
-    groupTransactions(rows, groupBy, visibleIndexes, rules),
+    providedGroups ?? groupTransactions(rows, groupBy, visibleIndexes, rules),
     effectiveSort,
     summarySortValue
   );
@@ -474,6 +546,7 @@ export function TransactionSummaryTable({
   const groupLabel = groupBy === "product"
     ? t("商品", "Item")
     : t("交易对手", "Counterparty");
+  const groupEditField: keyof Transaction = groupBy === "product" ? "product" : "counterparty";
   const summaryTitle = groupBy === "product"
     ? t("商品汇总", "Item summary")
     : t("交易对手汇总", "Counterparty summary");
@@ -498,8 +571,10 @@ export function TransactionSummaryTable({
             </tr>
           </thead>
           <tbody>
-            {groups.map(({ row: group }) => (
-              <Fragment key={group.key}>
+            {groups.map(({ row: group }) => {
+              const groupViewKey = stableGroupKey(group);
+              return (
+              <Fragment key={groupViewKey}>
                 <tr>
                   <td className="asset-track-type-cell">
                     {selectedTransactionKeys && (onToggleTransaction || onToggleGroup) && (
@@ -520,7 +595,25 @@ export function TransactionSummaryTable({
                     )}
                     {businessLabel(group.type)}
                   </td>
-                  <td title={group.variants.join("、")}>{group.label}</td>
+                  <td title={group.variants.join("、")}>
+                    <input
+                      className="asset-track-summary-group-input"
+                      value={group.label}
+                      aria-label={t(
+                        `修改${group.label || "空"}汇总组${groupLabel}`,
+                        `Edit ${group.label || "(empty)"} summary group ${groupLabel}`
+                      )}
+                      onChange={(event) => {
+                        if (onUpdateGroup) {
+                          onUpdateGroup(group.indexes, groupEditField, event.target.value);
+                        } else {
+                          group.indexes.forEach((index) =>
+                            onUpdate(index, groupEditField, event.target.value)
+                          );
+                        }
+                      }}
+                    />
+                  </td>
                   <td className="asset-track-count-cell">{group.count}</td>
                   <td className="asset-track-amount-cell">{money(
                     group.amount,
@@ -554,15 +647,15 @@ export function TransactionSummaryTable({
                         : onCreateRule && <button type="button" onClick={() => onCreateRule(group)}>
                           {t("新建规则", "New rule")}
                         </button>)}
-                      <button type="button" onClick={() => onExpanded(expanded === group.key ? "" : group.key)}>
-                        {expanded === group.key ? t("收起", "Collapse") : t("展开逐项", "Expand items")}
+                      <button type="button" onClick={() => onExpanded(expanded === groupViewKey ? "" : groupViewKey)}>
+                        {expanded === groupViewKey ? t("收起", "Collapse") : t("展开逐项", "Expand items")}
                       </button>
                     </span>
                   </td>
                 </tr>
-                {expanded === group.key && (
-                  <tr key={`${group.key}:expanded`}>
-                    <td colSpan={5 + (hasCategory ? 1 : 0)}>
+                {expanded === groupViewKey && (
+                  <tr key={`${groupViewKey}:expanded`} className="asset-track-summary-detail-row">
+                    <td className="asset-track-summary-detail-host-cell" colSpan={5 + (hasCategory ? 1 : 0)}>
                       <div className="asset-track-summary-details">
                         <table className={`asset-track-summary-detail-table${hasCategory ? " asset-track-summary-detail-table--has-category" : ""}`}>
                           <colgroup>
@@ -594,6 +687,7 @@ export function TransactionSummaryTable({
                               const usesCategory = transactionTypeUsesCategory(item.type);
                               const stableKey = transactionKey(item);
                               const blockNumber = transactionBlockNumber(rows, index);
+                              const itemDisplayType = businessLabel(item.type);
                               const available = categories.filter(
                                 (category) =>
                                   (category.is_active || category.category_key === item.category_key)
@@ -616,18 +710,46 @@ export function TransactionSummaryTable({
                                         />
                                       )}
                                       <span>{blockNumber}</span>
+                                      <RowIssueMarker
+                                        issues={issuesByRow.get(index)}
+                                        label={t(`${item.type}第 ${blockNumber} 行`, `${businessLabel(item.type)} row ${blockNumber}`)}
+                                      />
                                     </span>
                                   </td>
                                   <td colSpan={3} className="asset-track-summary-detail-content-cell">
                                     <div className="asset-track-summary-detail-content">
-                                      <input value={item.counterparty ?? ""} placeholder={t("交易对手", "Counterparty")} onChange={(event) => onUpdate(index, "counterparty", event.target.value)} />
-                                      <input value={item.product} aria-label={t("商品", "Item")} onChange={(event) => onUpdate(index, "product", event.target.value)} />
-                                      <input className="asset-track-amount-cell" type="number" value={item.amount} aria-label={t("金额", "Amount")} onChange={(event) => onUpdate(index, "amount", event.target.value)} />
-                                      <input type="date" value={item.transaction_date} aria-label={t("日期", "Date")} onChange={(event) => onUpdate(index, "transaction_date", event.target.value)} />
+                                      <input
+                                        value={item.counterparty ?? ""}
+                                        placeholder={t("交易对手", "Counterparty")}
+                                        aria-label={t(`${item.type}第 ${blockNumber} 行交易对手`, `${itemDisplayType} row ${blockNumber} counterparty`)}
+                                        onChange={(event) => onUpdate(index, "counterparty", event.target.value)}
+                                      />
+                                      <input
+                                        value={item.product}
+                                        aria-label={t(`${item.type}第 ${blockNumber} 行商品`, `${itemDisplayType} row ${blockNumber} item`)}
+                                        onChange={(event) => onUpdate(index, "product", event.target.value)}
+                                      />
+                                      <input
+                                        className="asset-track-amount-cell"
+                                        type="number"
+                                        value={item.amount}
+                                        aria-label={t(`${item.type}第 ${blockNumber} 行金额`, `${itemDisplayType} row ${blockNumber} amount`)}
+                                        onChange={(event) => onUpdate(index, "amount", event.target.value)}
+                                      />
+                                      <input
+                                        type="date"
+                                        value={item.transaction_date}
+                                        aria-label={t(`${item.type}第 ${blockNumber} 行日期`, `${itemDisplayType} row ${blockNumber} date`)}
+                                        onChange={(event) => onUpdate(index, "transaction_date", event.target.value)}
+                                      />
                                     </div>
                                   </td>
                                   {hasCategory && <td>
-                                    {usesCategory && <select value={item.category_key ?? ""} onChange={(event) => onUpdate(index, "category_key", event.target.value)}>
+                                    {usesCategory && <select
+                                      value={item.category_key ?? ""}
+                                      aria-label={t(`${item.type}第 ${blockNumber} 行分类`, `${itemDisplayType} row ${blockNumber} category`)}
+                                      onChange={(event) => onUpdate(index, "category_key", event.target.value)}
+                                    >
                                       <option value="">{t("请选择分类", "Select category")}</option>
                                       {available.map((category) => <option key={category.category_key} value={category.category_key}>{category.name}</option>)}
                                     </select>}
@@ -662,7 +784,8 @@ export function TransactionSummaryTable({
                   </tr>
                 )}
               </Fragment>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -734,7 +857,10 @@ export function FixedAssetTable({
             </tr>
           </thead>
           <tbody>
-            {sorted.map(({ row, originalIndex }) => (
+            {sorted.map(({ row, originalIndex }) => {
+              const assetLabel = row.asset_name?.trim()
+                || t(`第 ${originalIndex + 1} 行资产`, `Asset row ${originalIndex + 1}`);
+              return (
               <tr data-asset-track-row-key={tableRowKey(row, originalIndex)} key={row.id ?? row.asset_key ?? row.client_id ?? originalIndex}>
                 {(["asset_name", "category", "purchase_date", "purchase_price"] as const).map((field) => (
                   <td key={field} className={field === "purchase_date"
@@ -745,19 +871,25 @@ export function FixedAssetTable({
                     <input
                       type={field === "purchase_price" ? "number" : field === "purchase_date" ? "date" : "text"}
                       value={String(row[field] ?? "")}
+                      aria-label={t(`${assetLabel}${fixedAssetFieldLabel(field)}`, `${assetLabel} ${fixedAssetFieldLabel(field)}`)}
                       onChange={(event) => onUpdate(originalIndex, field, event.target.value)}
                     />
                   </td>
                 ))}
                 <td className="asset-track-status-cell">
-                  <select value={row.status} onChange={(event) => onUpdate(originalIndex, "status", event.target.value)}>
+                  <select
+                    value={row.status}
+                    aria-label={t(`${assetLabel}状态`, `${assetLabel} status`)}
+                    onChange={(event) => onUpdate(originalIndex, "status", event.target.value)}
+                  >
                     {["在用", "闲置", "已出售", "已报废"].map((value) => <option key={value} value={value}>{businessLabel(value)}</option>)}
                   </select>
                 </td>
-                <td><input value={row.note} onChange={(event) => onUpdate(originalIndex, "note", event.target.value)} /></td>
+                <td><input value={row.note} aria-label={t(`${assetLabel}备注`, `${assetLabel} notes`)} onChange={(event) => onUpdate(originalIndex, "note", event.target.value)} /></td>
                 <td className="asset-track-actions-cell"><button onClick={() => onDelete(originalIndex)}>{t("删除", "Delete")}</button></td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

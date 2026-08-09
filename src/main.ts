@@ -2,7 +2,7 @@ import {
   FileSystemAdapter,
   Plugin
 } from "obsidian";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   VIEW_TYPE_ASSET_TRACK,
@@ -53,7 +53,9 @@ export type DatabaseState = "unconfigured" | "initializing" | "ready" | "error";
 export type DirectorySwitchMode = "migrate" | "load";
 
 function canLoadDatabase(inspection: DatabaseInspection): boolean {
-  return inspection.valid || inspection.migration_required === true;
+  return inspection.valid
+    || inspection.migration_required === true
+    || inspection.recovery_available === true;
 }
 
 interface ServiceContext {
@@ -70,6 +72,7 @@ export default class AssetTrackPlugin extends Plugin {
   private databaseManager: DatabaseManager | null = null;
   private readonly dataListeners = new Set<() => void>();
   private readonly draftRecoveries = new DraftRecoveryStore();
+  private viewOpenDatabaseInitialization: Promise<void> | null = null;
 
   async onload(): Promise<void> {
     const parsed = parseAssetTrackSettings(await this.loadData());
@@ -143,6 +146,15 @@ export default class AssetTrackPlugin extends Plugin {
     return this.databaseState === "ready" && Boolean(this.databaseManager);
   }
 
+  hasUnsavedEditorChanges(): boolean {
+    return this.app.workspace
+      .getLeavesOfType(VIEW_TYPE_ASSET_TRACK)
+      .some((leaf) =>
+        leaf.view instanceof AssetTrackEditorView
+        && leaf.view.hasUnsavedChanges()
+      );
+  }
+
   async inspectDataDirectory(value: string): Promise<DatabaseInspection> {
     const dataDirectory = normalizeDataDirectory(value);
     if (!dataDirectory) {
@@ -152,17 +164,21 @@ export default class AssetTrackPlugin extends Plugin {
   }
 
   async prepareDatabaseOnViewOpen(): Promise<void> {
-    if (
-      !this.isDatabaseReady()
-      && this.databaseState !== "initializing"
-      && this.settings.dataDirectory
-    ) {
-      await this.loadDatabase(this.settings.dataDirectory).catch((error) => {
-        this.databaseState = "error";
-        this.databaseError = error;
-        void this.refreshViews();
-      });
+    if (this.isDatabaseReady() || !this.settings.dataDirectory) return;
+    if (!this.viewOpenDatabaseInitialization) {
+      if (this.databaseState === "initializing") return;
+      const dataDirectory = this.settings.dataDirectory;
+      this.viewOpenDatabaseInitialization = this.loadDatabase(dataDirectory)
+        .catch((error) => {
+          this.databaseState = "error";
+          this.databaseError = error;
+          void this.refreshViews();
+        })
+        .finally(() => {
+          this.viewOpenDatabaseInitialization = null;
+        });
     }
+    await this.viewOpenDatabaseInitialization;
   }
 
   async createDatabase(value: string): Promise<void> {
@@ -172,7 +188,7 @@ export default class AssetTrackPlugin extends Plugin {
     const dataDirectory = normalizeDataDirectory(value);
     if (!dataDirectory) throw new AssetTrackError({ code: "workspace.data_directory_required", status: 422 });
     const inspection = await this.inspectDataDirectory(dataDirectory);
-    if (inspection.exists) {
+    if (inspection.exists || inspection.recovery_available) {
       throw new AssetTrackError({ code: "database.file_exists_use_load", status: 409 });
     }
     await this.activateInitialDatabase(dataDirectory, true);
@@ -186,8 +202,8 @@ export default class AssetTrackPlugin extends Plugin {
       throw new AssetTrackError({ code: "database.already_open", status: 409 });
     }
     const inspection = await this.inspectDataDirectory(dataDirectory);
-    if (!inspection.exists || !canLoadDatabase(inspection)) {
-      const error = inspection.exists
+    if (!canLoadDatabase(inspection)) {
+      const error = inspection.exists || inspection.recovery_available
         ? new AssetTrackError({
             code: "database.invalid_database",
             status: 422,
@@ -215,20 +231,16 @@ export default class AssetTrackPlugin extends Plugin {
     if (dataDirectory === this.settings.dataDirectory) {
       throw new AssetTrackError({ code: "database.directory_in_use", status: 409 });
     }
-    const dirty = this.app.workspace
-      .getLeavesOfType(VIEW_TYPE_ASSET_TRACK)
-      .some((leaf) =>
-        leaf.view instanceof AssetTrackEditorView
-        && leaf.view.hasUnsavedChanges()
-      );
-    if (dirty) throw new AssetTrackError({ code: "database.unsaved_changes", status: 409 });
+    if (this.hasUnsavedEditorChanges()) {
+      throw new AssetTrackError({ code: "database.unsaved_changes", status: 409 });
+    }
 
     const inspection = await this.inspectDataDirectory(dataDirectory);
     if (mode === "migrate" && inspection.exists) {
       throw new AssetTrackError({ code: "database.migration_target_exists", status: 409 });
     }
-    if (mode === "load" && (!inspection.exists || !canLoadDatabase(inspection))) {
-      throw inspection.exists
+    if (mode === "load" && !canLoadDatabase(inspection)) {
+      throw inspection.exists || inspection.recovery_available
         ? new AssetTrackError({
             code: "database.invalid_database",
             status: 422,
@@ -306,8 +318,8 @@ export default class AssetTrackPlugin extends Plugin {
     let next: ServiceContext | null = null;
     try {
       const inspection = await this.inspectDataDirectory(dataDirectory);
-      if (!createIfMissing && (!inspection.exists || !canLoadDatabase(inspection))) {
-        throw inspection.exists
+      if (!createIfMissing && !canLoadDatabase(inspection)) {
+        throw inspection.exists || inspection.recovery_available
           ? new AssetTrackError({
               code: "database.invalid_database",
               status: 422,
@@ -348,10 +360,16 @@ export default class AssetTrackPlugin extends Plugin {
     const directory = adapter.getFullPath(
       backupsVaultPath(this.settings.dataDirectory)
     );
-    const target = join(
+    const base = join(
       directory,
       `${prefix}-${new Date().toISOString().replace(/[:.]/g, "-")}.sqlite3`
     );
+    let target = base;
+    let sequence = 1;
+    while (existsSync(target)) {
+      target = `${base}-${sequence}`;
+      sequence += 1;
+    }
     await this.databaseManager.snapshot(target);
     const validation = DatabaseManager.inspect(target);
     if (!validation.valid) {

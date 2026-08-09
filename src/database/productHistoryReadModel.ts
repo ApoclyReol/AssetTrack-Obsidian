@@ -5,7 +5,8 @@ import type {
 import type {
   HistoricalCategoryCount,
   HistoricalProductStat,
-  RuleMatchLevel
+  RuleMatchLevel,
+  RuleTransactionType
 } from "../types/rules";
 import type {
   ProductHistoryIndexResult,
@@ -49,7 +50,7 @@ export class ProductHistoryReadModel {
 
   private historyRows(db: DatabaseSync, query: ProductHistoryQuery, window: ReadWindow): Row[] {
     const windowPredicate = transactionWindowPredicate(window);
-    const conditions = ["t.type IN ('支出','收入')", windowPredicate.sql];
+    const conditions = ["t.type IN ('支出','收入','代付')", windowPredicate.sql];
     const parameters: string[] = [...windowPredicate.parameters];
     if (query.transaction_type) {
       conditions.push("t.type=?");
@@ -73,19 +74,19 @@ export class ProductHistoryReadModel {
     }
     const productSearch = scalarText(query.product_search).trim();
     if (productSearch) {
-      conditions.push("LOWER(COALESCE(t.product,'')) LIKE LOWER(?)");
-      parameters.push(`%${productSearch}%`);
+      conditions.push("asset_track_normalize_match_key(COALESCE(t.product,'')) LIKE '%' || asset_track_normalize_match_key(?) || '%'");
+      parameters.push(productSearch);
     }
     const counterpartySearch = scalarText(query.counterparty_search).trim();
     if (counterpartySearch) {
-      conditions.push("LOWER(COALESCE(t.counterparty,'')) LIKE LOWER(?)");
-      parameters.push(`%${counterpartySearch}%`);
+      conditions.push("asset_track_normalize_match_key(COALESCE(t.counterparty,'')) LIKE '%' || asset_track_normalize_match_key(?) || '%'");
+      parameters.push(counterpartySearch);
     }
     const history = rows(db.prepare(`
       SELECT t.id,t.month,t.transaction_date,t.type,t.category_key,t.category,
              t.counterparty,t.product,t.amount,d.is_active AS category_active
       FROM transactions t
-      JOIN month_status m ON m.month=t.month AND m.status='saved'
+      JOIN month_status m ON m.month=t.month AND m.status IN ('saved','locked')
       LEFT JOIN category_definitions d ON d.category_key=t.category_key
       WHERE ${conditions.join(" AND ")}
       ORDER BY t.type,t.product,t.month,t.transaction_date,t.id
@@ -257,7 +258,7 @@ export class ProductHistoryReadModel {
       && stableUnmatchedCategory
       && (groupBy === "product" ? suggestedProduct : suggestedCounterparty)
       ? {
-          transaction_type: text(representative.type) as "支出" | "收入",
+          transaction_type: text(representative.type) as RuleTransactionType,
           match_scope: groupBy === "counterparty" ? "merchant" as const : "product" as const,
           counterparty: suggestedCounterparty,
           product: suggestedProduct,
@@ -278,7 +279,7 @@ export class ProductHistoryReadModel {
       : undefined;
     return {
       group_by: groupBy,
-      transaction_type: text(representative.type) as "支出" | "收入",
+      transaction_type: text(representative.type) as RuleTransactionType,
       product_key: normalizeProductKey(groupBy === "counterparty"
         ? representative.counterparty
         : representative.product),
@@ -458,7 +459,7 @@ export class ProductHistoryReadModel {
         id: transaction.id ?? 0,
         month: text(row.month),
         transaction_date: transaction.transaction_date,
-        type: transaction.type as "支出" | "收入",
+        type: transaction.type as RuleTransactionType,
         category_key: transaction.category_key ?? null,
         category: transaction.category,
         category_active: categoryActive,

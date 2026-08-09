@@ -43,6 +43,7 @@ export function calculateMonthly(
   largeExpenseThreshold = 1000
 ): MonthlyCalculation {
   const metadata = new Map(categories.map((row) => [row.name, row]));
+  const metadataByKey = new Map(categories.map((row) => [row.category_key, row]));
   const categorySummary: Record<string, number> = {};
   const structure = {
     necessary: 0,
@@ -54,13 +55,17 @@ export function calculateMonthly(
   const bigTickets: MonthlyCalculation["big_tickets"] = [];
   for (const row of rows) {
     if (row.type !== "支出" && row.type !== "代付") continue;
-    const category = LEGACY_CATEGORY_ALIASES[row.category] ?? row.category ?? "";
+    const rawCategory = row.category ?? "";
+    const legacyCategory = LEGACY_CATEGORY_ALIASES[rawCategory] ?? rawCategory;
+    const definition = row.category_key
+      ? metadataByKey.get(row.category_key)
+      : metadata.get(legacyCategory);
+    const category = definition?.name ?? legacyCategory;
     const amount = Number(row.amount || 0);
     const signedAmount = row.type === "代付" ? -amount : amount;
     if (category) {
       categorySummary[category] = (categorySummary[category] ?? 0) + signedAmount;
     }
-    const definition = metadata.get(category);
     if (definition?.is_big_ticket || amount >= largeExpenseThreshold) {
       if (row.type === "支出") bigTickets.push({ product: row.product, amount, category });
     }
@@ -111,7 +116,7 @@ export interface ExtendedAnnualRow extends AnnualRow {
 }
 
 export function buildAnnualRows(inputs: AnnualInput[]): ExtendedAnnualRow[] {
-  return inputs
+  return [...inputs]
     .sort((left, right) => left.month.localeCompare(right.month))
     .map((input, index, all) => {
       const position = input.market_value + input.investment_cash;
@@ -130,11 +135,12 @@ export function buildAnnualRows(inputs: AnnualInput[]): ExtendedAnnualRow[] {
       const previous = index > 0 ? all[index - 1] : null;
       const previousPosition = previous
         ? previous.market_value + previous.investment_cash : 0;
+      // The previous month-end position and principal already include that
+      // month's cash flows.  Adjusting only one side would count a deposit or
+      // withdrawal as investment performance; both sides cancel, so compare
+      // the persisted month-end balances directly.
       const previousProfit = previous
-        ? previousPosition
-          - previous.principal
-          - previous.monthly.total_deposit
-          + previous.monthly.total_withdraw
+        ? previousPosition - previous.principal
         : 0;
       const consecutive = Boolean(previous && previousMonth(input.month) === previous.month);
       const debtChange = consecutive ? input.debt - (previous?.debt ?? 0) : null;

@@ -69,12 +69,14 @@ export interface MonthEditorTransactionsSectionProps {
   month: string;
   draft: MonthWorkspace;
   categories: CategoryDefinition[];
+  issues?: Array<Record<string, unknown>>;
   rules?: SavedRule[];
   summarySort: SortState;
   expandedGroup: string;
   onSummarySort: (sort: SortState) => void;
   onExpandedGroupChange: (key: string) => void;
   onUpdate: (index: number, field: keyof Transaction, value: string) => void;
+  onUpdateGroup?: (indexes: readonly number[], field: keyof Transaction, value: string) => void;
   onDelete: (index: number) => void;
   onAdd: (title: string) => void;
   businessTab?: TransactionBusinessTab;
@@ -90,22 +92,18 @@ export interface MonthEditorTransactionsSectionProps {
   showBusinessTabs?: boolean;
 }
 
-function appendUnique(keys: TransactionKey[], next: TransactionKey[]): void {
-  next.forEach((key) => {
-    if (!keys.includes(key)) keys.push(key);
-  });
-}
-
 export function MonthEditorTransactionsSection({
   month,
   draft,
   categories,
+  issues = [],
   rules = [],
   summarySort,
   expandedGroup,
   onSummarySort,
   onExpandedGroupChange,
   onUpdate,
+  onUpdateGroup,
   onDelete,
   onAdd,
   businessTab,
@@ -154,16 +152,22 @@ export function MonthEditorTransactionsSection({
   const groupBy: TransactionGroupBy = activeViewMode === "counterparty"
     ? "counterparty"
     : "product";
+  const summaryGroups = useMemo(
+    () => activeViewMode === "detail"
+      ? []
+      : groupTransactions(draft.transactions, groupBy, activeIndexes, rules),
+    [activeIndexes, activeViewMode, draft.transactions, groupBy, rules]
+  );
   const currentViewTransactionKeys = useMemo(() => {
     if (activeViewMode === "detail") {
       return transactionKeysForIndexes(draft.transactions, activeIndexes);
     }
-    const keys: TransactionKey[] = [];
-    groupTransactions(draft.transactions, groupBy, activeIndexes).forEach((group) => {
-      appendUnique(keys, group.transactionKeys);
+    const keys = new Set<TransactionKey>();
+    summaryGroups.forEach((group) => {
+      group.transactionKeys.forEach((key) => keys.add(key));
     });
-    return keys;
-  }, [activeIndexes, activeViewMode, draft.transactions, groupBy]);
+    return [...keys];
+  }, [activeIndexes, activeViewMode, draft.transactions, summaryGroups]);
   const effectiveSelectedKeys = selectedTransactionKeys ?? localSelectedTransactionKeys;
   const selectedCount = currentViewTransactionKeys.filter((key) => effectiveSelectedKeys.has(key)).length;
   const allCurrentViewSelected = currentViewTransactionKeys.length > 0
@@ -305,10 +309,10 @@ export function MonthEditorTransactionsSection({
           <TransactionTable
             key={type}
             title={type}
-            month={month}
             rows={draft.transactions}
             visibleIndexes={transactionIndexes(draft.transactions, type)}
             categories={categories}
+            issues={issues}
             investmentAccounts={draft.investment_accounts}
             selectedTransactionKeys={isInvestmentTab ? undefined : effectiveSelectedKeys}
             onToggleTransaction={isInvestmentTab ? undefined : toggleTransaction}
@@ -324,9 +328,10 @@ export function MonthEditorTransactionsSection({
         <TransactionSummaryTable
           rows={draft.transactions}
           visibleIndexes={activeIndexes}
+          groups={summaryGroups}
           businessTab={activeBusinessTab}
           categories={categories}
-          investmentAccounts={draft.investment_accounts}
+          issues={issues}
           rules={rules}
           groupBy={groupBy}
           selectedTransactionKeys={effectiveSelectedKeys}
@@ -340,6 +345,7 @@ export function MonthEditorTransactionsSection({
           expanded={expandedGroup}
           onExpanded={onExpandedGroupChange}
           onUpdate={onUpdate}
+          onUpdateGroup={onUpdateGroup}
           onDelete={onDelete}
         />
       )}

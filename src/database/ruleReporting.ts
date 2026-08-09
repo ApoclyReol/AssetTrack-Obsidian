@@ -26,25 +26,100 @@ function toRuleRow(row: Row): RuleRow & { id: number } {
   };
 }
 
-function matches(rule: RuleRow, transaction: Row): boolean {
-  if (rule.transaction_type !== text(transaction.type)) return false;
+function ruleIndexKey(transactionType: string, counterparty: string, product: string): string {
+  return `${transactionType}\u0000${counterparty}\u0000${product}`;
+}
+
+function appendIndexed(groups: Map<string, Row[]>, key: string, row: Row): void {
+  const current = groups.get(key);
+  if (current) current.push(row);
+  else groups.set(key, [row]);
+}
+
+function buildTransactionIndex(transactions: Row[]): {
+  product: Map<string, Row[]>;
+  merchant: Map<string, Row[]>;
+  merchantProduct: Map<string, Row[]>;
+} {
+  const index = {
+    product: new Map<string, Row[]>(),
+    merchant: new Map<string, Row[]>(),
+    merchantProduct: new Map<string, Row[]>()
+  };
+  transactions.forEach((transaction) => {
+    const transactionType = text(transaction.type);
+    const counterparty = normalizeProductKey(transaction.counterparty);
+    const product = normalizeProductKey(transaction.product);
+    if (product) appendIndexed(index.product, ruleIndexKey(transactionType, "", product), transaction);
+    if (counterparty) appendIndexed(index.merchant, ruleIndexKey(transactionType, counterparty, ""), transaction);
+    if (counterparty && product) {
+      appendIndexed(index.merchantProduct, ruleIndexKey(transactionType, counterparty, product), transaction);
+    }
+  });
+  return index;
+}
+
+function transactionsForRule(
+  index: ReturnType<typeof buildTransactionIndex>,
+  rule: RuleRow
+): Row[] {
   const level = ruleMatchLevel(rule);
-  if (!level) return false;
-  const counterparty = normalizeProductKey(transaction.counterparty);
-  const product = normalizeProductKey(transaction.product);
-  if (level === "product") return Boolean(product) && product === normalizeProductKey(rule.product);
-  if (level === "merchant") return Boolean(counterparty) && counterparty === normalizeProductKey(rule.counterparty);
-  return Boolean(counterparty && product)
-    && counterparty === normalizeProductKey(rule.counterparty)
-    && product === normalizeProductKey(rule.product);
+  if (!level) return [];
+  const counterparty = normalizeProductKey(rule.counterparty);
+  const product = normalizeProductKey(rule.product);
+  if (level === "product") {
+    return product
+      ? index.product.get(ruleIndexKey(rule.transaction_type, "", product)) ?? []
+      : [];
+  }
+  if (level === "merchant") {
+    return counterparty
+      ? index.merchant.get(ruleIndexKey(rule.transaction_type, counterparty, "")) ?? []
+      : [];
+  }
+  return counterparty && product
+    ? index.merchantProduct.get(ruleIndexKey(rule.transaction_type, counterparty, product)) ?? []
+    : [];
+}
+
+function transactionSummary(transactions: Row[]): {
+  occurrences: number;
+  monthsCount: number;
+  lastMonth: string;
+  lastUsedDate: string;
+} {
+  const months = new Set<string>();
+  let lastMonth = "";
+  let lastUsedDate = "";
+  transactions.forEach((transaction) => {
+    const month = text(transaction.month);
+    const usedDate = text(transaction.transaction_date);
+    if (month) {
+      months.add(month);
+      if (month > lastMonth) lastMonth = month;
+    }
+    if (usedDate > lastUsedDate) lastUsedDate = usedDate;
+  });
+  return {
+    occurrences: transactions.length,
+    monthsCount: months.size,
+    lastMonth,
+    lastUsedDate
+  };
 }
 
 export function buildRuleReport(
   raw: Row[],
   transactions: Row[]
 ): { revision: number; rows: Row[] } {
-  const revision = contentRevision(raw);
+  // `category_active` comes from the category join and belongs to the
+  // category revision, not the rule definition revision. Keep it out of the
+  // hash so the revision matches ruleWorkspaceShell(), which is sent to the
+  // editor and later returned with operation previews.
+  const revisionRows = raw.map(({ category_active: _categoryActive, ...row }) => row);
+  const revision = contentRevision(revisionRows);
   const definitions = raw.map(toRuleRow);
+  const transactionIndex = buildTransactionIndex(transactions);
   const duplicateIds = new Map<number, number[]>();
   const conflictIds = new Map<number, number[]>();
   for (const conflict of findRuleConflicts(definitions)) {
@@ -57,13 +132,7 @@ export function buildRuleReport(
     revision,
     rows: raw.map((row, index) => {
       const definition = definitions[index];
-      const matchingTransactions = transactions.filter((transaction) => matches(definition, transaction));
-      const summary = {
-        occurrences: matchingTransactions.length,
-        months: new Set(matchingTransactions.map((transaction) => text(transaction.month))),
-        lastMonth: matchingTransactions.map((transaction) => text(transaction.month)).sort().at(-1) ?? "",
-        lastUsedDate: matchingTransactions.map((transaction) => text(transaction.transaction_date)).sort().at(-1) ?? ""
-      };
+      const summary = transactionSummary(transactionsForRule(transactionIndex, definition));
       const id = Number(row.id);
       return {
         ...row,
@@ -73,7 +142,7 @@ export function buildRuleReport(
         rewrite_merchant: definition.rewrite_merchant ?? "",
         rewrite_product: definition.rewrite_product ?? "",
         occurrences: summary.occurrences,
-        months_count: summary.months.size,
+        months_count: summary.monthsCount,
         last_month: summary.lastMonth,
         last_used_date: summary.lastUsedDate,
         duplicate_rule_ids: duplicateIds.get(id) ?? [],

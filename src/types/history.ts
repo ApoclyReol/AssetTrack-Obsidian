@@ -1,7 +1,8 @@
 import type {
   HistoricalCategoryCount,
   HistoricalProductStat,
-  RuleMatchExplanation
+  RuleMatchExplanation,
+  RuleTransactionType
 } from "./rules";
 import type { ReadWindow } from "./readWindows";
 
@@ -16,7 +17,7 @@ export type ProductHistoryIssueFilter =
 
 export interface ProductHistoryQuery {
   group_by?: "product" | "counterparty";
-  transaction_type?: "支出" | "收入";
+  transaction_type?: RuleTransactionType;
   product_key?: string;
   category_key?: string | null;
   product_search?: string;
@@ -39,7 +40,7 @@ export interface ProductHistoryTransaction {
   id: number;
   month: string;
   transaction_date: string;
-  type: "支出" | "收入";
+  type: RuleTransactionType;
   category_key: string | null;
   category: string;
   category_active: boolean | null;

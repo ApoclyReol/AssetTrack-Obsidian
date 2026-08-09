@@ -3,6 +3,7 @@
 import { WorkspaceLeaf } from "obsidian";
 import { describe, expect, it, vi } from "vitest";
 import type AssetTrackPlugin from "../../src/main";
+import AssetTrackPluginClass from "../../src/main";
 import {
   DRAFT_RECOVERY_EPHEMERAL_KEY,
   type EditorDraftSnapshot
@@ -11,6 +12,12 @@ import {
   AssetTrackEditorView,
   type AssetTrackViewState
 } from "../../src/views/AssetTrackEditorView";
+
+vi.mock("../../src/services/desktopRuntime", () => ({
+  loadElectronModule: () => ({
+    shell: { showItemInFolder: () => undefined }
+  })
+}));
 
 interface TestViewFields {
   sessionSnapshot: EditorDraftSnapshot | null;
@@ -139,5 +146,32 @@ describe("AssetTrackEditorView close recovery", () => {
       month: "2026-08"
     });
     expect(view.hasUnsavedChanges()).toBe(true);
+  });
+});
+
+describe("AssetTrackPlugin view-open database initialization", () => {
+  it("deduplicates concurrent automatic database loads from view open", async () => {
+    const resolveLoad: Array<() => void> = [];
+    const loadDatabase = vi.fn(() => new Promise<void>((resolve) => {
+      resolveLoad.push(resolve);
+    }));
+    const plugin = Object.create(AssetTrackPluginClass.prototype) as AssetTrackPlugin;
+    Object.assign(plugin as unknown as Record<string, unknown>, {
+      settings: { dataDirectory: "Asset-track", csvMappings: [] },
+      databaseState: "unconfigured",
+      databaseError: null,
+      databaseManager: null,
+      loadDatabase,
+      refreshViews: vi.fn().mockResolvedValue(undefined)
+    });
+
+    const first = plugin.prepareDatabaseOnViewOpen();
+    const second = plugin.prepareDatabaseOnViewOpen();
+
+    expect(loadDatabase).toHaveBeenCalledTimes(1);
+    expect(loadDatabase).toHaveBeenCalledWith("Asset-track");
+    expect(resolveLoad).toHaveLength(1);
+    resolveLoad[0]();
+    await Promise.all([first, second]);
   });
 });

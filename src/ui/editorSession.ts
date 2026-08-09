@@ -10,5 +10,7 @@ export interface EditorSession {
   hasUnsavedChanges: () => boolean;
   getDraftSnapshot: () => EditorDraftSnapshot | null;
   save: () => Promise<boolean>;
+  saveAll: () => Promise<boolean>;
   discard: () => Promise<void>;
+  discardAll: () => Promise<void>;
 }

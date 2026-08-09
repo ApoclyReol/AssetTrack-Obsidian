@@ -57,6 +57,14 @@ describe("current backup service", () => {
         category: "工资收入",
         product: "工资,含奖金",
         amount: 8000
+      },
+      {
+        transaction_date: "2026-01-15",
+        type: "加仓",
+        category: "",
+        product: "理财转入",
+        account_key: "investment-default",
+        amount: 100
       }],
       []
     );
@@ -65,8 +73,9 @@ describe("current backup service", () => {
     expect(exported.validation).toMatchObject({
       valid: true,
       mode: "complete",
-      row_counts: { transactions: 1 }
+      row_counts: { transactions: 2 }
     });
+    expect(exported.validation.manifest?.tables.transactions.columns).toContain("account_key");
 
     await repository.saveMonth(
       "2026-01",
@@ -84,7 +93,11 @@ describe("current backup service", () => {
     const restored = await backup.restore(exported.path);
     expect(existsSync(String(restored.safety_snapshot))).toBe(true);
     expect((await repository.getMonth("2026-01")).cash_accounts[0].balance).toBe(1000);
-    expect((await repository.getMonth("2026-01")).transactions).toHaveLength(1);
+    const restoredTransactions = (await repository.getMonth("2026-01")).transactions;
+    expect(restoredTransactions).toHaveLength(2);
+    expect(restoredTransactions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "加仓", account_key: "investment-default" })
+    ]));
   });
 
   it("rejects a damaged zip before replacing the current database", async () => {
@@ -110,5 +123,28 @@ describe("current backup service", () => {
     await expect(backup.restore(damaged)).rejects.toBeDefined();
     expect((await repository.getMonth("2026-01")).cash_accounts[0].balance).toBe(321);
     expect((await repository.getMonth("2026-01")).revision).toBe(1);
+  });
+
+  it("reopens the current database when the final restore guard rejects", async () => {
+    const { repository, backup, root, manager } = setup();
+    await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 456 }],
+      [{
+        account_key: "investment-default",
+        principal: 0,
+        market_value: 0,
+        cash_balance: 0
+      }],
+      [],
+      []
+    );
+    const exported = await backup.exportZip(join(root, "exports"));
+    await expect(backup.restore(exported.path, () => {
+      throw new Error("restore guard rejected");
+    })).rejects.toThrow("restore guard rejected");
+    expect(manager.isOpen).toBe(true);
+    expect((await repository.getMonth("2026-01")).cash_accounts[0].balance).toBe(456);
   });
 });

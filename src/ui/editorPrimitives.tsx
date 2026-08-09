@@ -18,6 +18,44 @@ export function issueIsBlocking(issue: Record<string, unknown>): boolean {
   return issue.blocking === true || issue.severity === "错误";
 }
 
+export const MAX_VISIBLE_ISSUES = 10;
+
+const BLOCKING_ISSUE_FIELD_PRIORITY: Record<string, number> = {
+  "日期": 10,
+  "金额": 20,
+  "收支": 30,
+  "分类": 40,
+  "商品": 50,
+  "规则": 60
+};
+
+const WARNING_ISSUE_FIELD_PRIORITY: Record<string, number> = {
+  "分类": 10,
+  "商品": 20,
+  "金额": 30,
+  "日期": 40,
+  "收支": 50,
+  "规则": 60
+};
+
+export function orderedIssues(
+  issues: Array<Record<string, unknown>>
+): Array<{ issue: Record<string, unknown>; originalIndex: number }> {
+  return issues
+    .map((issue, originalIndex) => ({ issue, originalIndex }))
+    .sort((left, right) => {
+      const leftBlocking = issueIsBlocking(left.issue);
+      const rightBlocking = issueIsBlocking(right.issue);
+      if (leftBlocking !== rightBlocking) return leftBlocking ? -1 : 1;
+      const priorities = leftBlocking
+        ? BLOCKING_ISSUE_FIELD_PRIORITY
+        : WARNING_ISSUE_FIELD_PRIORITY;
+      const leftPriority = priorities[scalarText(left.issue.field)] ?? 100;
+      const rightPriority = priorities[scalarText(right.issue.field)] ?? 100;
+      return leftPriority - rightPriority || left.originalIndex - right.originalIndex;
+    });
+}
+
 export function messageFor(error: unknown): string {
   return displayError(error);
 }
@@ -111,13 +149,33 @@ export function IssueList({
   rows: Transaction[];
 }) {
   const blocking = issues.filter(issueIsBlocking).length;
+  const visibleIssues = orderedIssues(issues).slice(0, MAX_VISIBLE_ISSUES);
+  const omittedCount = issues.length - visibleIssues.length;
+  const omittedBlocking = blocking - visibleIssues.filter(({ issue }) => issueIsBlocking(issue)).length;
+  const summary = blocking > 0
+    ? omittedCount > 0
+      ? t(
+        `共 ${issues.length} 项问题，其中 ${blocking} 项会阻止保存；按优先级显示前 ${visibleIssues.length} 项：`,
+        `${issues.length} issues found; ${blocking} block saving. Showing the first ${visibleIssues.length} by priority:`
+      )
+      : t(
+        `以下问题中有 ${blocking} 项会阻止保存，已按优先级排序：`,
+        `${blocking} of the following issues block saving, sorted by priority:`
+      )
+    : omittedCount > 0
+      ? t(
+        `共 ${issues.length} 项提醒，不会阻止保存；按优先级显示前 ${visibleIssues.length} 项：`,
+        `${issues.length} warnings found; they do not block saving. Showing the first ${visibleIssues.length} by priority:`
+      )
+      : t(
+        "以下提醒不会阻止保存，已按优先级排序：",
+        "The following warnings do not block saving and are sorted by priority:"
+      );
   return (
     <div className="asset-track-issues" role="alert">
-      <strong>{blocking > 0
-        ? t(`以下问题中有 ${blocking} 项会阻止保存：`, `${blocking} of the following issues block saving:`)
-        : t("以下为保存后的提醒：", "The following items are saved warnings:")}</strong>
+      <strong>{summary}</strong>
       <ul>
-        {issues.map((issue, index) => {
+        {visibleIssues.map(({ issue, originalIndex }) => {
           const globalIndex = Number(issue.row_index ?? 0);
           const type = scalarText(
             issue.type ?? rows[globalIndex]?.type ?? t("流水", "Transaction")
@@ -132,7 +190,7 @@ export function IssueList({
             ? t("规则存在冲突，未自动覆盖", "Rules conflict; no automatic override was applied.")
             : issueReason;
           return (
-            <li key={index}>
+            <li key={originalIndex}>
               {t(
                 `［${severity}］${businessLabel(type)}第 ${Math.max(1, blockRow)} 行／${scalarText(issue.field) || "规则"}／${visibleReason}`,
                 `[${severity}] ${businessLabel(type)} row ${Math.max(1, blockRow)} / ${businessLabel(scalarText(issue.field) || "规则")} / ${displayError(visibleReason)}`
@@ -142,6 +200,19 @@ export function IssueList({
           );
         })}
       </ul>
+      {omittedCount > 0 && (
+        <small className="asset-track-issues-omitted">
+          {omittedBlocking > 0
+            ? t(
+              `其余 ${omittedCount} 项已省略，其中 ${omittedBlocking} 项会阻止保存。`,
+              `${omittedCount} more issues are hidden, including ${omittedBlocking} that block saving.`
+            )
+            : t(
+              `其余 ${omittedCount} 项已省略。`,
+              `${omittedCount} more issues are hidden.`
+            )}
+        </small>
+      )}
     </div>
   );
 }

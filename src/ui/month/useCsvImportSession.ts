@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useRef,
   useState,
   type ChangeEvent,
@@ -16,6 +17,7 @@ import type {
   ImportMode
 } from "../../types/csv";
 import type {
+  MonthSection,
   MonthWorkspace
 } from "../../types/month";
 import type { MonthEditorPort } from "../../services/ports";
@@ -28,7 +30,6 @@ import {
 import {
   readImportFile
 } from "../monthEditorModel";
-import type { TransactionOperations } from "./useTransactionOperations";
 
 export interface CsvImportSource {
   filename: string;
@@ -39,12 +40,15 @@ export interface CsvImportSource {
 export interface CsvImportSessionOptions {
   api: MonthEditorPort;
   month: string;
+  activeSection?: MonthSection;
   draft: MonthWorkspace | null;
-  rulesRevision: number | null;
-  setIssues: Dispatch<SetStateAction<Array<Record<string, unknown>>>>;
   setState: Dispatch<SetStateAction<OperationState>>;
-  operations: TransactionOperations;
-  getCsvMapping: (signature: string) => CsvColumnMapping | undefined;
+  mark: (
+    next: MonthWorkspace,
+    section: "transactions",
+    nextIssues?: Array<Record<string, unknown>>
+  ) => void;
+  invalidatePendingOperationLogs: () => void;
   saveCsvMapping: (
     signature: string,
     mapping: CsvColumnMapping
@@ -68,22 +72,87 @@ export interface CsvImportSession {
 export function useCsvImportSession({
   api,
   month,
+  activeSection,
   draft,
-  rulesRevision,
-  setIssues,
   setState,
-  operations,
-  getCsvMapping,
+  mark,
+  invalidatePendingOperationLogs,
   saveCsvMapping
 }: CsvImportSessionOptions): CsvImportSession {
   const csvInputRef = useRef<HTMLInputElement>(null);
   const [csvSource, setCsvSource] = useState<CsvImportSource | null>(null);
+  const mounted = useRef(true);
+  const requestSequence = useRef(0);
+  const contextRef = useRef({ month, activeSection, draft });
+  const csvSourceRef = useRef(csvSource);
+  const sourceContextRef = useRef<{
+    month: string;
+    activeSection?: MonthSection;
+    draft: MonthWorkspace | null;
+  } | null>(null);
+  contextRef.current = { month, activeSection, draft };
+  csvSourceRef.current = csvSource;
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      requestSequence.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    requestSequence.current += 1;
+    const sourceContext = sourceContextRef.current;
+    if (sourceContext && (
+      sourceContext.month !== month
+      || sourceContext.activeSection !== activeSection
+      || sourceContext.draft !== draft
+    )) {
+      sourceContextRef.current = null;
+      setCsvSource(null);
+    }
+  }, [activeSection, draft, month]);
+
+  const nextRequestSequence = useCallback((): number => {
+    requestSequence.current += 1;
+    return requestSequence.current;
+  }, []);
+
+  const isCurrentRequest = useCallback((
+    sequence: number,
+    sourceDraft: MonthWorkspace | null,
+    sourceMonth: string,
+    sourceSection?: MonthSection,
+    source?: CsvImportSource
+  ): boolean => mounted.current
+    && requestSequence.current === sequence
+    && contextRef.current.month === sourceMonth
+    && contextRef.current.activeSection === sourceSection
+    && contextRef.current.draft === sourceDraft
+    && (source === undefined || csvSourceRef.current === source), []);
+
+  const throwIfContextChanged = useCallback((
+    sourceDraft: MonthWorkspace | null,
+    sourceMonth: string,
+    sourceSection?: MonthSection,
+    source?: CsvImportSource
+  ): void => {
+    if (contextRef.current.month !== sourceMonth
+      || contextRef.current.activeSection !== sourceSection
+      || contextRef.current.draft !== sourceDraft
+      || (source !== undefined && csvSourceRef.current !== source)) {
+      throw new AssetTrackError({ code: "operation.preview_draft_mismatch", status: 409 });
+    }
+  }, []);
 
   const openImport = useCallback(() => {
     csvInputRef.current?.click();
   }, []);
 
   const cancelImport = useCallback(() => {
+    requestSequence.current += 1;
+    sourceContextRef.current = null;
     setCsvSource(null);
   }, []);
 
@@ -91,18 +160,31 @@ export function useCsvImportSession({
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
+    const sourceDraft = draft;
+    const sourceMonth = month;
+    const sourceSection = activeSection;
+    const sequence = nextRequestSequence();
+    if (!isCurrentRequest(sequence, sourceDraft, sourceMonth, sourceSection)) return;
     setState({ kind: "pending", message: t("解析账单…", "Parsing statement…") });
     try {
       const content = await readImportFile(file);
+      if (!isCurrentRequest(sequence, sourceDraft, sourceMonth, sourceSection)) return;
       const inspection = await api.inspectCsv(month, file.name, content);
+      if (!isCurrentRequest(sequence, sourceDraft, sourceMonth, sourceSection)) return;
+      sourceContextRef.current = {
+        month: sourceMonth,
+        activeSection: sourceSection,
+        draft: sourceDraft
+      };
       setCsvSource({ filename: file.name, content, inspection });
-      setState({ kind: "idle" });
+      if (isCurrentRequest(sequence, sourceDraft, sourceMonth, sourceSection)) setState({ kind: "idle" });
     } catch (error) {
+      if (!isCurrentRequest(sequence, sourceDraft, sourceMonth, sourceSection)) return;
       const message = messageFor(error);
       new Notice(message);
       setState({ kind: "error", message });
     }
-  }, [api, month, setState]);
+  }, [activeSection, api, draft, isCurrentRequest, month, nextRequestSequence, setState]);
 
   const previewMappedCsv = useCallback(async (
     mapping: CsvColumnMapping
@@ -110,56 +192,111 @@ export function useCsvImportSession({
     if (!csvSource) {
       throw new AssetTrackError({ code: "csv.file_not_selected", status: 422 });
     }
-    return api.previewMappedCsv(
-      month,
-      csvSource.filename,
-      csvSource.content,
+    const source = csvSource;
+    const sourceDraft = draft;
+    const sourceMonth = month;
+    const sourceSection = activeSection;
+    const sequence = nextRequestSequence();
+    throwIfContextChanged(sourceDraft, sourceMonth, sourceSection, source);
+    if (!isCurrentRequest(sequence, sourceDraft, sourceMonth, sourceSection, source)) {
+      throw new AssetTrackError({ code: "operation.preview_draft_mismatch", status: 409 });
+    }
+    const result = await api.previewMappedCsv(
+      sourceMonth,
+      source.filename,
+      source.content,
       mapping
     );
-  }, [api, csvSource, month]);
+    if (!isCurrentRequest(sequence, sourceDraft, sourceMonth, sourceSection, source)) {
+      throwIfContextChanged(sourceDraft, sourceMonth, sourceSection, source);
+      throw new AssetTrackError({ code: "operation.preview_draft_mismatch", status: 409 });
+    }
+    return result;
+  }, [activeSection, api, draft, isCurrentRequest, month, nextRequestSequence, throwIfContextChanged, csvSource]);
 
   const applyCsvPreview = useCallback(async (
     response: CsvImportPreview,
     mode: ImportMode,
     mapping: CsvColumnMapping
   ): Promise<void> => {
-    if (!csvSource || !draft) return;
-    setState({ kind: "pending", message: t("正在准备导入草稿…", "Preparing the import draft…") });
+    if (!csvSource) {
+      throw new AssetTrackError({ code: "csv.file_not_selected", status: 422 });
+    }
+    if (!draft) {
+      throw new AssetTrackError({ code: "month.not_loaded", status: 409 });
+    }
+    const source = csvSource;
+    const sourceDraft = draft;
+    const sourceMonth = month;
+    const sourceSection = activeSection;
+    const sequence = nextRequestSequence();
+    if (!isCurrentRequest(sequence, sourceDraft, sourceMonth, sourceSection, source)) return;
+    setState({ kind: "pending", message: t("正在把预览结果放入本月流水草稿…", "Putting the preview result into this month's transaction draft…") });
     try {
       const prepared = await prepareCsvImportCommit({
-        currentTransactions: draft.transactions,
+        currentTransactions: sourceDraft.transactions,
         importedTransactions: response.rows,
         mode,
-        headerSignature: csvSource.inspection.header_signature,
+        headerSignature: source.inspection.header_signature,
         mapping,
-        saveMapping: saveCsvMapping
+        saveMapping: async (signature, nextMapping) => {
+          throwIfContextChanged(sourceDraft, sourceMonth, sourceSection, source);
+          await saveCsvMapping(signature, nextMapping);
+          throwIfContextChanged(sourceDraft, sourceMonth, sourceSection, source);
+        }
       });
+      if (!isCurrentRequest(sequence, sourceDraft, sourceMonth, sourceSection, source)) return;
+      if (!response.rows.length) {
+        sourceContextRef.current = null;
+        setCsvSource(null);
+        setState({
+          kind: "success",
+          message: t(
+            "没有通过预览的流水；草稿未改变。请展开被过滤条目检查原因。",
+            "No transactions passed the preview. The draft was unchanged. Expand filtered rows to check why."
+          )
+        });
+        return;
+      }
+      // CSV import only commits accepted rows to the React draft. Rule changes
+      // remain an explicit transaction operation with its own confirmation.
+      if (mode === "replace") invalidatePendingOperationLogs();
+      const nextWorkspace = { ...sourceDraft, transactions: prepared.transactions };
+      const validation = await api.validateTransactions(sourceMonth, prepared.transactions);
+      if (!isCurrentRequest(sequence, sourceDraft, sourceMonth, sourceSection, source)) return;
+      mark(nextWorkspace, "transactions", validation.issues);
+      // Keep the source and preview available until validation and the draft
+      // update both succeed.  A failed validation/mark must be retryable from
+      // the same import instead of forcing the user to select the file again.
+      sourceContextRef.current = null;
       setCsvSource(null);
-      setIssues(response.issues);
-      await operations.previewOperation(
-        "apply-rules",
-        response.rows,
-        undefined,
-        { rules_revision: rulesRevision ?? undefined },
-        prepared.transactions
-      );
       setState({
         kind: "success",
-        message: t(
-          `已准备导入 ${response.rows.length} 行并生成规则预览，确认后请保存流水。`,
-          `Prepared ${response.rows.length} imported rows and generated a rule preview. Confirm, then save transactions.`
-        )
+        message: mode === "replace"
+          ? t(
+              `已用 ${response.rows.length} 条接受流水替换当前流水草稿；请检查行号提示，然后保存流水。`,
+              `Replaced the current transaction draft with ${response.rows.length} accepted rows. Check row markers, then save transactions.`
+            )
+          : t(
+              `已把 ${response.rows.length} 条接受流水加入本月草稿；请检查行号提示，然后保存流水。`,
+              `Added ${response.rows.length} accepted rows to this month's draft. Check row markers, then save transactions.`
+            )
       });
     } catch (error) {
+      if (!isCurrentRequest(sequence, sourceDraft, sourceMonth, sourceSection, source)) return;
       const message = messageFor(error);
       new Notice(message);
       setState({ kind: "error", message });
       throw error;
     }
-  }, [csvSource, draft, operations, rulesRevision, saveCsvMapping, setIssues, setState]);
+  }, [activeSection, api, csvSource, draft, invalidatePendingOperationLogs, isCurrentRequest, mark, month, nextRequestSequence, saveCsvMapping, setState, throwIfContextChanged]);
 
   return {
-    csvSource,
+    csvSource: csvSource && sourceContextRef.current?.month === month
+      && sourceContextRef.current.activeSection === activeSection
+      && sourceContextRef.current.draft === draft
+      ? csvSource
+      : null,
     csvInputRef,
     openImport,
     cancelImport,

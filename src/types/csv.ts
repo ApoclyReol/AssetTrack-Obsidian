@@ -20,6 +20,18 @@ export interface CsvMappingProfile {
   updated_at: string;
 }
 
+export type CsvImportFilterReason =
+  | "outside_month"
+  | "status_filtered"
+  | "ignored_type"
+  | "invalid";
+
+export interface CsvImportFilteredRow {
+  row: number;
+  reason: CsvImportFilterReason;
+  values: Record<string, string>;
+}
+
 export interface CsvInspection {
   month: string;
   filename: string;
@@ -39,6 +51,7 @@ export interface CsvImportStats {
   defaulted_examples: Record<string, Array<Record<string, unknown>>>;
   filtered: Record<string, number>;
   examples: Record<string, Array<Record<string, unknown>>>;
+  filtered_rows: CsvImportFilteredRow[];
 }
 
 export interface CsvImportPreview {

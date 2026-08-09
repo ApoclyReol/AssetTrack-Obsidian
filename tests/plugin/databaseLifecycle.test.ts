@@ -1,4 +1,12 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -28,11 +36,11 @@ it("inspects missing and damaged database files without creating or replacing th
     expect(readFileSync(missing)).toEqual(before);
   });
 
-it("creates and reopens a schema 10 database at a Chinese path", async () => {
+it("creates and reopens a schema 11 database at a Chinese path", async () => {
     const { manager, repository, path } = fixture();
     expect(manager.validate(true)).toMatchObject({
       valid: true,
-      schema_version: 10,
+      schema_version: 11,
       integrity_check: "ok"
     });
     expect(repository.accounts().rows.map((row) => row.account_key)).toEqual([
@@ -59,5 +67,62 @@ it("rejects an unsupported schema without modifying it", () => {
       (inspected.prepare("PRAGMA user_version").get() as { user_version: number }).user_version
     ).toBe(7);
     inspected.close();
-  });
+});
+
+it("recovers a valid rollback and removes stale restore sidecars", () => {
+    const { manager, path } = fixture();
+    manager.close();
+    const rollback = `${path}.rollback`;
+    renameSync(path, rollback);
+    writeFileSync(path, "partial restore", "utf8");
+    writeFileSync(`${path}-wal`, "stale wal", "utf8");
+    writeFileSync(`${path}-shm`, "stale shm", "utf8");
+    expect(DatabaseManager.inspect(path).recovery_available).toBe(true);
+
+    const reopened = new DatabaseManager(path);
+    trackManager(reopened);
+    expect(reopened.validate(true)).toMatchObject({
+      valid: true,
+      schema_version: 11,
+      integrity_check: "ok"
+    });
+    expect(existsSync(rollback)).toBe(false);
+    if (existsSync(`${path}-wal`)) {
+      expect(readFileSync(`${path}-wal`)).not.toEqual(Buffer.from("stale wal", "utf8"));
+    }
+    if (existsSync(`${path}-shm`)) {
+      expect(readFileSync(`${path}-shm`)).not.toEqual(Buffer.from("stale shm", "utf8"));
+    }
+});
+
+it("keeps the recovered target and discards an uninstalled incoming candidate", () => {
+    const { manager, path } = fixture();
+    manager.close();
+    const incoming = `${path}.incoming`;
+    copyFileSync(path, incoming);
+    rmSync(path, { force: true });
+    expect(DatabaseManager.inspect(path).recovery_available).toBe(true);
+
+    const reopened = new DatabaseManager(path);
+    trackManager(reopened);
+    expect(reopened.validate(true).valid).toBe(true);
+    expect(existsSync(incoming)).toBe(false);
+});
+
+it("keeps a valid incoming restore candidate when both target and rollback are damaged", () => {
+    const { manager, path } = fixture();
+    manager.close();
+    const incoming = `${path}.incoming`;
+    const rollback = `${path}.rollback`;
+    copyFileSync(path, incoming);
+    writeFileSync(path, "damaged target", "utf8");
+    writeFileSync(rollback, "damaged rollback", "utf8");
+
+    const reopened = new DatabaseManager(path);
+    trackManager(reopened);
+    expect(reopened.validate(true)).toMatchObject({ valid: true, schema_version: 11 });
+    expect(existsSync(incoming)).toBe(false);
+    expect(existsSync(rollback)).toBe(false);
+    reopened.close();
+});
 });

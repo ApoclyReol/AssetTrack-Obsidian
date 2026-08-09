@@ -3,6 +3,7 @@ import type { ReadWindow } from "./readWindows";
 
 export type RuleMatchScope = "product" | "merchant" | "merchant_product";
 export type RuleMatchLevel = RuleMatchScope;
+export type RuleTransactionType = "支出" | "收入" | "代付";
 
 export type ProductCategoryStatus = "正常" | "停用" | "未分类" | "混合";
 
@@ -38,11 +39,12 @@ export interface RuleChainIssue {
   rule_id: number | null;
   target_rule_ids: number[];
   fields: Array<"counterparty" | "product">;
+  category_conflict: boolean;
   reason: string;
 }
 
 export interface RuleCandidate {
-  transaction_type: "支出" | "收入";
+  transaction_type: RuleTransactionType;
   product: string;
   product_key?: string;
   variants: string[];
@@ -60,7 +62,7 @@ export interface RuleCandidate {
 export type RuleCoverage = "none" | "partial" | "full";
 
 export interface HistoricalRuleSuggestion {
-  transaction_type: "支出" | "收入";
+  transaction_type: RuleTransactionType;
   match_scope?: RuleMatchScope;
   counterparty?: string;
   product: string;
@@ -76,7 +78,7 @@ export interface HistoricalRuleSuggestion {
 
 export interface HistoricalProductStat {
   group_by?: "product" | "counterparty";
-  transaction_type: "支出" | "收入";
+  transaction_type: RuleTransactionType;
   product_key: string;
   product: string;
   counterparty: string;
@@ -127,7 +129,7 @@ export interface RuleHealthSummary {
 
 export interface SavedRule {
   id?: number;
-  transaction_type: "支出" | "收入";
+  transaction_type: RuleTransactionType;
   match_scope?: RuleMatchScope;
   counterparty?: string;
   product: string;

@@ -29,6 +29,7 @@ import { isCurrencyCode } from "./domain/moneyFormat";
 import { scalarText } from "./domain/text";
 import { confirmAction } from "./ui/ConfirmModal";
 import { displayError, t } from "./i18n";
+import { AssetTrackError } from "./application/errors";
 
 export const DEFAULT_SETTINGS: AssetTrackSettings = {
   dataDirectory: "",
@@ -530,12 +531,20 @@ export class AssetTrackSettingTab extends PluginSettingTab {
     try {
       const result = await this.plugin.inspectDataDirectory(directory);
       if (!result.exists) return t(
-        "目录中没有数据库，可以创建新数据库。",
-        "No database was found in this directory. You can create a new one."
+        result.recovery_available
+          ? "发现未完成的数据库恢复残留；载入时会先恢复有效候选文件。"
+          : "目录中没有数据库，可以创建新数据库。",
+        result.recovery_available
+          ? "An unfinished database restore was found. Loading will first recover the valid candidate file."
+          : "No database was found in this directory. You can create a new one."
+      );
+      if (result.recovery_available) return t(
+        "发现未完成的数据库恢复残留；载入时会先恢复有效候选文件。",
+        "An unfinished database restore was found. Loading will first recover the valid candidate file."
       );
       if (result.migration_required) return t(
-        "发现旧版数据库；载入时会先创建保护备份，再自动无损升级到 schema 10。",
-        "An older database was found. Loading it will create a protection backup and automatically upgrade it to schema 10 without changing its financial rows."
+        "发现旧版数据库；载入时会先创建保护备份，再自动无损升级到最新 schema。",
+        "An older database was found. Loading it will create a protection backup and automatically upgrade it to the latest schema without changing its financial rows."
       );
       if (result.valid) return t(
         `发现有效的 ${DATABASE_NAME}，可以载入。`,
@@ -574,6 +583,8 @@ export class AssetTrackSettingTab extends PluginSettingTab {
             const directory = await chooseBackupDirectory();
             if (!directory) return;
             button.setDisabled(true);
+            exportedPath = "";
+            revealButton?.setDisabled(true);
             backupStatus.setText(t(
               "正在创建并校验一致性 zip 备份…",
               "Creating and validating a consistent ZIP backup…"
@@ -586,6 +597,8 @@ export class AssetTrackSettingTab extends PluginSettingTab {
               `Backup complete: ${result.path}`
             ));
           } catch (error) {
+            exportedPath = "";
+            revealButton?.setDisabled(true);
             backupStatus.setText(t(
               `备份失败：${message(error)}`,
               `Backup failed: ${message(error)}`
@@ -607,6 +620,7 @@ export class AssetTrackSettingTab extends PluginSettingTab {
 
     let restorePath = "";
     let restoreValidated = false;
+    let restoreValidationSequence = 0;
     let restoreButton:
       | { setDisabled(value: boolean): unknown }
       | undefined;
@@ -631,8 +645,9 @@ export class AssetTrackSettingTab extends PluginSettingTab {
     const selectAndValidate = async (
       picker: () => Promise<string | null>
     ): Promise<void> => {
+      const sequence = ++restoreValidationSequence;
       const selected = await picker();
-      if (!selected) return;
+      if (!selected || sequence !== restoreValidationSequence) return;
       restorePath = selected;
       restoreValidated = false;
       restoreButton?.setDisabled(true);
@@ -642,10 +657,12 @@ export class AssetTrackSettingTab extends PluginSettingTab {
       ));
       try {
         const result = await this.plugin.api.validateBackup(restorePath);
+        if (sequence !== restoreValidationSequence) return;
         restoreValidated = true;
         restoreButton?.setDisabled(false);
         backupStatus.setText(validationSummary(result));
       } catch (error) {
+        if (sequence !== restoreValidationSequence) return;
         backupStatus.setText(t(
           `校验失败：${message(error)}`,
           `Validation failed: ${message(error)}`
@@ -671,23 +688,45 @@ export class AssetTrackSettingTab extends PluginSettingTab {
           .setDisabled(true)
           .onClick(async () => {
             if (!restorePath || !restoreValidated) return;
+            const selectedPath = restorePath;
+            const selectedSequence = restoreValidationSequence;
             const confirmed = await confirmAction(
               this.app,
               t("恢复数据库备份？", "Restore database backup?"),
               t(
-                `将恢复：${restorePath}。恢复前会创建当前数据库一致性安全备份。`,
-                `Restore ${restorePath}? A consistent safety backup of the current database will be created first.`
+                `将恢复：${selectedPath}。恢复前会创建当前数据库一致性安全备份。`,
+                `Restore ${selectedPath}? A consistent safety backup of the current database will be created first.`
               ),
               t("确认恢复", "Confirm restore")
             );
             if (!confirmed) return;
+            if (selectedSequence !== restoreValidationSequence
+              || restorePath !== selectedPath
+              || !restoreValidated) {
+              backupStatus.setText(t(
+                "备份候选已改变，请重新校验后再恢复。",
+                "The backup candidate changed. Validate it again before restoring."
+              ));
+              return;
+            }
+            if (this.plugin.hasUnsavedEditorChanges()) {
+              backupStatus.setText(t(
+                "当前编辑器有未保存草稿，请先保存或放弃草稿后再恢复备份。",
+                "The editor has unsaved drafts. Save or discard them before restoring a backup."
+              ));
+              return;
+            }
             button.setDisabled(true);
             backupStatus.setText(t(
               "正在 staging 恢复数据库…",
               "Staging the database restore…"
             ));
             try {
-              await this.plugin.api.restoreBackup(restorePath);
+              await this.plugin.api.restoreBackup(selectedPath, () => {
+                if (this.plugin.hasUnsavedEditorChanges()) {
+                  throw new AssetTrackError({ code: "database.unsaved_changes", status: 409 });
+                }
+              });
               this.plugin.notifyDataChanged();
               restoreValidated = false;
               button.setDisabled(true);

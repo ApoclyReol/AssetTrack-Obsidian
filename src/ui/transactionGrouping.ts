@@ -165,9 +165,13 @@ export function transactionKeysForIndexes(
   indexes: readonly number[]
 ): TransactionKey[] {
   const keys: TransactionKey[] = [];
+  const seen = new Set<TransactionKey>();
   indexes.forEach((index) => {
     const key = transactionKey(rows[index]);
-    if (key !== null && !keys.includes(key)) keys.push(key);
+    if (key !== null && !seen.has(key)) {
+      seen.add(key);
+      keys.push(key);
+    }
   });
   return keys;
 }

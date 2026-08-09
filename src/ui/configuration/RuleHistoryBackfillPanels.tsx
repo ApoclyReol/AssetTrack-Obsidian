@@ -68,7 +68,7 @@ export function CategoryHistoryMigrationPanel({
       {onClose && <button type="button" onClick={onClose}>{t("关闭", "Close")}</button>}
     </div>
     <div className="asset-track-rule-history-category-actions">
-      <button type="button" disabled={!groups.length} onClick={onToggleAll}>
+      <button type="button" disabled={loading || !groups.length} onClick={onToggleAll}>
         {allCategoryGroupsSelected ? t("取消全选商品", "Deselect all items") : t("全选商品", "Select all items")}
       </button>
       <span className="asset-track-selected-count" role="status">
@@ -80,7 +80,7 @@ export function CategoryHistoryMigrationPanel({
         <StaticTableHeader label={t("选择", "Select")} className="asset-track-checkbox-heading" />
         <th scope="col" className="asset-track-date-column"><HistorySortButton field="last_date" label={t("最近日期", "Latest date")} sort={sort} onSort={onSort} /></th>
         <th scope="col"><HistorySortButton field="product" label={t("商品", "Item")} sort={sort} onSort={onSort} /></th>
-        <StaticTableHeader label={t("交易对方", "Counterparties")} />
+        <StaticTableHeader label={t("交易对手", "Counterparties")} />
         <th scope="col" className="asset-track-count-column"><HistorySortButton field="occurrences" label={t("次数", "Occurrences")} sort={sort} onSort={onSort} /></th>
         <th scope="col" className="asset-track-count-column"><HistorySortButton field="months_count" label={t("月份数", "Months")} sort={sort} onSort={onSort} /></th>
         <th scope="col" className="asset-track-amount-column"><HistorySortButton field="total_amount" label={t("总金额", "Total amount")} sort={sort} onSort={onSort} /></th>
@@ -88,6 +88,7 @@ export function CategoryHistoryMigrationPanel({
         <td><input
           className="asset-track-selection-checkbox"
           type="checkbox"
+          disabled={loading}
           checked={categoryGroupSelected(group)}
           onChange={() => onToggleGroup(group)}
           aria-label={t(`选择商品 ${group.product || "空商品"}`, `Select item ${group.product || "empty item"}`)}
@@ -100,7 +101,7 @@ export function CategoryHistoryMigrationPanel({
     </div>
     <div className="asset-track-backfill-actions asset-track-rule-history-target">
       <label>{t("选中商品的目标分类", "Target category for selected items")}
-        <select value={targetCategoryKey} onChange={(event) => onTargetCategoryChange(event.target.value)}>
+        <select value={targetCategoryKey} disabled={loading} onChange={(event) => onTargetCategoryChange(event.target.value)}>
           <option value="">{t("请选择", "Select")}</option>
           {targetCategories.map((category) => <option key={category.category_key} value={category.category_key}>{category.name}</option>)}
         </select>
@@ -170,7 +171,7 @@ export function ProductHistoryDetailPanel({
       <button type="button" onClick={detailOnly ? onClose : onBack}>{detailOnly ? t("关闭", "Close") : t(`返回${groupLabel}列表`, `Back to ${groupLabel.toLocaleLowerCase()} list`)}</button>
     </div>
     <div className="asset-track-rule-history-selection-actions">
-      <button type="button" disabled={!detailRows.length} onClick={onToggleAllVisible}>
+      <button type="button" disabled={loading || !detailRows.length} onClick={onToggleAllVisible}>
         {allVisibleSelected ? t("取消全选流水", "Deselect all transactions") : t("全选流水", "Select all transactions")}
       </button>
       <span className="asset-track-selected-count" role="status">{t(`已选择 ${selectedIds.size} 条`, `${selectedIds.size} selected`)}</span>
@@ -180,7 +181,7 @@ export function ProductHistoryDetailPanel({
         <StaticTableHeader label={t("日期", "Date")} className="asset-track-date-column" /><StaticTableHeader label={t("选择", "Select")} className="asset-track-checkbox-heading" /><StaticTableHeader label={t("交易对手", "Counterparty")} /><StaticTableHeader label={t("商品", "Item")} /><StaticTableHeader label={t("原分类", "Original category")} /><StaticTableHeader label={t("金额", "Amount")} className="asset-track-amount-column" /><StaticTableHeader label={t("规则解释", "Rule explanation")} />
       </tr></thead><tbody>{detailRows.map((row) => <tr key={row.id}>
         <td className="asset-track-date-cell">{row.transaction_date}</td>
-        <td><input type="checkbox" checked={selectedIds.has(row.id)} onChange={() => onToggleSelected(row.id)} aria-label={t(`选择 ${row.transaction_date} ${row.counterparty || "流水"}`, `Select ${row.transaction_date} ${row.counterparty || "transaction"}`)} /></td>
+        <td><input type="checkbox" disabled={loading} checked={selectedIds.has(row.id)} onChange={() => onToggleSelected(row.id)} aria-label={t(`选择 ${row.transaction_date} ${row.counterparty || "流水"}`, `Select ${row.transaction_date} ${row.counterparty || "transaction"}`)} /></td>
         <td>{row.counterparty || t("（空）", "(empty)")}</td><td>{row.product || t("（空商品）", "(empty item)")}</td><td>{row.category || t("未分类", "Uncategorized")}</td><td className="asset-track-amount-cell">{money(row.amount, row.type)}</td>
         <td>{row.rule_match.status === "conflict"
           ? `${t("规则冲突", "Rule conflict")}（${row.rule_match.rule_ids.length}）`
@@ -191,7 +192,7 @@ export function ProductHistoryDetailPanel({
     </div>
     <div className="asset-track-backfill-actions asset-track-rule-history-target">
       <label>{t("目标分类", "Target category")}
-        <select value={targetCategoryKey} onChange={(event) => onTargetCategoryChange(event.target.value)}>
+        <select value={targetCategoryKey} disabled={loading} onChange={(event) => onTargetCategoryChange(event.target.value)}>
           <option value="">{t("请选择", "Select")}</option>
           {targetCategories.map((category) => <option key={category.category_key} value={category.category_key}>{category.name}</option>)}
         </select>

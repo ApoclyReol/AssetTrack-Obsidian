@@ -11,6 +11,7 @@ import type {
 import { businessLabel, t } from "../i18n";
 import { scalarText } from "../domain/text";
 import { money } from "../domain/moneyFormat";
+import { messageFor } from "./editorPrimitives";
 
 export interface TransactionOperationModalOptions {
   app: App;
@@ -101,6 +102,7 @@ function OperationPreviewContent({
   const [busy, setBusy] = useState(false);
   const [current, setCurrent] = useState(preview);
   const [currentRows, setCurrentRows] = useState<Transaction[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const retryStatuses = ["error", "need_review", "unclassified"] as const;
   const availableRetryStatuses = retryStatuses.filter((status) =>
     current.metadata
@@ -116,12 +118,15 @@ function OperationPreviewContent({
   }));
   const confirm = async (includeProtected: boolean) => {
     setBusy(true);
+    setError(null);
     try {
       await onConfirm(
         includeProtected,
         currentRows ? { preview: current, rows: currentRows } : undefined
       );
       onClose();
+    } catch (reason) {
+      setError(messageFor(reason));
     } finally {
       setBusy(false);
     }
@@ -129,10 +134,13 @@ function OperationPreviewContent({
   const retry = async (status: AiBatchResult["rows"][number]["status"]) => {
     if (!onRetry) return;
     setBusy(true);
+    setError(null);
     try {
       const result = await onRetry([status]);
       setCurrent(result.preview);
       setCurrentRows(result.rows);
+    } catch (reason) {
+      setError(messageFor(reason));
     } finally {
       setBusy(false);
     }
@@ -142,7 +150,8 @@ function OperationPreviewContent({
     || current.operation_type === "daifu-to-income";
   const isAiClassification = current.operation_type === "ai-classification";
   return <div className="asset-track-operation-preview">
-    <p>{t("写入前预览。确认后只会进入当前月份草稿，仍需保存当前区块。", "Preview before writing. Confirmation only changes the current-month draft; save the section to persist it.")}</p>
+    {error && <p role="alert" className="asset-track-operation-error">{error}</p>}
+    <p>{t("写入前预览。确认后只会进入当前月份草稿，仍需保存流水。", "Preview before writing. Confirmation only changes the current-month draft; save transactions to persist it.")}</p>
     <div className="asset-track-operation-preview-metrics" role="status">
       <span>{t("总数", "Total")} {current.total_count}</span>
       <span>{t("将变更", "Changes")} {current.change_count}</span>
@@ -154,7 +163,7 @@ function OperationPreviewContent({
     </p>}
     {current.protected_count ? <p>{t(`默认保护 ${current.protected_count} 条已人工修改流水。`, `${current.protected_count} manually edited rows are protected by default.`)}</p> : null}
     {aiRows.length > 0 && <div className="asset-track-ai-result-summary" role="status">
-      <strong>{t("AI 结果分组", "AI result groups")}</strong>
+      <strong>{t("AI 建议结果", "AI suggestion results")}</strong>
       <div>{aiStatusCounts.map(({ status, count }) => <span key={status}>{aiStatusLabel(status)}：{count}</span>)}</div>
       {aiRows.some((row) => row.status !== "classified") && <small>{t("未完成的分类会保留原值，可按结果重试。", "Unresolved classifications keep their current values and can be retried by result.")}</small>}
     </div>}
@@ -172,7 +181,7 @@ function OperationPreviewContent({
         type="button"
         disabled={busy}
         onClick={() => void retry(status)}
-      >{status === "error" ? t("重试失败", "Retry errors") : status === "need_review" ? t("重试待确认", "Retry needs review") : t("重试未分类", "Retry unclassified")}</button>)}
+      >{status === "error" ? t("重试调用失败的结果", "Retry failed requests") : status === "need_review" ? t("重试需要确认的结果", "Retry results needing review") : t("重试未分类的结果", "Retry unclassified results")}</button>)}
     </div>}
     <div className="asset-track-operation-preview-actions">
       <button
@@ -180,14 +189,14 @@ function OperationPreviewContent({
         disabled={busy}
         aria-label={t("确认修改，并跳过已保护的流水", "Confirm changes and skip protected transactions")}
         onClick={() => void confirm(false)}
-      >{t("确认修改", "Confirm changes")}</button>
+      >{t("确认修改（跳过保护流水）", "Confirm changes (skip protected)")}</button>
       {Boolean(current.protected_count) && <button
         type="button"
         className="mod-warning"
         disabled={busy}
         aria-label={t("确认修改，并包含已保护的流水", "Confirm changes including protected transactions")}
         onClick={() => void confirm(true)}
-      >{t("确认修改", "Confirm changes")}</button>}
+      >{t("包含保护流水并修改", "Include protected and modify")}</button>}
       <button type="button" disabled={busy} onClick={onClose}>{t("取消", "Cancel")}</button>
     </div>
   </div>;

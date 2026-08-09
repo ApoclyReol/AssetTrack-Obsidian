@@ -16,7 +16,7 @@ import type {
 import type { ReadWindow } from "../../types/readWindows";
 import type { HistoryBackfillContentProps, HistoryFilters, HistorySort } from "./ruleHistoryTypes";
 import { t } from "../../i18n";
-import { normalizeProductKey } from "../../domain/rules";
+import { normalizeProductKey, ruleCategoryType } from "../../domain/rules";
 import { CategoryHistoryMigrationPanel, ProductHistoryDetailPanel } from "./RuleHistoryBackfillPanels";
 import { RuleHistoryFilters } from "./RuleHistoryFilters";
 import { ProductHealthTable, ProductOverviewTable } from "./RuleHistoryProductTables";
@@ -62,6 +62,7 @@ export function HistoryBackfillContent({
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [sort, setSort] = useState<HistorySort>({ key: "last_date", direction: "desc" });
+  const mounted = useRef(true);
   const requestSequence = useRef(0);
   const autoLoadTimer = useRef<number | null>(null);
   const skipNextQueryRef = useRef(false);
@@ -193,10 +194,13 @@ export function HistoryBackfillContent({
       onOpenDetail(group, detailQuery);
       return;
     }
+    const sequence = requestSequence.current + 1;
+    requestSequence.current = sequence;
     setLoading(true);
     setMessage(t("正在加载商品时间线…", "Loading the item timeline…"));
     try {
       const result = await api.productHistory(detailQuery);
+      if (sequence !== requestSequence.current) return;
       const summary = result.groups.find((item) =>
         item.transaction_type === group.transaction_type
         && item.product_key === group.product_key
@@ -207,14 +211,14 @@ export function HistoryBackfillContent({
       setPreview(null);
       setTargetCategoryKey(
         categories.find((category) =>
-          category.is_active && category.transaction_type === group.transaction_type
+          category.is_active && category.transaction_type === ruleCategoryType(group.transaction_type)
         )?.category_key ?? ""
       );
       setMessage("");
     } catch (error) {
-      setMessage(errorMessage(error));
+      if (sequence === requestSequence.current) setMessage(errorMessage(error));
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current) setLoading(false);
     }
   }, [api, categories, detailOnly, embedded, onOpenDetail, query]);
 
@@ -248,11 +252,13 @@ export function HistoryBackfillContent({
   }, [detailGroup, detailOnly, initialQuery, openDetail]);
 
   useEffect(() => () => {
+    mounted.current = false;
     requestSequence.current += 1;
     if (autoLoadTimer.current !== null) hostWindow.clearTimeout(autoLoadTimer.current);
   }, [hostWindow]);
 
   const toggleAllVisible = () => {
+    requestSequence.current += 1;
     setSelectedIds((current) => {
       const next = new Set(current);
       if (allVisibleSelected) visibleIds.forEach((id) => next.delete(id));
@@ -260,15 +266,18 @@ export function HistoryBackfillContent({
       return next;
     });
     setPreview(null);
+    setLoading(false);
   };
 
   const toggleSelected = (id: number) => {
+    requestSequence.current += 1;
     setSelectedIds((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
     setPreview(null);
+    setLoading(false);
   };
 
   const categoryGroupTransactionIds = (group: HistoricalProductStat): number[] =>
@@ -297,6 +306,8 @@ export function HistoryBackfillContent({
       setMessage(t("请选择流水和目标分类后再预览。", "Select transactions and a target category before previewing."));
       return;
     }
+    const sequence = requestSequence.current + 1;
+    requestSequence.current = sequence;
     setLoading(true);
     setMessage(t("正在生成回溯预览…", "Preparing the backfill preview…"));
     try {
@@ -304,17 +315,20 @@ export function HistoryBackfillContent({
         transaction_ids: [...selectedIds],
         target_category_key: targetCategoryKey
       });
+      if (sequence !== requestSequence.current) return;
       setPreview(result);
       setMessage("");
     } catch (error) {
-      setMessage(errorMessage(error));
+      if (sequence === requestSequence.current) setMessage(errorMessage(error));
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current) setLoading(false);
     }
   };
 
   const applyBackfill = async () => {
     if (!preview) return;
+    const previewSnapshot = preview;
+    const previewSequence = requestSequence.current;
     if (mode === "category") {
       const confirmed = await confirmAction(
         t("确认迁移历史分类？", "Confirm historical category migration?"),
@@ -326,26 +340,34 @@ export function HistoryBackfillContent({
       );
       if (!confirmed) return;
     }
+    if (previewSequence !== requestSequence.current) {
+      setMessage(t("迁移预览已失效，请重新生成预览。", "The migration preview is stale. Generate a new preview."));
+      return;
+    }
+    const sequence = previewSequence + 1;
+    requestSequence.current = sequence;
     setLoading(true);
     setMessage(t("正在写入历史分类…", "Applying historical categories…"));
     try {
       const result = await api.applyCategoryBackfill({
-        transaction_ids: preview.transaction_ids,
-        target_category_key: preview.target_category_key,
+        transaction_ids: previewSnapshot.transaction_ids,
+        target_category_key: previewSnapshot.target_category_key,
         expected_month_revisions: Object.fromEntries(
-          preview.months.map((month) => [month.month, month.revision])
+          previewSnapshot.months.map((month) => [month.month, month.revision])
         )
       });
+      if (!mounted.current || sequence !== requestSequence.current) return;
       onSaved();
+      if (!mounted.current) return;
       onDataChanged();
       new Notice(t(`已更新 ${result.updated_count} 条历史流水。`, `Updated ${result.updated_count} historical transactions.`));
 
       setMessage("");
       if (!embedded) onClose?.();
     } catch (error) {
-      setMessage(errorMessage(error));
+      if (sequence === requestSequence.current) setMessage(errorMessage(error));
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current) setLoading(false);
     }
   };
 
@@ -359,10 +381,11 @@ export function HistoryBackfillContent({
       && category.category_key !== sourceCategoryKey
       && (!selectedGroup
         ? !sourceCategory || category.transaction_type === sourceCategory.transaction_type
-        : category.transaction_type === selectedGroup.transaction_type)
+        : category.transaction_type === ruleCategoryType(selectedGroup.transaction_type))
   );
 
   const toggleCategoryGroup = (group: HistoricalProductStat) => {
+    requestSequence.current += 1;
     const ids = categoryGroupTransactionIds(group);
     setSelectedIds((current) => {
       const next = new Set(current);
@@ -371,9 +394,11 @@ export function HistoryBackfillContent({
       return next;
     });
     setPreview(null);
+    setLoading(false);
   };
 
   const toggleAllCategoryGroups = () => {
+    requestSequence.current += 1;
     setSelectedIds((current) => {
       const next = new Set(current);
       const allIds = sortedGroups.flatMap((group) => categoryGroupTransactionIds(group));
@@ -382,6 +407,14 @@ export function HistoryBackfillContent({
       return next;
     });
     setPreview(null);
+    setLoading(false);
+  };
+
+  const updateTargetCategory = (categoryKey: string) => {
+    requestSequence.current += 1;
+    setTargetCategoryKey(categoryKey);
+    setPreview(null);
+    setLoading(false);
   };
 
   return <div className="asset-track-rule-history-modal-content">
@@ -448,7 +481,7 @@ export function HistoryBackfillContent({
       onSort={setSort}
       onToggleAll={toggleAllCategoryGroups}
       onToggleGroup={toggleCategoryGroup}
-      onTargetCategoryChange={(categoryKey) => { setTargetCategoryKey(categoryKey); setPreview(null); }}
+      onTargetCategoryChange={updateTargetCategory}
       onPreview={() => { void previewBackfill(); }}
       onApply={() => { void applyBackfill(); }}
       onClose={onClose}
@@ -466,6 +499,9 @@ export function HistoryBackfillContent({
       loading={loading}
       onClose={() => onClose?.()}
       onBack={() => {
+        requestSequence.current += 1;
+        setLoading(false);
+        setMessage("");
         setSelectedGroup(null);
         setDetailRows(null);
         setSelectedIds(new Set());
@@ -473,7 +509,7 @@ export function HistoryBackfillContent({
       }}
       onToggleAllVisible={toggleAllVisible}
       onToggleSelected={toggleSelected}
-      onTargetCategoryChange={(categoryKey) => { setTargetCategoryKey(categoryKey); setPreview(null); }}
+      onTargetCategoryChange={updateTargetCategory}
       onPreview={() => { void previewBackfill(); }}
       onApply={() => { void applyBackfill(); }}
     />}

@@ -244,6 +244,32 @@ describe("current schema rule scopes", () => {
     });
   });
 
+  it("uses dedicated paid-on-behalf rules instead of expense rules", () => {
+    const row: Transaction = {
+      transaction_date: "2026-01-01",
+      type: "代付",
+      category: "",
+      category_key: null,
+      counterparty: "咖啡店",
+      product: "拿铁",
+      amount: 20
+    };
+
+    expect(resolveRule(row, rules)).toMatchObject({
+      status: "none",
+      rule_ids: []
+    });
+
+    expect(resolveRule(row, [{
+      ...rules[0],
+      transaction_type: "代付"
+    }])).toMatchObject({
+      status: "matched",
+      selected_rule_id: 1,
+      category_key: "cat-combo"
+    });
+  });
+
   it("does not apply a rule whose category is inactive", () => {
     const row: Transaction = {
       transaction_date: "2026-01-01",
@@ -278,7 +304,26 @@ describe("current schema rule scopes", () => {
       }
     ])).toMatchObject([{
       rule_id: 1,
-      target_rule_ids: [6]
+      target_rule_ids: [6],
+      category_conflict: true
+    }]);
+
+    const sameCategoryTarget = detectRewriteChains([
+      rules[0],
+      rules[2],
+      {
+        id: 7,
+        transaction_type: "支出",
+        match_scope: "product" as const,
+        product: "咖啡",
+        counterparty: "",
+        category_key: "cat-combo",
+        category: "组合分类"
+      }
+    ]);
+    expect(sameCategoryTarget).toMatchObject([{
+      target_rule_ids: [7],
+      category_conflict: false
     }]);
   });
 });

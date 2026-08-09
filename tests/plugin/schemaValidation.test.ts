@@ -28,6 +28,7 @@ function downgradeToSchema9(db: DatabaseSync): void {
     DROP INDEX idx_auto_rules_match;
     ALTER TABLE category_definitions DROP COLUMN description;
     DROP TABLE auto_rules;
+    DROP TABLE operation_logs;
     CREATE TABLE auto_rules (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       transaction_type TEXT NOT NULL CHECK(transaction_type IN ('支出','收入')),
@@ -46,6 +47,62 @@ function downgradeToSchema9(db: DatabaseSync): void {
 function createSchema9Database(path: string): DatabaseSync {
   const db = createDatabase(path);
   downgradeToSchema9(db);
+  return db;
+}
+
+function downgradeToSchema10(db: DatabaseSync): void {
+  db.exec(`
+    DROP INDEX idx_auto_rules_match;
+    ALTER TABLE auto_rules RENAME TO auto_rules_schema11;
+    CREATE TABLE auto_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      transaction_type TEXT NOT NULL CHECK(transaction_type IN ('支出','收入')),
+      match_scope TEXT NOT NULL DEFAULT 'product'
+        CHECK(match_scope IN ('product','merchant','merchant_product')),
+      counterparty TEXT NOT NULL DEFAULT '',
+      product TEXT NOT NULL DEFAULT '',
+      match_counterparty_key TEXT GENERATED ALWAYS AS (
+        CASE
+          WHEN match_scope IN ('merchant','merchant_product')
+            THEN asset_track_normalize_match_key(counterparty)
+          ELSE ''
+        END
+      ) STORED,
+      match_product_key TEXT GENERATED ALWAYS AS (
+        CASE
+          WHEN match_scope IN ('product','merchant_product')
+            THEN asset_track_normalize_match_key(product)
+          ELSE ''
+        END
+      ) STORED,
+      rewrite_merchant TEXT NOT NULL DEFAULT '',
+      rewrite_product TEXT NOT NULL DEFAULT '',
+      category_key TEXT NOT NULL,
+      category TEXT NOT NULL,
+      CHECK(
+        (match_scope='product' AND match_counterparty_key='' AND match_product_key<>'')
+        OR (match_scope='merchant' AND match_counterparty_key<>'' AND match_product_key='')
+        OR (match_scope='merchant_product' AND match_counterparty_key<>'' AND match_product_key<>'')
+      ),
+      FOREIGN KEY(category_key) REFERENCES category_definitions(category_key)
+    );
+    INSERT INTO auto_rules
+      (id,transaction_type,match_scope,counterparty,product,
+       rewrite_merchant,rewrite_product,category_key,category)
+    SELECT id,transaction_type,match_scope,counterparty,product,
+           rewrite_merchant,rewrite_product,category_key,category
+    FROM auto_rules_schema11
+    WHERE transaction_type IN ('支出','收入');
+    DROP TABLE auto_rules_schema11;
+    CREATE UNIQUE INDEX idx_auto_rules_match
+      ON auto_rules(transaction_type, match_scope, match_counterparty_key, match_product_key);
+    PRAGMA user_version=10;
+  `);
+}
+
+function createSchema10Database(path: string): DatabaseSync {
+  const db = createDatabase(path);
+  downgradeToSchema10(db);
   return db;
 }
 
@@ -73,7 +130,7 @@ function insertLegacyRule(
 }
 
 describe("schema validation", () => {
-  it("accepts a complete schema 10 database", () => {
+  it("accepts a complete schema 11 database", () => {
     const path = databasePath();
     createDatabase(path).close();
     expect(DatabaseManager.inspect(path)).toMatchObject({
@@ -89,7 +146,7 @@ describe("schema validation", () => {
         foreign_key_violations: 0
       }
     });
-    expect(DatabaseManager.inspect(path).validation?.schema_version).toBe(10);
+    expect(DatabaseManager.inspect(path).validation?.schema_version).toBe(11);
   });
 
   it("marks a structurally valid schema 9 database for automatic migration without writing during inspection", () => {
@@ -159,6 +216,33 @@ describe("schema validation", () => {
     );
   });
 
+  it("rejects a schema with a required primary key removed", () => {
+    const path = databasePath();
+    const db = createDatabase(path);
+    db.exec(`
+      ALTER TABLE month_status RENAME TO month_status_old;
+      CREATE TABLE month_status (
+        month TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'draft',
+        locked_at TEXT,
+        updated_at TEXT,
+        fixed_assets_initialized INTEGER NOT NULL DEFAULT 0,
+        revision INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO month_status
+        (month,status,locked_at,updated_at,fixed_assets_initialized,revision)
+      SELECT month,status,locked_at,updated_at,fixed_assets_initialized,revision
+      FROM month_status_old;
+      DROP TABLE month_status_old;
+    `);
+    db.close();
+    const inspection = DatabaseManager.inspect(path);
+    expect(inspection.valid).toBe(false);
+    expect(inspection.validation?.invalid_primary_keys).toContain(
+      "month_status(month)"
+    );
+  });
+
   it("creates normalized generated match keys and enforces scoped uniqueness", () => {
     const path = databasePath();
     const db = createDatabase(path);
@@ -193,7 +277,52 @@ describe("schema validation", () => {
     db.close();
   });
 
-  it("migrates schema 9 in one transaction and retains a validated protection backup", () => {
+  it("marks a structurally valid schema 10 database for automatic migration without writing during inspection", () => {
+    const path = databasePath();
+    const db = createSchema10Database(path);
+    db.close();
+
+    expect(DatabaseManager.inspect(path)).toMatchObject({
+      exists: true,
+      valid: false,
+      migration_required: true,
+      validation: { schema_version: 10 }
+    });
+    const unchanged = new DatabaseSync(path, { readOnly: true });
+    expect((unchanged.prepare("PRAGMA user_version").get() as { user_version: number }).user_version)
+      .toBe(10);
+    unchanged.close();
+  });
+
+  it("migrates schema 10 to 11 and allows paid-on-behalf rules", () => {
+    const path = databasePath();
+    const db = createSchema10Database(path);
+    const food = categoryKey("餐饮基础");
+    db.close();
+
+    const manager = new DatabaseManager(path);
+    const migrated = manager.open();
+    expect(manager.validate(true).valid).toBe(true);
+    expect((migrated.prepare("PRAGMA user_version").get() as { user_version: number }).user_version)
+      .toBe(11);
+    expect(() => migrated.prepare(`
+      INSERT INTO auto_rules
+        (transaction_type,match_scope,counterparty,product,category_key,category)
+      VALUES (?,?,?,?,?,?)
+    `).run("代付", "product", "", "AA 回款", food, "餐饮基础")).not.toThrow();
+    const backups = readdirSync(join(dirname(path), "backups"))
+      .filter((name) => name.startsWith("before-schema11-") && name.endsWith(".db"));
+    expect(backups).toHaveLength(1);
+    const protection = new DatabaseSync(join(dirname(path), "backups", backups[0]), {
+      readOnly: true
+    });
+    expect((protection.prepare("PRAGMA user_version").get() as { user_version: number }).user_version)
+      .toBe(10);
+    protection.close();
+    manager.close();
+  });
+
+  it("migrates schema 9 through the version chain and retains a validated protection backup", () => {
     const path = databasePath();
     const db = createSchema9Database(path);
     insertLegacyRule(db, { product: "  Coffee   Beans " });
@@ -232,7 +361,7 @@ describe("schema validation", () => {
     const migrated = manager.open();
     expect(manager.validate(true).valid).toBe(true);
     expect((migrated.prepare("PRAGMA user_version").get() as { user_version: number }).user_version)
-      .toBe(10);
+      .toBe(11);
     expect(migrated.prepare(
       "SELECT description FROM category_definitions WHERE category_key=?"
     ).get(categoryKey("餐饮基础"))).toMatchObject({ description: "" });
@@ -303,7 +432,7 @@ describe("schema validation", () => {
       revision: 4
     }]);
     const backups = readdirSync(join(dirname(path), "backups"))
-      .filter((name) => name.startsWith("before-schema10-") && name.endsWith(".db"));
+      .filter((name) => name.startsWith("before-schema11-") && name.endsWith(".db"));
     expect(backups).toHaveLength(1);
     const protection = new DatabaseSync(join(dirname(path), "backups", backups[0]), {
       readOnly: true
@@ -366,6 +495,36 @@ describe("schema validation", () => {
     const manager = new DatabaseManager(path);
     expect(() => manager.open()).toThrow(SchemaMigrationError);
     manager.close();
+    const unchanged = new DatabaseSync(path, { readOnly: true });
+    expect((unchanged.prepare("PRAGMA user_version").get() as { user_version: number }).user_version)
+      .toBe(9);
+    unchanged.close();
+  });
+
+  it("blocks schema 9 migration when multiple investment accounts make legacy flows ambiguous", () => {
+    const path = databasePath();
+    const db = createSchema9Database(path);
+    db.exec(`
+      INSERT INTO account_definitions
+        (account_key,name,account_type,is_active,sort_order)
+      VALUES ('investment-b','第二理财账户','investment',1,2);
+      INSERT INTO transactions
+        (month,transaction_date,type,category_key,category,counterparty,product,amount)
+      VALUES ('2026-01','2026-01-01','加仓','${categoryKey("餐饮基础")}','餐饮基础','理财','转入',100);
+    `);
+    db.close();
+
+    const manager = new DatabaseManager(path);
+    let caught: unknown;
+    try {
+      manager.open();
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(SchemaMigrationError);
+    expect((caught as SchemaMigrationError).report.issues).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "ambiguous_investment_account" })])
+    );
     const unchanged = new DatabaseSync(path, { readOnly: true });
     expect((unchanged.prepare("PRAGMA user_version").get() as { user_version: number }).user_version)
       .toBe(9);

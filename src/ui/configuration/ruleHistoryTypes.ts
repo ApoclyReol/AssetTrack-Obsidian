@@ -3,6 +3,9 @@ import type {
   CategoryDefinition
 } from "../../types/configuration";
 import type {
+  RuleTransactionType
+} from "../../types/rules";
+import type {
   HistoricalProductStat
 } from "../../types/rules";
 import type {
@@ -20,7 +23,7 @@ export type HistorySort = {
 };
 
 export interface HistoryFilters {
-  transaction_type: "" | "支出" | "收入";
+  transaction_type: "" | RuleTransactionType;
   category_key: string;
   issue_filter: "" | ProductHistoryIssueFilter;
   product_search: string;

@@ -3,14 +3,15 @@ import type {
   RuleChainIssue,
   RuleMatchExplanation,
   RuleMatchLevel,
-  RuleMatchScope
+  RuleMatchScope,
+  RuleTransactionType
 } from "../types/rules";
 import type {
   Transaction
 } from "../types/transactions";
 import { scalarText } from "./text";
 
-export const RULE_TYPES = new Set(["支出", "收入"]);
+export const RULE_TYPES = new Set<RuleTransactionType>(["支出", "收入", "代付"]);
 export const RULE_SCOPES = new Set<RuleMatchScope>([
   "product",
   "merchant",
@@ -43,7 +44,7 @@ export interface RuleRow {
 }
 
 export interface NormalizedRule extends RuleRow {
-  transaction_type: "支出" | "收入";
+  transaction_type: RuleTransactionType;
   match_scope: RuleMatchScope;
   counterparty: string;
   product: string;
@@ -67,6 +68,12 @@ export interface RuleDefinitionIssue {
 
 function comparable(value: unknown): string {
   return normalizeRuleKey(value);
+}
+
+export function ruleCategoryType(type: string): "支出" | "收入" | null {
+  if (type === "代付") return "支出";
+  if (type === "支出" || type === "收入") return type;
+  return null;
 }
 
 /**
@@ -100,7 +107,7 @@ export function ruleMatchLevel(
 
 export function ruleConditionKey(rule: Pick<RuleRow, "transaction_type" | "match_scope" | "counterparty" | "product">): string | null {
   const scope = inferRuleScope(rule);
-  if (!scope || !RULE_TYPES.has(rule.transaction_type)) return null;
+  if (!scope || !RULE_TYPES.has(rule.transaction_type as RuleTransactionType)) return null;
   const counterparty = scope === "merchant" || scope === "merchant_product"
     ? comparable(rule.counterparty) : "";
   const product = scope === "product" || scope === "merchant_product"
@@ -124,8 +131,8 @@ export function normalizeRuleDefinition(source: Partial<RuleRow>): {
   const rewriteMerchant = scalarText(source.rewrite_merchant).trim();
   const rewriteProduct = scalarText(source.rewrite_product).trim();
   const issues: RuleDefinitionIssue[] = [];
-  if (!RULE_TYPES.has(transactionType)) {
-    issues.push({ code: "invalid_type", message: "规则收支类型只能是支出或收入" });
+  if (!RULE_TYPES.has(transactionType as RuleTransactionType)) {
+    issues.push({ code: "invalid_type", message: "规则收支类型只能是支出、收入或代付" });
   }
   if (!scope) {
     issues.push({ code: "invalid_scope", message: "规则匹配范围无效" });
@@ -148,13 +155,13 @@ export function normalizeRuleDefinition(source: Partial<RuleRow>): {
   if (scope === "merchant" && product) {
     issues.push({ code: "condition_not_allowed", message: "仅交易对手规则不能填写商品条件" });
   }
-  if (issues.length || !scope || !RULE_TYPES.has(transactionType)) {
+  if (issues.length || !scope || !RULE_TYPES.has(transactionType as RuleTransactionType)) {
     return { value: null, issues };
   }
   return {
     value: {
       ...source,
-      transaction_type: transactionType as "支出" | "收入",
+      transaction_type: transactionType as RuleTransactionType,
       match_scope: scope,
       counterparty,
       product,
@@ -182,6 +189,15 @@ function sortIndexed(left: IndexedRule, right: IndexedRule): number {
   return left.order - right.order;
 }
 
+function appendToGroup<K, V>(groups: Map<K, V[]>, key: K, value: V): void {
+  const existing = groups.get(key);
+  if (existing) {
+    existing.push(value);
+  } else {
+    groups.set(key, [value]);
+  }
+}
+
 function ruleName(level: RuleMatchLevel): string {
   return level === "merchant_product"
     ? "组合规则"
@@ -191,6 +207,10 @@ function ruleName(level: RuleMatchLevel): string {
 type MatchableTransaction = Pick<Transaction, "type" | "product"> & {
   counterparty?: string;
 };
+
+function ruleTypeForTransaction(type: string): string {
+  return RULE_TYPES.has(type as RuleTransactionType) ? type : "";
+}
 
 export class RuleMatcher {
   private readonly merchantProduct = new Map<string, IndexedRule[]>();
@@ -210,13 +230,13 @@ export class RuleMatcher {
       const indexed = { rule, order } satisfies IndexedRule;
       if (scope === "merchant_product" && counterparty && product) {
         const key = indexKey(rule.transaction_type, counterparty, product);
-        this.merchantProduct.set(key, [...(this.merchantProduct.get(key) ?? []), indexed]);
+        appendToGroup(this.merchantProduct, key, indexed);
       } else if (scope === "product" && product) {
         const key = indexKey(rule.transaction_type, "", product);
-        this.product.set(key, [...(this.product.get(key) ?? []), indexed]);
+        appendToGroup(this.product, key, indexed);
       } else if (scope === "merchant" && counterparty) {
         const key = indexKey(rule.transaction_type, counterparty, "");
-        this.merchant.set(key, [...(this.merchant.get(key) ?? []), indexed]);
+        appendToGroup(this.merchant, key, indexed);
       }
     });
   }
@@ -231,13 +251,14 @@ export class RuleMatcher {
   matchingRules(row: MatchableTransaction): RuleRow[] {
     const counterparty = comparable(row.counterparty);
     const product = comparable(row.product);
-    if (!RULE_TYPES.has(row.type) || (!counterparty && !product)) return [];
+    const transactionType = ruleTypeForTransaction(row.type);
+    if (!RULE_TYPES.has(transactionType as RuleTransactionType) || (!counterparty && !product)) return [];
     const matches = [
       ...(counterparty && product
-        ? this.merchantProduct.get(indexKey(row.type, counterparty, product)) ?? []
+        ? this.merchantProduct.get(indexKey(transactionType, counterparty, product)) ?? []
         : []),
-      ...(product ? this.product.get(indexKey(row.type, "", product)) ?? [] : []),
-      ...(counterparty ? this.merchant.get(indexKey(row.type, counterparty, "")) ?? [] : [])
+      ...(product ? this.product.get(indexKey(transactionType, "", product)) ?? [] : []),
+      ...(counterparty ? this.merchant.get(indexKey(transactionType, counterparty, "")) ?? [] : [])
     ];
     return matches.sort(sortIndexed).map((candidate) => candidate.rule);
   }
@@ -256,7 +277,7 @@ export class RuleMatcher {
     for (const candidate of matches) {
       const level = ruleMatchLevel(candidate);
       if (!level) continue;
-      grouped.set(level, [...(grouped.get(level) ?? []), candidate]);
+      appendToGroup(grouped, level, candidate);
     }
     const levels: RuleMatchLevel[] = ["merchant_product", "product", "merchant"];
     for (const level of levels) {
@@ -322,7 +343,7 @@ export function findRuleConflicts(rules: readonly RuleRow[]): Array<{
   for (const rule of rules) {
     const key = ruleConditionKey(rule);
     if (!key) continue;
-    groups.set(key, [...(groups.get(key) ?? []), rule]);
+    appendToGroup(groups, key, rule);
   }
   return [...groups.entries()].flatMap(([conditionKey, group]) => {
     if (group.length < 2) return [];
@@ -363,11 +384,27 @@ export function detectRewriteChains(rules: readonly RuleRow[]): RuleChainIssue[]
         amount: 0
       } satisfies Transaction)
     };
-    const targets = matcher.matchingRules(rewritten)
-      .filter((target) => Number(target.id) !== sourceId)
+    const targetRules = matcher.matchingRules(rewritten)
+      .filter((target) => target !== source && (!sourceHasId || Number(target.id) !== sourceId));
+    const targetResolution = matcher.resolveWithMatches(rewritten, targetRules);
+    if (targetResolution.status === "none" || !targetResolution.level) continue;
+    // Only the highest-priority target level is relevant. Lower levels are
+    // covered by the normal one-pass resolver and must not turn a harmless
+    // normalization chain into a false conflict.
+    const highestPriorityTargets = targetRules.filter((target) =>
+      ruleMatchLevel(target) === targetResolution.level
+    );
+    const targets = highestPriorityTargets
       .map((target) => Number(target.id))
       .filter((id) => Number.isFinite(id) && id > 0);
-    if (!targets.length) continue;
+    const sourceCategory = comparable(source.category_key) || comparable(source.category);
+    const categoryConflict = highestPriorityTargets.some((target) =>
+      (comparable(target.category_key) || comparable(target.category)) !== sourceCategory
+    );
+    if (!highestPriorityTargets.length) continue;
+    const targetLabel = targets.length
+      ? [...new Set(targets)].join("、")
+      : "新建规则";
     issues.push({
       rule_id: sourceHasId ? sourceId : null,
       target_rule_ids: [...new Set(targets)],
@@ -375,7 +412,8 @@ export function detectRewriteChains(rules: readonly RuleRow[]): RuleChainIssue[]
         ...(rewriteMerchant ? ["counterparty" as const] : []),
         ...(rewriteProduct ? ["product" as const] : [])
       ],
-      reason: `重写结果会再次命中规则 ${[...new Set(targets)].join("、")}`
+      category_conflict: categoryConflict,
+      reason: `重写结果会再次命中最高优先级规则 ${targetLabel}${categoryConflict ? "，且目标分类不同" : "，但分类相同"}`
     });
   }
   return issues;

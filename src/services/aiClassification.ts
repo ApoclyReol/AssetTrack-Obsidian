@@ -16,7 +16,6 @@ import type {
 import type {
   Transaction
 } from "../types/transactions";
-import { scalarText } from "../domain/text";
 import { transactionKey } from "../domain/transactionOperations";
 
 interface RawAiRow {
@@ -30,6 +29,7 @@ interface RawAiRow {
 }
 
 const AI_STATUSES = new Set(["classified", "unclassified", "need_review", "error"]);
+const inFlightAiRequests = new Set<string>();
 
 function categoryTypeForTransaction(type: Transaction["type"]): "支出" | "收入" | null {
   if (type === "代付") return "支出";
@@ -51,6 +51,7 @@ function beforeFields(row: Transaction): Record<string, unknown> {
   return {
     transaction_date: row.transaction_date,
     type: row.type,
+    account_key: row.account_key ?? null,
     counterparty: row.counterparty ?? "",
     product: row.product,
     source: row.source ?? "",
@@ -105,18 +106,40 @@ async function requestWithTimeout(
   timerHost?: Pick<Window, "setTimeout" | "clearTimeout">
 ): Promise<unknown> {
   const host = timerHost ?? window;
+  const requestKey = `${url}\u0000${body}`;
+  if (inFlightAiRequests.has(requestKey)) {
+    throw new AssetTrackError({ code: "ai.request_in_flight", status: 409 });
+  }
+  inFlightAiRequests.add(requestKey);
   let timer: number | undefined;
-  const request = requestUrl({
-    url,
-    method: "POST",
-    contentType: "application/json",
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body,
-    throw: false
-  });
+  let request: ReturnType<typeof requestUrl>;
+  try {
+    request = requestUrl({
+      url,
+      method: "POST",
+      contentType: "application/json",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body,
+      throw: false
+    });
+  } catch (error) {
+    inFlightAiRequests.delete(requestKey);
+    throw error;
+  }
+  const trackedRequest = request.then(
+    (response) => {
+      inFlightAiRequests.delete(requestKey);
+      return response;
+    },
+    (error: unknown) => {
+      inFlightAiRequests.delete(requestKey);
+      throw error;
+    }
+  );
+  trackedRequest.catch(() => undefined);
   try {
     const response = await Promise.race([
-      request,
+      trackedRequest,
       new Promise<never>((_resolve, reject) => {
         timer = host.setTimeout(() => reject(new AssetTrackError({
           code: "ai.timeout",
@@ -190,13 +213,95 @@ function parseRawResult(
   return base;
 }
 
-function findRawResult(row: Transaction, rawRows: RawAiRow[], index: number): RawAiRow | undefined {
-  const id = typeof row.id === "number" ? String(row.id) : "";
-  const key = transactionKey(row, index);
-  return rawRows.find((candidate) =>
-    (id && String(candidate.transaction_id) === id)
-    || (key && scalarText(candidate.transaction_key) === key)
-  );
+function invalidResult(
+  row: Transaction,
+  index: number,
+  error: string,
+  raw?: RawAiRow
+): AiBatchResult["rows"][number] {
+  return {
+    transaction_id: typeof row.id === "number" ? row.id : null,
+    transaction_key: transactionKey(row, index),
+    status: "error",
+    category_key: null,
+    rewrite_merchant: null,
+    rewrite_product: null,
+    confidence: null,
+    error,
+    ...(raw ? { raw } : {})
+  };
+}
+
+interface RawResolution {
+  raw?: RawAiRow;
+  error?: string;
+  rowIndex?: number;
+}
+
+function resolveRawResults(
+  rows: Array<{ row: Transaction; index: number }>,
+  rawRows: RawAiRow[]
+): RawResolution[] {
+  const indexesById = new Map<string, number[]>();
+  const indexesByKey = new Map<string, number[]>();
+  rows.forEach(({ row, index }, rowIndex) => {
+    if (typeof row.id === "number" && Number.isInteger(row.id)) {
+      const matches = indexesById.get(String(row.id)) ?? [];
+      matches.push(rowIndex);
+      indexesById.set(String(row.id), matches);
+    }
+    const key = transactionKey(row, index);
+    const matches = indexesByKey.get(key) ?? [];
+    matches.push(rowIndex);
+    indexesByKey.set(key, matches);
+  });
+  const resolved = rawRows.map((raw) => {
+    const hasId = raw.transaction_id !== undefined && raw.transaction_id !== null;
+    const hasKey = raw.transaction_key !== undefined && raw.transaction_key !== null;
+    if (!hasId && !hasKey) {
+      return { raw, error: "AI 返回结果缺少流水标识" };
+    }
+    if (hasId && (typeof raw.transaction_id !== "number"
+      || !Number.isInteger(raw.transaction_id)
+      || raw.transaction_id <= 0)) {
+      return { raw, error: "AI 返回了无效的流水 id" };
+    }
+    if (hasKey && (typeof raw.transaction_key !== "string" || !raw.transaction_key.trim())) {
+      return { raw, error: "AI 返回了无效的流水 key" };
+    }
+    const idMatches = hasId ? indexesById.get(String(raw.transaction_id)) ?? [] : [];
+    const normalizedKey = typeof raw.transaction_key === "string"
+      ? raw.transaction_key.trim()
+      : "";
+    const keyMatches = hasKey ? indexesByKey.get(normalizedKey) ?? [] : [];
+    if (idMatches.length !== 1 && hasId) {
+      return { raw, error: "AI 返回的流水 id 不属于本次选择或对应多条流水" };
+    }
+    if (keyMatches.length !== 1 && hasKey) {
+      return { raw, error: "AI 返回的流水 key 不属于本次选择或对应多条流水" };
+    }
+    if (hasId && hasKey && idMatches[0] !== keyMatches[0]) {
+      return { raw, error: "AI 返回的流水 id 与 key 指向不同流水" };
+    }
+    return { raw, rowIndex: hasId ? idMatches[0] : keyMatches[0] };
+  });
+  const resolvedByRow = new Map<number, RawResolution[]>();
+  resolved.forEach((item) => {
+    if (item.rowIndex === undefined) return;
+    const matches = resolvedByRow.get(item.rowIndex);
+    if (matches) matches.push(item);
+    else resolvedByRow.set(item.rowIndex, [item]);
+  });
+  return rows.map((_row, rowIndex) => {
+    const matches = resolvedByRow.get(rowIndex) ?? [];
+    if (matches.length > 1) {
+      return { error: "AI 为同一流水返回了重复结果" };
+    }
+    if (matches.length === 1) {
+      return matches[0].error ? { error: matches[0].error, raw: matches[0].raw } : { raw: matches[0].raw };
+    }
+    return { error: "AI 未返回对应流水结果" };
+  });
 }
 
 function changeFor(
@@ -255,15 +360,15 @@ export async function previewAiClassification(
   const selectedKeys = new Set(request.transaction_keys ?? []);
   const protectedIds = new Set(request.protected_transaction_ids ?? []);
   const protectedKeys = new Set(request.protected_transaction_keys ?? []);
-  const selectedRows = rows.filter((row, index) => {
+  const selectedRows = rows.map((row, index) => ({ row, index })).filter(({ row, index }) => {
     if (!categoryTypeForTransaction(row.type)) return false;
     const id = typeof row.id === "number" ? row.id : null;
     const key = transactionKey(row, index);
     return (id !== null && selected.has(id)) || selectedKeys.has(key);
   });
-  const rowsToSend = selectedRows.filter((row, index) => {
+  const rowsToSend = selectedRows.filter(({ row, index }) => {
     const id = typeof row.id === "number" ? row.id : null;
-    const key = transactionKey(row, rows.indexOf(row) >= 0 ? rows.indexOf(row) : index);
+    const key = transactionKey(row, index);
     return request.include_protected
       || !((id !== null && protectedIds.has(id)) || protectedKeys.has(key));
   });
@@ -293,9 +398,9 @@ export async function previewAiClassification(
   if (!apiKey.trim()) {
     throw new AssetTrackError({ code: "ai.api_key_missing", status: 422 });
   }
-  const input = rowsToSend.map((row) => ({
+  const input = rowsToSend.map(({ row, index }) => ({
     transaction_id: typeof row.id === "number" ? row.id : null,
-    transaction_key: transactionKey(row, rows.indexOf(row)),
+    transaction_key: transactionKey(row, index),
     transaction_type: row.type,
     counterparty: row.counterparty ?? "",
     product: row.product,
@@ -326,9 +431,9 @@ export async function previewAiClassification(
       timerHost
     );
   } catch (error) {
-    const failedRows = selectedRows.map((row) => ({
+    const failedRows = rowsToSend.map(({ row, index }) => ({
       transaction_id: typeof row.id === "number" ? row.id : null,
-      transaction_key: transactionKey(row, rows.indexOf(row)),
+      transaction_key: transactionKey(row, index),
       status: "error" as const,
       category_key: null,
       rewrite_merchant: null,
@@ -348,7 +453,7 @@ export async function previewAiClassification(
         classified_count: 0,
         unclassified_count: 0,
         review_count: 0,
-        error_count: selectedRows.length,
+        error_count: rowsToSend.length,
         rows: failedRows
       },
       protectedIds,
@@ -356,11 +461,14 @@ export async function previewAiClassification(
     );
   }
   const rawRows = responseRows(payload);
-  const parsed = rowsToSend.map((row) => {
-    const index = rows.indexOf(row);
+  const selectedWithIndexes = rowsToSend;
+  const resolutions = resolveRawResults(selectedWithIndexes, rawRows);
+  const parsed = selectedWithIndexes.map(({ row, index }, rowIndex) => {
+    const resolution = resolutions[rowIndex];
+    if (resolution.error) return invalidResult(row, index, resolution.error, resolution.raw);
     return parseRawResult(
       row,
-      findRawResult(row, rawRows, index),
+      resolution.raw,
       categories.filter((category) => category.transaction_type === categoryTypeForTransaction(row.type)),
       index
     );

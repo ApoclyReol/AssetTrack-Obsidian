@@ -12,6 +12,65 @@ export function setTestLanguage(value: string): void {
 
 export const requestUrl = vi.fn();
 
+export class App {}
+
+export class Plugin {
+  app: unknown = {};
+  manifest = { version: "0.0.0" };
+
+  async loadData(): Promise<unknown> { return null; }
+
+  async saveData(_data: unknown): Promise<void> {}
+
+  registerView(): void {}
+
+  addSettingTab(): void {}
+
+  addRibbonIcon(): void {}
+
+  addCommand(): void {}
+}
+
+export class PluginSettingTab {
+  app: unknown;
+  plugin: unknown;
+  containerEl: HTMLDivElement;
+
+  constructor(app: unknown, plugin: unknown) {
+    this.app = app;
+    this.plugin = plugin;
+    this.containerEl = document.createRange().createContextualFragment(
+      "<div></div>",
+    ).firstElementChild as HTMLDivElement;
+  }
+
+  display(): void {}
+}
+
+export class Setting {
+  constructor(_containerEl?: HTMLElement) {}
+
+  setName(): this { return this; }
+
+  setDesc(): this { return this; }
+
+  addText(): this { return this; }
+
+  addTextArea(): this { return this; }
+
+  addDropdown(): this { return this; }
+
+  addButton(): this { return this; }
+}
+
+export class SettingPage {}
+
+export class FileSystemAdapter {
+  getFullPath(path: string): string { return path; }
+
+  getBasePath(): string { return ""; }
+}
+
 export class Modal {
   constructor(_app?: unknown) {}
 

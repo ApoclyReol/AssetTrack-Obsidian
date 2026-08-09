@@ -144,7 +144,7 @@ export class RuleHistoryReadModel {
         || !stat.product_key
         || stat.occurrences < threshold
         || stat.has_category_conflict
-        || stat.rule_coverage !== "none"
+        || stat.rule_coverage === "full"
         || stat.conflicted_occurrences > 0
         || stat.history_rule_mismatch
       ) continue;
@@ -217,7 +217,7 @@ export class RuleHistoryReadModel {
       ).length,
       uncategorized_transactions: history.filter((row) => !text(row.category_key)).length,
       stable_products_without_rule: historicalProducts.filter((row) =>
-        Boolean(row.rule_suggestion)
+        row.rule_coverage === "none" && Boolean(row.rule_suggestion)
       ).length,
       fully_covered_groups: historicalProducts.filter((row) => row.rule_coverage === "full").length,
       partially_covered_groups: historicalProducts.filter((row) => row.rule_coverage === "partial").length,

@@ -8,6 +8,7 @@ import type {
   OperationKind
 } from "../types/operations";
 import { businessLabel, t } from "../i18n";
+import { messageFor } from "./editorPrimitives";
 
 const UNCATEGORIZED_CATEGORY_KEY = "__asset-track-uncategorized__";
 
@@ -75,7 +76,7 @@ function BatchEditContent({
       });
       onClose();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      setMessage(messageFor(error));
     } finally {
       setBusy(false);
     }
@@ -84,7 +85,7 @@ function BatchEditContent({
   return <div className="asset-track-batch-edit-modal-content">
     <p>{isCategory
       ? t("选择目标分类；选择“未分类”可以清空分类。确认后直接进入当前月份草稿，保存流水后才会写入数据库。", "Choose a target category. Choose “Uncategorized” to clear the category. Confirmation changes the current-month draft; save transactions to persist it.")
-      : t("输入目标值；留空可以清空商品或交易对手。确认后直接进入当前月份草稿。", "Enter a target value. Leave it empty to clear the item or counterparty. Confirmation changes the current-month draft.")}</p>
+      : t("输入目标值；留空可以清空商品或交易对手。确认后会进入当前月份草稿；保存流水后才会写入数据库。", "Enter a target value. Leave it empty to clear the item or counterparty. Confirmation changes the current-month draft; save transactions to persist it.")}</p>
     {message && <p className="asset-track-rule-history-message" role="alert">{message}</p>}
     {categoryEditBlocked && <div className="asset-track-batch-edit-warning" role="alert">
       <strong>{t(`不能同时修改${conflictTypes}的分类`, `Cannot edit categories across ${conflictTypes}`)}</strong>

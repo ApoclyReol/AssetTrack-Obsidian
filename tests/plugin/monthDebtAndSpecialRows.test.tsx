@@ -73,7 +73,6 @@ describe("month debt and special transaction rows", () => {
     render(
       <TransactionTable
         title="加仓"
-        month="2026-01"
         rows={rows}
         visibleIndexes={[0]}
         categories={categories}
@@ -96,6 +95,37 @@ describe("month debt and special transaction rows", () => {
     expect(screen.getByLabelText("加仓第 1 行账户")).toBeDefined();
     expect(screen.queryByLabelText("加仓第 1 行分类")).toBeNull();
     expect(screen.queryByRole("checkbox")).toBeNull();
+  });
+
+  it("marks transaction row validation issues next to the row number", () => {
+    const rows: Transaction[] = [{
+      id: 1,
+      transaction_date: "2026-01-01",
+      type: "支出",
+      category_key: null,
+      category: "",
+      counterparty: "咖啡店",
+      product: "",
+      amount: 0
+    }];
+
+    render(
+      <TransactionTable
+        title="支出"
+        rows={rows}
+        visibleIndexes={[0]}
+        categories={[]}
+        issues={[
+          { row_index: 0, field: "商品", issue: "商品为空", severity: "警告", blocking: false },
+          { row_index: 0, field: "金额", issue: "金额为 0", severity: "警告", blocking: false }
+        ]}
+        onUpdate={vi.fn()}
+        onDelete={vi.fn()}
+        onAdd={vi.fn()}
+      />
+    );
+
+    expect(screen.getByLabelText("支出第 1 行 · 提醒 2：商品：商品为空；金额：金额为 0")).toBeDefined();
   });
 
   it("removes rule coverage from item summary and keeps type/category sortable", () => {
@@ -144,6 +174,52 @@ describe("month debt and special transaction rows", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "分类排序" }));
     expect(onSort).toHaveBeenCalledWith({ key: "category", direction: "asc" });
+  });
+
+  it("edits the parent summary item field for every row in the group", () => {
+    const onUpdateGroup = vi.fn();
+    const rows: Transaction[] = [
+      {
+        id: 1,
+        transaction_date: "2026-01-01",
+        type: "支出",
+        category_key: "food",
+        category: "餐饮",
+        counterparty: "咖啡店",
+        product: "咖啡",
+        amount: 20
+      },
+      {
+        id: 2,
+        transaction_date: "2026-01-02",
+        type: "支出",
+        category_key: "food",
+        category: "餐饮",
+        counterparty: "另一家咖啡店",
+        product: "咖啡",
+        amount: 25
+      }
+    ];
+
+    render(
+      <TransactionSummaryTable
+        rows={rows}
+        categories={[]}
+        sort={null}
+        onSort={vi.fn()}
+        expanded=""
+        onExpanded={vi.fn()}
+        onUpdate={vi.fn()}
+        onUpdateGroup={onUpdateGroup}
+        onDelete={vi.fn()}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("修改咖啡汇总组商品"), {
+      target: { value: "拿铁" }
+    });
+
+    expect(onUpdateGroup).toHaveBeenCalledWith([0, 1], "product", "拿铁");
   });
 
   it("does not render a category placeholder in special item summary details", () => {

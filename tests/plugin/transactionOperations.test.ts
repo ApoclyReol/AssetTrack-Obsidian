@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   previewTransactionOperation,
+  transactionCategoryType,
   validateTransactionOperationRequest
 } from "../../src/domain/transactionOperations";
 import type {
@@ -56,6 +57,13 @@ function request(
 }
 
 describe("transaction operation previews", () => {
+  it("uses the expense category namespace for paid-on-behalf rows", () => {
+    expect(transactionCategoryType("支出")).toBe("支出");
+    expect(transactionCategoryType("代付")).toBe("支出");
+    expect(transactionCategoryType("收入")).toBe("收入");
+    expect(transactionCategoryType("加仓")).toBeNull();
+  });
+
   it("validates selection and category type contracts before preview generation", () => {
     expect(validateTransactionOperationRequest(rows, request("bulk-edit-product", []))).toEqual([
       { code: "transaction.selection.empty", params: {} }
@@ -169,6 +177,54 @@ describe("transaction operation previews", () => {
         target_category_key: "cat-food",
         target_value: "餐饮"
       })
+    );
+    expect(result.rows[0]).toMatchObject({
+      type: "代付",
+      category_key: "cat-food",
+      category: "餐饮"
+    });
+    expect(result.preview.change_count).toBe(1);
+  });
+
+  it("applies dedicated daifu rules to daifu rows", () => {
+    const daifuRows: Transaction[] = [{
+      ...rows[0],
+      type: "代付",
+      category_key: null,
+      category: ""
+    }];
+    const expenseResult = previewTransactionOperation(
+      daifuRows,
+      request("apply-rules", [1]),
+      [{
+        id: 31,
+        transaction_type: "支出",
+        match_scope: "product",
+        counterparty: "",
+        product: "咖啡",
+        category_key: "cat-food",
+        category: "餐饮"
+      }]
+    );
+    expect(expenseResult.rows[0]).toMatchObject({
+      type: "代付",
+      category_key: null,
+      category: ""
+    });
+    expect(expenseResult.preview.change_count).toBe(0);
+
+    const result = previewTransactionOperation(
+      daifuRows,
+      request("apply-rules", [1]),
+      [{
+        id: 32,
+        transaction_type: "代付",
+        match_scope: "product",
+        counterparty: "",
+        product: "咖啡",
+        category_key: "cat-food",
+        category: "餐饮"
+      }]
     );
     expect(result.rows[0]).toMatchObject({
       type: "代付",

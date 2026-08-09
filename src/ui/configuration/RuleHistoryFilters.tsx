@@ -55,6 +55,7 @@ export function RuleHistoryFilters({
           <option value="">{t("全部", "All")}</option>
           <option value="支出">{businessLabel("支出")}</option>
           <option value="收入">{businessLabel("收入")}</option>
+          <option value="代付">{businessLabel("代付")}</option>
         </select>
       </label>
       {!hideIssueFilter && !overview && <label>{t("问题类型", "Issue")}

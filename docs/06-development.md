@@ -2,7 +2,7 @@
 
 > 文档角色：开发与维护。本文服务源码修改、测试、构建和代码评审，不承担用户使用说明。
 
-## v1.7.0 维护边界
+## v1.8.0 维护边界
 
 - 金额展示统一调用 `src/domain/moneyFormat.ts`。
 - 分析阈值来自 `AssetTrackSettings`，Repository 不复制界面常量。
@@ -50,7 +50,7 @@
 ```text
 src/domain/              财务计算、账单解析、规则和质检
 src/application/         跨层结构化错误协议
-src/database/            schema 10、DatabaseManager 和 Repository
+src/database/            schema 11、DatabaseManager 和 Repository
 src/services/            UI Service、备份恢复和原生对话框
 src/types/               按领域拆分的持久化、分析和操作协议
 src/ui/、src/views/      React、能力端口适配与 ItemView
@@ -118,16 +118,17 @@ build/
 - 项目不使用 `dist/` 或 `out/`，`build/` 根目录只保留标准三文件；
 - `release:check` 验证版本、许可证、标准三文件和生产 bundle。
 
-测试覆盖 schema 10、schema 9→10 迁移、中文路径、WAL、整体事务、revision、冻结 golden、
+测试覆盖 schema 11、schema 10→11 与 schema 9→10→11 迁移链、中文路径、WAL、整体事务、revision、冻结 golden、
 CSV/XLSX/XLS、备份恢复、读取窗口边界、跨 10 年的 5 万笔流水和数据库锁释放。恢复和写入只能使用隔离
 Vault 与合成数据库。
 
 ## 数据库版本边界
 
-当前开发、测试、备份和恢复统一使用 schema 10。打开 schema 9 时由
-`DatabaseManager` 创建经过校验的 `before-schema10-*.db` 保护备份，并在同一可回滚
-事务中完成 9→10。schema 10 在 `transactions` 增加可空
-`account_key`，并将既有加仓/提现流水无损回填到首个理财账户；非理财流水保持为空。迁移完成后
+当前开发、测试、备份和恢复统一使用 schema 11。打开 schema 9 或 schema 10 时由
+`DatabaseManager` 创建经过校验的 `before-schema11-*.db` 保护备份，并按版本链执行
+9→10、10→11。schema 10 在 `transactions` 增加可空
+`account_key`，并将既有加仓/提现流水无损回填到首个理财账户；schema 11 仅放宽
+`auto_rules.transaction_type` 以支持代付规则，非理财流水保持为空。迁移完成后
 比较保留表行数、规则行数、外键、完整性和保护备份可读性。schema 8 私有数据过渡已完成，仓库
 不再保留 schema 8 运行路径。
 

@@ -5,9 +5,13 @@ import type {
   MonthWorkspace,
   MonthSection
 } from "../types/month";
+import type { RulesMode } from "../constants";
 import type {
   RuleWorkspace
 } from "../types/rules";
+import type {
+  PendingOperationLog
+} from "../types/operations";
 
 export interface MonthEditorDraftSnapshot {
   kind: "transactions";
@@ -15,6 +19,7 @@ export interface MonthEditorDraftSnapshot {
   workspace: MonthWorkspace;
   categories: CategoryDefinition[];
   issues: Array<Record<string, unknown>>;
+  pending_operation_logs?: PendingOperationLog[];
   active_section?: MonthSection;
   dirty_sections?: MonthSection[];
 }
@@ -25,6 +30,7 @@ export interface RulesEditorDraftSnapshot {
   category_dirty: boolean;
   rule_dirty: boolean;
   analytics_ready: boolean;
+  active_section?: RulesMode;
 }
 
 export type EditorDraftSnapshot =

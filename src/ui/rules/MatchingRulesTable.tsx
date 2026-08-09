@@ -7,7 +7,7 @@ import type {
 } from "../../types/rules";
 import type { ReadWindow } from "../../types/readWindows";
 import { businessLabel, t } from "../../i18n";
-import { inferRuleScopeFromConditions } from "../../domain/rules";
+import { inferRuleScopeFromConditions, ruleCategoryType } from "../../domain/rules";
 import { ActionTableHeader } from "../TablePrimitives";
 import {
   clone,
@@ -86,19 +86,22 @@ export function MatchingRulesTable({
       )}</caption><thead><tr><th scope="col" className="asset-track-count-column">{t("编号", "ID")}</th>{[
         ["transaction_type", t("收支", "Type")], ["counterparty", t("交易对手条件", "Counterparty condition")], ["product", t("商品条件", "Item condition")], ["rewrite_merchant", t("重写交易对手", "Rewrite counterparty")], ["rewrite_product", t("重写商品", "Rewrite item")], ["category", t("分类", "Category")], ["occurrences", t("流水数", "Transactions")], ["last_month", t("最近月份", "Latest month")]
       ].map(([field, label]) => <th key={field} scope="col" className={field === "transaction_type" ? "asset-track-type-column" : field === "category" ? "asset-track-centered-column" : field === "occurrences" ? "asset-track-count-column" : field === "last_month" ? "asset-track-date-column" : undefined}><SortButton field={field} label={label} sort={sort} onSort={onSort} /></th>)}<ActionTableHeader /></tr></thead>
-        <tbody>{ruleView.map(({ row, originalIndex: index }) => <tr data-asset-track-row-key={String(row.id ?? `new-rule-${index}`)} key={String(row.id ?? index)}>
+        <tbody>{ruleView.map(({ row, originalIndex: index }) => {
+          const rowLabel = row.id ? `#${row.id}` : t(`第 ${index + 1} 条新规则`, `New rule ${index + 1}`);
+          return <tr data-asset-track-row-key={String(row.id ?? `new-rule-${index}`)} key={String(row.id ?? index)}>
           <td className="asset-track-count-cell">{row.id ? `#${row.id}` : t("新规则", "New")}</td>
-          <td className="asset-track-type-cell"><select value={row.transaction_type} onChange={(event) => updateRule(index, (rule) => { rule.transaction_type = event.target.value as "支出" | "收入"; rule.category_key = ""; rule.category = ""; })}><option value="支出">{businessLabel("支出")}</option><option value="收入">{businessLabel("收入")}</option></select></td>
-          <td><input value={row.counterparty ?? ""} onChange={(event) => updateRule(index, (rule) => { rule.counterparty = event.target.value; })} /></td>
-          <td><input value={row.product} onChange={(event) => updateRule(index, (rule) => { rule.product = event.target.value; })} /></td>
-          <td><input value={row.rewrite_merchant ?? ""} onChange={(event) => updateRule(index, (rule) => { rule.rewrite_merchant = event.target.value; })} /></td>
-          <td><input value={row.rewrite_product ?? ""} onChange={(event) => updateRule(index, (rule) => { rule.rewrite_product = event.target.value; })} /></td>
-          <td className="asset-track-centered-cell"><select value={row.category_key} onChange={(event) => updateRule(index, (rule) => { const category = categories.find((item) => item.category_key === event.target.value); rule.category_key = event.target.value; rule.category = category?.name ?? ""; })}><option value="">{t("请选择", "Select")}</option>{categories.filter((category) => category.transaction_type === row.transaction_type).map((category) => <option key={category.category_key} value={category.category_key} disabled={!category.is_active}>{category.name}{category.is_active ? "" : ` · ${t("停用", "Inactive")}`}</option>)}</select></td>
+          <td className="asset-track-type-cell"><select aria-label={t(`${rowLabel}收支类型`, `${rowLabel} transaction type`)} value={row.transaction_type} onChange={(event) => updateRule(index, (rule) => { rule.transaction_type = event.target.value as SavedRule["transaction_type"]; rule.category_key = ""; rule.category = ""; })}><option value="支出">{businessLabel("支出")}</option><option value="收入">{businessLabel("收入")}</option><option value="代付">{businessLabel("代付")}</option></select></td>
+          <td><input aria-label={t(`${rowLabel}交易对手条件`, `${rowLabel} counterparty condition`)} value={row.counterparty ?? ""} onChange={(event) => updateRule(index, (rule) => { rule.counterparty = event.target.value; })} /></td>
+          <td><input aria-label={t(`${rowLabel}商品条件`, `${rowLabel} item condition`)} value={row.product} onChange={(event) => updateRule(index, (rule) => { rule.product = event.target.value; })} /></td>
+          <td><input aria-label={t(`${rowLabel}重写交易对手`, `${rowLabel} rewrite counterparty`)} value={row.rewrite_merchant ?? ""} onChange={(event) => updateRule(index, (rule) => { rule.rewrite_merchant = event.target.value; })} /></td>
+          <td><input aria-label={t(`${rowLabel}重写商品`, `${rowLabel} rewrite item`)} value={row.rewrite_product ?? ""} onChange={(event) => updateRule(index, (rule) => { rule.rewrite_product = event.target.value; })} /></td>
+          <td className="asset-track-centered-cell"><select aria-label={t(`${rowLabel}分类`, `${rowLabel} category`)} value={row.category_key} onChange={(event) => updateRule(index, (rule) => { const category = categories.find((item) => item.category_key === event.target.value); rule.category_key = event.target.value; rule.category = category?.name ?? ""; })}><option value="">{t("请选择", "Select")}</option>{categories.filter((category) => category.transaction_type === ruleCategoryType(row.transaction_type)).map((category) => <option key={category.category_key} value={category.category_key} disabled={!category.is_active}>{category.name}{category.is_active ? "" : ` · ${t("停用", "Inactive")}`}</option>)}</select></td>
           <td className="asset-track-count-cell">{row.occurrences ?? "—"}</td><td className="asset-track-date-cell">{row.last_month ?? "—"}</td>
           <td className="asset-track-actions-cell"><button type="button" onClick={() => void (onRemove
             ? onRemove(index, row)
             : onChange(rules.filter((_, item) => item !== index)))}>{t("删除", "Delete")}</button></td>
-        </tr>)}</tbody>
+        </tr>;
+        })}</tbody>
       </table>
     </div>}
     <div className="asset-track-section-actions">

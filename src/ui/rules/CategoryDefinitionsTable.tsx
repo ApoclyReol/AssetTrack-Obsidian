@@ -31,6 +31,7 @@ export interface CategoryDefinitionsTableProps {
   onOpenHistory: (query: ProductHistoryQuery) => void;
   showSectionActions: boolean;
   dirty: boolean;
+  saveBlocked: boolean;
   pageState: OperationState;
   saveState: OperationState;
   onReload: () => Promise<void>;
@@ -47,6 +48,7 @@ export function CategoryDefinitionsTable({
   onOpenHistory,
   showSectionActions,
   dirty,
+  saveBlocked,
   pageState,
   saveState,
   onReload,
@@ -75,17 +77,21 @@ export function CategoryDefinitionsTable({
       <table className="asset-track-category-table"><thead><tr>{[
         ["name", t("名称", "Name")], ["description", t("定义说明", "Description")], ["transaction_type", t("收支", "Type")], ["necessity", t("必要性", "Necessity")], ["pattern", t("消费频率", "Frequency")], ["is_big_ticket", t("大额", "Large")], ["color", t("颜色", "Color")], ["transaction_count", t("流水数", "Transactions")]
       ].map(([field, label]) => <th key={field} scope="col" className={field === "is_big_ticket" ? "asset-track-checkbox-heading" : field === "color" ? "asset-track-color-column" : ["transaction_type", "necessity", "pattern"].includes(field) ? "asset-track-type-column" : field === "transaction_count" ? "asset-track-count-column" : undefined}><SortButton field={field} label={label} sort={sort} onSort={onSort} /></th>)}<ActionTableHeader /></tr></thead>
-        <tbody>{categoryView.map(({ row, originalIndex: index }) => <tr data-asset-track-row-key={row.category_key} key={row.category_key}>
-          <td><input value={row.name} onChange={(event) => updateCategory(index, (category) => { category.name = event.target.value; })} /></td>
-          <td><input value={row.description ?? ""} onChange={(event) => updateCategory(index, (category) => { category.description = event.target.value; })} /></td>
-          <td className="asset-track-type-cell"><select value={row.transaction_type} onChange={(event) => updateCategory(index, (category) => { category.transaction_type = event.target.value as "支出" | "收入"; })}><option value="支出">{businessLabel("支出")}</option><option value="收入">{businessLabel("收入")}</option></select></td>
-          <td className="asset-track-type-cell"><select value={row.necessity} onChange={(event) => updateCategory(index, (category) => { category.necessity = event.target.value as CategoryDefinition["necessity"]; })}>{["必要", "可控", "不适用"].map((value) => <option key={value} value={value}>{businessLabel(value)}</option>)}</select></td>
-          <td className="asset-track-type-cell"><select value={row.pattern} onChange={(event) => updateCategory(index, (category) => { category.pattern = event.target.value as CategoryDefinition["pattern"]; })}>{["周期", "日常", "偶尔", "不适用"].map((value) => <option key={value} value={value}>{businessLabel(value)}</option>)}</select></td>
-          <td className="asset-track-checkbox-cell"><input type="checkbox" checked={row.is_big_ticket} onChange={(event) => updateCategory(index, (category) => { category.is_big_ticket = event.target.checked; })} /></td>
-          <td className="asset-track-color-cell"><input type="color" value={row.color} onChange={(event) => updateCategory(index, (category) => { category.color = event.target.value; })} /></td>
+        <tbody>{categoryView.map(({ row, originalIndex: index }) => {
+          const rowLabel = row.name.trim()
+            || t(`第 ${index + 1} 行分类`, `Category row ${index + 1}`);
+          return <tr data-asset-track-row-key={row.category_key} key={row.category_key}>
+          <td><input aria-label={t(`${rowLabel}名称`, `${rowLabel} name`)} value={row.name} onChange={(event) => updateCategory(index, (category) => { category.name = event.target.value; })} /></td>
+          <td><input aria-label={t(`${rowLabel}定义说明`, `${rowLabel} description`)} value={row.description ?? ""} onChange={(event) => updateCategory(index, (category) => { category.description = event.target.value; })} /></td>
+          <td className="asset-track-type-cell"><select aria-label={t(`${rowLabel}收支类型`, `${rowLabel} transaction type`)} value={row.transaction_type} onChange={(event) => updateCategory(index, (category) => { category.transaction_type = event.target.value as "支出" | "收入"; })}><option value="支出">{businessLabel("支出")}</option><option value="收入">{businessLabel("收入")}</option></select></td>
+          <td className="asset-track-type-cell"><select aria-label={t(`${rowLabel}必要性`, `${rowLabel} necessity`)} value={row.necessity} onChange={(event) => updateCategory(index, (category) => { category.necessity = event.target.value as CategoryDefinition["necessity"]; })}>{["必要", "可控", "不适用"].map((value) => <option key={value} value={value}>{businessLabel(value)}</option>)}</select></td>
+          <td className="asset-track-type-cell"><select aria-label={t(`${rowLabel}消费频率`, `${rowLabel} frequency`)} value={row.pattern} onChange={(event) => updateCategory(index, (category) => { category.pattern = event.target.value as CategoryDefinition["pattern"]; })}>{["周期", "日常", "偶尔", "不适用"].map((value) => <option key={value} value={value}>{businessLabel(value)}</option>)}</select></td>
+          <td className="asset-track-checkbox-cell"><input aria-label={t(`${rowLabel}是否大额`, `${rowLabel} large-ticket flag`)} type="checkbox" checked={row.is_big_ticket} onChange={(event) => updateCategory(index, (category) => { category.is_big_ticket = event.target.checked; })} /></td>
+          <td className="asset-track-color-cell"><input aria-label={t(`${rowLabel}颜色`, `${rowLabel} color`)} type="color" value={row.color} onChange={(event) => updateCategory(index, (category) => { category.color = event.target.value; })} /></td>
           <td className="asset-track-count-cell">{row.transaction_count ?? 0}</td>
           <td className="asset-track-category-actions asset-track-actions-cell">{row.transaction_count ? <button type="button" onClick={() => onOpenHistory({ category_key: row.category_key })}>{t("迁移", "Migrate")}</button> : null}<button type="button" onClick={() => void onRemove(row, index)}>{t("删除", "Delete")}</button></td>
-        </tr>)}</tbody>
+        </tr>;
+        })}</tbody>
       </table>
     </div>}
     <div className="asset-track-section-actions">
@@ -98,7 +104,7 @@ export function CategoryDefinitionsTable({
         <button type="button" disabled={pageState.kind === "pending"} onClick={() => void onReload()}>
           {t("放弃并重载", "Discard and reload")}
         </button>
-        <button type="button" className="mod-cta" disabled={!dirty || saveState.kind === "pending"} onClick={() => void onSave()}>
+        <button type="button" className="mod-cta" disabled={saveBlocked || !dirty || saveState.kind === "pending"} onClick={() => void onSave()}>
           {t("保存分类", "Save categories")}
         </button>
         {readWindow && <span className="asset-track-section-scope-note" role="note">

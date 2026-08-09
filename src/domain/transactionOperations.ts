@@ -54,7 +54,15 @@ const PREVIEW_OPERATION_TYPES = new Set<TransactionOperationRequest["operation_t
   "daifu-to-income"
 ]);
 
-function categoryType(type: string): "支出" | "收入" | null {
+/**
+ * Return the category namespace used by a transaction type.
+ *
+ * 代付 is displayed in the incoming tab, but it deliberately shares the
+ * expense category namespace with 支出. Keeping this mapping in the domain
+ * layer prevents UI batch operations and persistence validation from
+ * disagreeing about mixed selections.
+ */
+export function transactionCategoryType(type: string): "支出" | "收入" | null {
   if (type === "代付") return "支出";
   if (type === "支出" || type === "收入") return type;
   return null;
@@ -131,7 +139,7 @@ export function validateTransactionOperationRequest(
   if (!selected.rows.length) return issues;
 
   if (request.operation_type === "bulk-edit-category") {
-    const types = new Set(selected.rows.map((row) => categoryType(row.type)));
+    const types = new Set(selected.rows.map((row) => transactionCategoryType(row.type)));
     if ([...types].some((type) => type === null)) {
       issues.push({ code: "transaction.category.invalid_selection", params: {} });
     }

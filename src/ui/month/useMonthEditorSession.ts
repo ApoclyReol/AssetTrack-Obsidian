@@ -26,6 +26,7 @@ import type {
 } from "../../types/rules";
 import type { MonthEditorPort } from "../../services/ports";
 import { t } from "../../i18n";
+import { transactionTab } from "../../domain/transactionOperations";
 import type {
   EditorDraftSnapshot,
   MonthEditorDraftSnapshot
@@ -80,6 +81,9 @@ export interface MonthEditorSession {
   ) => void;
   reloadCurrentSection: () => Promise<void>;
   save: () => Promise<boolean>;
+  saveAll: () => Promise<boolean>;
+  discardAll: () => Promise<void>;
+  acknowledgeDataChange: () => void;
   hasUnsavedChanges: () => boolean;
   getDraftSnapshot: () => EditorDraftSnapshot | null;
 }
@@ -121,13 +125,51 @@ export function useMonthEditorSession({
         ? [...MONTH_SECTIONS]
         : []
   );
-  const pendingOperationLogsRef = useRef<PendingOperationLog[]>([]);
+  const pendingOperationLogsRef = useRef<PendingOperationLog[]>(
+    initialDraft?.pending_operation_logs ? clone(initialDraft.pending_operation_logs) : []
+  );
   const lastDataVersion = useRef(dataVersion);
   const skipNextDataVersion = useRef(false);
+  const validationSequence = useRef(0);
+  const requestSequence = useRef(0);
+  const draftGeneration = useRef(0);
+  const mounted = useRef(true);
   const restoredDraft = useRef(
     initialDraft ? clone(initialDraft) : null
   );
   const [transactionResetVersion, setTransactionResetVersion] = useState(0);
+
+  const transactionWarningNotice = useCallback((
+    rows: MonthWorkspace["transactions"],
+    validationIssues: Array<Record<string, unknown>>
+  ): string | null => {
+    const warnings = validationIssues.filter((issue) => !issueIsBlocking(issue));
+    if (!warnings.length) return null;
+    const counts = new Map<"outgoing" | "incoming" | "investment", number>();
+    warnings.forEach((issue) => {
+      const index = Number(issue.row_index);
+      if (!Number.isInteger(index) || index < 0) return;
+      const tab = transactionTab(rows[index]?.type ?? "");
+      if (!tab) return;
+      counts.set(tab, (counts.get(tab) ?? 0) + 1);
+    });
+    const labels = [
+      counts.has("outgoing")
+        ? t(`出账 ${counts.get("outgoing")} 项`, `${counts.get("outgoing")} outgoing issues`)
+        : "",
+      counts.has("incoming")
+        ? t(`入账 ${counts.get("incoming")} 项`, `${counts.get("incoming")} incoming issues`)
+        : "",
+      counts.has("investment")
+        ? t(`理财 ${counts.get("investment")} 项`, `${counts.get("investment")} investment issues`)
+        : ""
+    ].filter(Boolean);
+    if (!labels.length) return null;
+    return t(
+      `${labels.join("、")}有不规范流水，建议检查行号标记。`,
+      `${labels.join(", ")} remain irregular. Check the row markers.`
+    );
+  }, []);
 
   const reportDraft = useCallback((
     next: MonthWorkspace,
@@ -140,12 +182,15 @@ export function useMonthEditorSession({
       workspace: clone(next),
       categories: clone(categories),
       issues: clone(nextIssues),
+      pending_operation_logs: clone(pendingOperationLogsRef.current),
       active_section: activeSection,
       dirty_sections: [...nextDirtySections]
     });
   }, [activeSection, categories, dirtySections, month, onSessionChange]);
 
   const load = useCallback(async () => {
+    const sequence = ++requestSequence.current;
+    validationSequence.current += 1;
     setState({ kind: "pending", message: t("加载月份…", "Loading month…") });
     try {
       const [data, ruleData] = await Promise.all([
@@ -153,6 +198,8 @@ export function useMonthEditorSession({
         api.ruleWorkspaceShell()
       ]);
       const validation = await api.validateTransactions(month, data.transactions);
+      if (!mounted.current || sequence !== requestSequence.current) return;
+      draftGeneration.current += 1;
       dispatchDraft({ type: "reset", workspace: clone(data) });
       setCategories(ruleData.categories);
       setRules(ruleData.rules);
@@ -165,6 +212,7 @@ export function useMonthEditorSession({
       onSessionChange(null);
       setState({ kind: "idle" });
     } catch (error) {
+      if (!mounted.current || sequence !== requestSequence.current) return;
       const message = messageFor(error);
       new Notice(message);
       setState({ kind: "error", message });
@@ -178,6 +226,8 @@ export function useMonthEditorSession({
       return;
     }
     restoredDraft.current = null;
+    const sequence = ++requestSequence.current;
+    validationSequence.current += 1;
     onSessionChange(restored);
     setState({
       kind: "success",
@@ -189,6 +239,7 @@ export function useMonthEditorSession({
       api.ruleWorkspaceShell()
     ])
       .then(([current, ruleData]) => {
+        if (!mounted.current || sequence !== requestSequence.current) return;
         setCategories(ruleData.categories);
         setRules(ruleData.rules);
         setRulesRevision(ruleData.rules_revision);
@@ -202,11 +253,20 @@ export function useMonthEditorSession({
         }
       })
       .catch((error: unknown) => {
+        if (!mounted.current || sequence !== requestSequence.current) return;
         const message = messageFor(error);
         new Notice(message);
         setState({ kind: "error", message });
       });
   }, [api, load, month, onSessionChange]);
+
+  useEffect(() => {
+    return () => {
+      mounted.current = false;
+      requestSequence.current += 1;
+      validationSequence.current += 1;
+    };
+  }, []);
 
   useEffect(() => {
     if (lastDataVersion.current === dataVersion) return;
@@ -231,28 +291,76 @@ export function useMonthEditorSession({
     onMetricsChange?.(draft ? draftMonthMetrics(draft) : null);
   }, [draft, onMetricsChange]);
 
+  useEffect(() => {
+    if (!draft || !dirtySections.includes("transactions")) return;
+    const sequence = ++validationSequence.current;
+    const generation = draftGeneration.current;
+    const validatingDraft = draft;
+    void api.validateTransactions(month, draft.transactions)
+      .then((result) => {
+        if (!mounted.current || sequence !== validationSequence.current
+          || generation !== draftGeneration.current) return;
+        setIssues(result.issues);
+        if (dirtySectionsRef.current.includes("transactions")) {
+          reportDraft(validatingDraft, result.issues, dirtySectionsRef.current);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!mounted.current || sequence !== validationSequence.current
+          || generation !== draftGeneration.current) return;
+        setState({ kind: "error", message: messageFor(error) });
+      });
+  }, [api, draft, dirtySections, month, reportDraft]);
+
   const mark = useCallback((
     next: MonthWorkspace,
     section: MonthSection,
-    nextIssues: Array<Record<string, unknown>> = section === "transactions" ? [] : issues
+    nextIssues: Array<Record<string, unknown>> = issues
   ) => {
-    const nextDirtySections = [...new Set([...dirtySections, section])];
+    draftGeneration.current += 1;
+    validationSequence.current += 1;
+    const nextDirtySections = [...new Set([...dirtySectionsRef.current, section])];
     dispatchDraft({ type: "edit", workspace: next });
     if (section === "transactions") setIssues(nextIssues);
     else setIssues(issues);
     setDirtySections(nextDirtySections);
     dirtySectionsRef.current = nextDirtySections;
     reportDraft(next, nextIssues, nextDirtySections);
-  }, [dirtySections, issues, reportDraft]);
+  }, [issues, reportDraft]);
+
+  const refreshAfterSave = useCallback(async (): Promise<void> => {
+    try {
+      await onSaved();
+    } catch (error) {
+      // The database write has already committed.  A cache/list refresh
+      // failure must not turn a successful save into a retryable write error.
+      new Notice(t(
+        `数据已保存，但页面刷新失败：${messageFor(error)}`,
+        `Data was saved, but the page could not refresh: ${messageFor(error)}`
+      ));
+    }
+  }, [onSaved]);
 
   const reloadCurrentSection = useCallback(async () => {
     if (!draft || !activeSection) {
       await load();
       return;
     }
-    setState({ kind: "pending", message: t("重载当前区块…", "Reloading this section…") });
+    const sequence = ++requestSequence.current;
+    const generation = draftGeneration.current;
+    validationSequence.current += 1;
+    setState({ kind: "pending", message: t("正在放弃当前页修改并重新加载…", "Discarding current page changes and reloading…") });
     try {
       const current = await api.month(month);
+      if (!mounted.current || sequence !== requestSequence.current) return;
+      if (generation !== draftGeneration.current) {
+        const message = t(
+          "重载期间产生了新修改，当前草稿已保留。",
+          "New edits were made while reloading; the current draft was preserved."
+        );
+        setState({ kind: "error", message });
+        return;
+      }
       const nextDirtySections = dirtySections.filter((item) => item !== activeSection);
       const preserveRevision = nextDirtySections.length > 0;
       const next: MonthWorkspace = {
@@ -269,16 +377,41 @@ export function useMonthEditorSession({
         next.investment_accounts = current.investment_accounts;
       } else if (activeSection === "transactions") {
         next.transactions = current.transactions;
+        pendingOperationLogsRef.current = [];
         const ruleData = await api.ruleWorkspaceShell();
+        if (!mounted.current || sequence !== requestSequence.current) return;
+        if (generation !== draftGeneration.current) {
+          const message = t(
+            "重载期间产生了新修改，当前草稿已保留。",
+            "New edits were made while reloading; the current draft was preserved."
+          );
+          setState({ kind: "error", message });
+          return;
+        }
         setCategories(ruleData.categories);
         const validation = await api.validateTransactions(month, current.transactions);
+        if (!mounted.current || sequence !== requestSequence.current) return;
+        if (generation !== draftGeneration.current) {
+          const message = t(
+            "重载期间产生了新修改，当前草稿已保留。",
+            "New edits were made while reloading; the current draft was preserved."
+          );
+          setState({ kind: "error", message });
+          return;
+        }
         nextIssues = validation.issues;
       } else if (activeSection === "debts") {
         next.debts = current.debts;
       } else {
         next.fixed_assets = current.fixed_assets;
       }
+      if (!mounted.current || sequence !== requestSequence.current
+        || generation !== draftGeneration.current) return;
+      if (activeSection === "transactions") {
+        pendingOperationLogsRef.current = [];
+      }
       dispatchDraft({ type: "reset", workspace: clone(next) });
+      draftGeneration.current += 1;
       setIssues(nextIssues);
       setDirtySections(nextDirtySections);
       dirtySectionsRef.current = nextDirtySections;
@@ -287,10 +420,14 @@ export function useMonthEditorSession({
       } else {
         onSessionChange(null);
       }
+      if (activeSection === "transactions") {
+        setTransactionResetVersion((value) => value + 1);
+      }
       onReloaded?.();
-      setState({ kind: "success", message: t("当前区块已重载。", "This section was reloaded.") });
-      new Notice(t("当前区块已重载。", "This section was reloaded."));
+      setState({ kind: "success", message: t("当前页已重新加载。", "This page was reloaded.") });
+      new Notice(t("当前页已重新加载。", "This page was reloaded."));
     } catch (error) {
+      if (!mounted.current || sequence !== requestSequence.current) return;
       const message = messageFor(error);
       new Notice(message);
       setState({ kind: "error", message });
@@ -299,12 +436,23 @@ export function useMonthEditorSession({
 
   const saveWholeMonth = useCallback(async (): Promise<boolean> => {
     if (!draft) return false;
+    const sequence = ++requestSequence.current;
+    const generation = draftGeneration.current;
+    const saveDraft = clone(draft);
+    const operationLogs = clone(pendingOperationLogsRef.current);
+    validationSequence.current += 1;
     setState({ kind: "pending", message: t("检查流水…", "Checking transactions…") });
     try {
-      const validation = await api.validateTransactions(month, draft.transactions);
+      const validation = await api.validateTransactions(month, saveDraft.transactions);
+      if (!mounted.current || sequence !== requestSequence.current
+        || generation !== draftGeneration.current) {
+        const message = t("保存期间草稿已变化，未覆盖新的编辑。", "The draft changed while saving; the newer edits were kept.");
+        setState({ kind: "error", message });
+        return false;
+      }
       const found = validation.issues;
       setIssues(found);
-      if (dirtySections.length > 0) reportDraft(draft, found, dirtySections);
+      if (dirtySections.length > 0) reportDraft(saveDraft, found, dirtySections);
       const blocking = found.filter(issueIsBlocking);
       if (blocking.length) {
         const message = t(
@@ -317,69 +465,102 @@ export function useMonthEditorSession({
       }
       setState({ kind: "pending", message: t("保存整月…", "Saving the month…") });
       const saved = await api.saveMonth(month, {
-        expected_revision: draft.revision,
-        cash_accounts: draft.cash_accounts,
-        investment_accounts: draft.investment_accounts,
-        transactions: draft.transactions,
-        fixed_assets: draft.fixed_assets,
-        debt_revision: draft.debt_revision,
-        debts: draft.debts,
-        operation_logs: pendingOperationLogsRef.current
+        expected_revision: saveDraft.revision,
+        cash_accounts: saveDraft.cash_accounts,
+        investment_accounts: saveDraft.investment_accounts,
+        transactions: saveDraft.transactions,
+        fixed_assets: saveDraft.fixed_assets,
+        debt_revision: saveDraft.debt_revision,
+        debts: saveDraft.debts,
+        operation_logs: operationLogs
       });
+      let persistedIssues: Array<Record<string, unknown>> = found;
+      let postSaveValidationMessage: string | null = null;
+      try {
+        const persistedValidation = await api.validateTransactions(month, saved.transactions);
+        persistedIssues = persistedValidation.issues;
+      } catch (error) {
+        postSaveValidationMessage = messageFor(error);
+      }
+      if (!mounted.current || sequence !== requestSequence.current
+        || generation !== draftGeneration.current) {
+        await refreshAfterSave();
+        const message = t("月份已保存，但保存期间产生了新的编辑；请重新加载后继续。", "The month was saved, but new edits were made during saving. Reload before continuing.");
+        setState({ kind: "error", message });
+        return false;
+      }
       dispatchDraft({ type: "reset", workspace: clone(saved) });
-      const persistedValidation = await api.validateTransactions(month, saved.transactions);
-      setIssues(persistedValidation.issues);
+      draftGeneration.current += 1;
+      setIssues(persistedIssues);
       setDirtySections([]);
       pendingOperationLogsRef.current = [];
       dirtySectionsRef.current = [];
       setTransactionResetVersion((value) => value + 1);
       onSessionChange(null);
       skipNextDataVersion.current = true;
-      await onSaved();
-      const message = persistedValidation.issues.length
+      await refreshAfterSave();
+      const warningMessage = transactionWarningNotice(saved.transactions, persistedIssues);
+      const message = postSaveValidationMessage
         ? t(
-            `已保存 revision ${saved.revision}，保留 ${persistedValidation.issues.length} 项警告。`,
-            `Saved revision ${saved.revision} with ${persistedValidation.issues.length} warnings.`
+            `本月已保存，但无法刷新流水提醒：${postSaveValidationMessage}`,
+            `This month was saved, but transaction warnings could not be refreshed: ${postSaveValidationMessage}`
+          )
+        : warningMessage
+        ? t(
+            `本月已保存；${warningMessage}`,
+            `This month was saved. ${warningMessage}`
           )
         : t(
-            `已保存 revision ${saved.revision}。`,
-            `Saved revision ${saved.revision}.`
+            "本月已保存。",
+            "This month was saved."
           );
       new Notice(message);
       setState({ kind: "success", message });
       return true;
     } catch (error) {
+      if (!mounted.current || sequence !== requestSequence.current) return false;
       const message = messageFor(error);
       new Notice(message);
       setState({ kind: "error", message });
       return false;
     }
-  }, [api, dirtySections, draft, month, onSaved, onSessionChange, reportDraft]);
+  }, [api, dirtySections, draft, month, onSessionChange, refreshAfterSave, reportDraft, transactionWarningNotice]);
 
   const saveSection = useCallback(async (section: MonthSection): Promise<boolean> => {
     if (!draft) return false;
     if (!dirtySections.includes(section)) {
-      new Notice(t("当前区块没有未保存修改。", "This section has no unsaved changes."));
+      new Notice(t("当前页没有需要保存的修改。", "This page has no changes to save."));
       setState({ kind: "idle" });
       return true;
     }
+    const sequence = ++requestSequence.current;
+    const generation = draftGeneration.current;
+    const saveDraft = clone(draft);
+    const operationLogs = clone(pendingOperationLogsRef.current);
+    validationSequence.current += 1;
     setState({
       kind: "pending",
-      message: t("检查当前区块…", "Checking this section…")
+      message: t("正在检查当前页…", "Checking this page…")
     });
     try {
       let request: MonthSectionSaveRequest;
       if (section === "assets") {
         request = {
-          expected_revision: draft.revision,
+          expected_revision: saveDraft.revision,
           section,
-          cash_accounts: draft.cash_accounts,
-          investment_accounts: draft.investment_accounts
+          cash_accounts: saveDraft.cash_accounts,
+          investment_accounts: saveDraft.investment_accounts
         };
       } else if (section === "transactions") {
-        const validation = await api.validateTransactions(month, draft.transactions);
+        const validation = await api.validateTransactions(month, saveDraft.transactions);
+        if (!mounted.current || sequence !== requestSequence.current
+          || generation !== draftGeneration.current) {
+          const message = t("保存期间草稿已变化，未覆盖新的编辑。", "The draft changed while saving; the newer edits were kept.");
+          setState({ kind: "error", message });
+          return false;
+        }
         setIssues(validation.issues);
-        if (dirtySections.length > 0) reportDraft(draft, validation.issues, dirtySections);
+        if (dirtySections.length > 0) reportDraft(saveDraft, validation.issues, dirtySections);
         const blocking = validation.issues.filter(issueIsBlocking);
         if (blocking.length) {
           const message = t(
@@ -391,29 +572,29 @@ export function useMonthEditorSession({
           return false;
         }
         request = {
-          expected_revision: draft.revision,
+          expected_revision: saveDraft.revision,
           section,
-          transactions: draft.transactions,
-          operation_logs: pendingOperationLogsRef.current
+          transactions: saveDraft.transactions,
+          operation_logs: operationLogs
         };
       } else if (section === "debts") {
         request = {
-          expected_revision: draft.revision,
+          expected_revision: saveDraft.revision,
           section,
-          debt_revision: draft.debt_revision,
-          debts: draft.debts
+          debt_revision: saveDraft.debt_revision,
+          debts: saveDraft.debts
         };
       } else {
         request = {
-          expected_revision: draft.revision,
+          expected_revision: saveDraft.revision,
           section,
-          fixed_assets: draft.fixed_assets
+          fixed_assets: saveDraft.fixed_assets
         };
       }
-      setState({ kind: "pending", message: t("保存当前区块…", "Saving this section…") });
+      setState({ kind: "pending", message: t("正在保存当前页…", "Saving this page…") });
       const saved = await api.saveMonthSection(month, request);
       const next: MonthWorkspace = {
-        ...draft,
+        ...saveDraft,
         revision: saved.revision,
         status: saved.status,
         debt_revision: saved.debt_revision,
@@ -428,11 +609,43 @@ export function useMonthEditorSession({
         ...(section === "fixed_assets" ? { fixed_assets: saved.fixed_assets } : {})
       };
       const nextDirtySections = dirtySections.filter((item) => item !== section);
-      const persistedValidation = section === "transactions"
-        ? await api.validateTransactions(month, saved.transactions)
-        : null;
+      let persistedIssues: Array<Record<string, unknown>> | null = null;
+      let postSaveValidationMessage: string | null = null;
+      if (section === "transactions") {
+        try {
+          persistedIssues = (await api.validateTransactions(month, saved.transactions)).issues;
+        } catch (error) {
+          postSaveValidationMessage = messageFor(error);
+        }
+      }
+      if (!mounted.current || sequence !== requestSequence.current
+        || generation !== draftGeneration.current) {
+        await refreshAfterSave();
+        const message = t("区块已保存，但保存期间产生了新的编辑；请重新加载后继续。", "The section was saved, but new edits were made during saving. Reload before continuing.");
+        setState({ kind: "error", message });
+        return false;
+      }
+      // The month revision covers every section, while an operation preview
+      // describes transaction rows only. Saving assets/debts/fixed assets
+      // therefore rebases pending transaction audit previews to the new month
+      // revision instead of making an otherwise valid preview unusable. This
+      // must happen only after the generation check, otherwise a new preview
+      // created during the save could be rebound to the old save.
+      if (section !== "transactions" && pendingOperationLogsRef.current.length > 0) {
+        pendingOperationLogsRef.current = pendingOperationLogsRef.current.map((entry) => ({
+          ...entry,
+          preview: {
+            ...entry.preview,
+            metadata: {
+              ...(entry.preview.metadata ?? {}),
+              expected_revision: saved.revision
+            }
+          }
+        }));
+      }
       dispatchDraft({ type: "reset", workspace: clone(next) });
-      if (persistedValidation) setIssues(persistedValidation.issues);
+      draftGeneration.current += 1;
+      if (persistedIssues) setIssues(persistedIssues);
       setDirtySections(nextDirtySections);
       if (section === "transactions") {
         pendingOperationLogsRef.current = [];
@@ -440,30 +653,57 @@ export function useMonthEditorSession({
       }
       dirtySectionsRef.current = nextDirtySections;
       if (nextDirtySections.length > 0) {
-        reportDraft(next, persistedValidation?.issues ?? issues, nextDirtySections);
+        reportDraft(next, persistedIssues ?? issues, nextDirtySections);
       } else {
         onSessionChange(null);
       }
       skipNextDataVersion.current = true;
-      await onSaved();
-      const message = t(
-        `${section === "assets" ? "资产" : section === "transactions" ? "流水" : section === "debts" ? "借款" : "固定资产"}已保存，revision ${saved.revision}。`,
-        `The ${section.replace("_", " ")} section was saved at revision ${saved.revision}.`
-      );
+      await refreshAfterSave();
+      const warningMessage = section === "transactions" && persistedIssues
+        ? transactionWarningNotice(saved.transactions, persistedIssues)
+        : null;
+      const sectionLabel = section === "assets"
+        ? t("资产账户", "Asset accounts")
+        : section === "transactions"
+          ? t("流水", "Transactions")
+          : section === "debts"
+            ? t("借款", "Debts")
+            : t("固定资产", "Fixed assets");
+      const message = postSaveValidationMessage
+        ? t(
+            `${sectionLabel}已保存，但无法刷新流水提醒：${postSaveValidationMessage}`,
+            `${sectionLabel} saved, but transaction warnings could not be refreshed: ${postSaveValidationMessage}`
+          )
+        : warningMessage
+          ? t(
+              `流水已保存；${warningMessage}`,
+              `Transactions saved. ${warningMessage}`
+            )
+        : t(
+            `${sectionLabel}已保存。`,
+            `${sectionLabel} saved.`
+          );
       new Notice(message);
       setState({ kind: "success", message });
       return true;
     } catch (error) {
+      if (!mounted.current || sequence !== requestSequence.current) return false;
       const message = messageFor(error);
       new Notice(message);
       setState({ kind: "error", message });
       return false;
     }
-  }, [api, dirtySections, draft, issues, month, onSaved, onSessionChange, reportDraft]);
+  }, [api, dirtySections, draft, issues, month, onSessionChange, refreshAfterSave, reportDraft, transactionWarningNotice]);
 
   const save = useCallback(async (): Promise<boolean> => {
     return activeSection ? saveSection(activeSection) : saveWholeMonth();
   }, [activeSection, saveSection, saveWholeMonth]);
+
+  const saveAll = useCallback(async (): Promise<boolean> => saveWholeMonth(), [saveWholeMonth]);
+  const discardAll = useCallback(async (): Promise<void> => { await load(); }, [load]);
+  const acknowledgeDataChange = useCallback(() => {
+    skipNextDataVersion.current = true;
+  }, []);
 
   const hasUnsavedChanges = useCallback(() => dirtySectionsRef.current.length > 0, []);
   const getDraftSnapshot = useCallback((): EditorDraftSnapshot | null => {
@@ -474,6 +714,7 @@ export function useMonthEditorSession({
       workspace: clone(draft),
       categories: clone(categories),
       issues: clone(issues),
+      pending_operation_logs: clone(pendingOperationLogsRef.current),
       active_section: activeSection,
       dirty_sections: [...dirtySectionsRef.current]
     };
@@ -499,6 +740,9 @@ export function useMonthEditorSession({
     mark,
     reloadCurrentSection,
     save,
+    saveAll,
+    discardAll,
+    acknowledgeDataChange,
     hasUnsavedChanges,
     getDraftSnapshot
   };

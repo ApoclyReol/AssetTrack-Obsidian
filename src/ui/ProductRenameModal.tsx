@@ -2,6 +2,7 @@ import { Modal, Notice, type App } from "obsidian";
 import {
   createElement,
   useEffect,
+  useRef,
   useState
 } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -52,6 +53,12 @@ export function ProductRenameContent({
   const [preview, setPreview] = useState<ProductRenamePreview | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const mounted = useRef(true);
+  const previewRequestSequence = useRef(0);
+
+  useEffect(() => () => {
+    mounted.current = false;
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -78,6 +85,7 @@ export function ProductRenameContent({
     }, 0);
     return () => {
       active = false;
+      previewRequestSequence.current += 1;
       hostWindow.clearTimeout(timer);
     };
   }, [api, group.product_key, group.transaction_type, hostWindow]);
@@ -87,19 +95,23 @@ export function ProductRenameContent({
   const allSelected = visibleRows.length > 0 && visibleRows.every((row) => selectedIds.has(row.id));
 
   const toggleAll = () => {
+    previewRequestSequence.current += 1;
     setSelectedIds(allSelected
       ? new Set()
       : new Set(visibleRows.map((row) => row.id)));
     setPreview(null);
+    setLoading(false);
   };
 
   const toggleRow = (id: number) => {
+    previewRequestSequence.current += 1;
     setSelectedIds((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
     setPreview(null);
+    setLoading(false);
   };
 
   const previewRename = async () => {
@@ -107,23 +119,27 @@ export function ProductRenameContent({
       setMessage(t("请选择流水并填写目标商品名称。", "Select transactions and enter a target item name."));
       return;
     }
+    const sequence = ++previewRequestSequence.current;
     setLoading(true);
     setMessage(t("正在准备修改预览…", "Preparing the item edit preview…"));
     try {
-      setPreview(await api.previewProductRename({
+      const result = await api.previewProductRename({
         transaction_ids: selectedRows.map((row) => row.id),
         target_product: targetProduct
-      }));
+      });
+      if (sequence !== previewRequestSequence.current) return;
+      setPreview(result);
       setMessage("");
     } catch (error) {
-      setMessage(errorMessage(error));
+      if (sequence === previewRequestSequence.current) setMessage(errorMessage(error));
     } finally {
-      setLoading(false);
+      if (sequence === previewRequestSequence.current) setLoading(false);
     }
   };
 
   const applyRename = async () => {
     if (!preview) return;
+    const sequence = ++previewRequestSequence.current;
     setLoading(true);
     setMessage(t("正在修改商品名称…", "Updating item names…"));
     try {
@@ -134,14 +150,17 @@ export function ProductRenameContent({
           preview.months.map((month) => [month.month, month.revision])
         )
       });
+      if (!mounted.current || sequence !== previewRequestSequence.current) return;
       onSaved();
+      if (!mounted.current) return;
       onDataChanged();
+      if (!mounted.current) return;
       new Notice(t(`已修改 ${result.updated_count} 条流水中的商品名称。`, `Updated item names in ${result.updated_count} transactions.`));
       onClose();
     } catch (error) {
-      setMessage(errorMessage(error));
+      if (mounted.current && sequence === previewRequestSequence.current) setMessage(errorMessage(error));
     } finally {
-      setLoading(false);
+      if (mounted.current && sequence === previewRequestSequence.current) setLoading(false);
     }
   };
 
@@ -165,7 +184,7 @@ export function ProductRenameContent({
           <StaticTableHeader label={t("金额", "Amount")} className="asset-track-amount-column" />
         </tr></thead>
         <tbody>{visibleRows.map((row) => <tr key={row.id}>
-          <td><input className="asset-track-selection-checkbox" type="checkbox" checked={selectedIds.has(row.id)} onChange={() => toggleRow(row.id)} aria-label={t(`选择 ${row.transaction_date} 的流水`, `Select transaction on ${row.transaction_date}`)} /></td>
+          <td><input className="asset-track-selection-checkbox" type="checkbox" disabled={loading} checked={selectedIds.has(row.id)} onChange={() => toggleRow(row.id)} aria-label={t(`选择 ${row.transaction_date} 的流水`, `Select transaction on ${row.transaction_date}`)} /></td>
           <td className="asset-track-date-cell">{row.transaction_date}</td>
           <td>{row.counterparty || t("（空）", "(empty)")}</td>
           <td>{row.product || t("（空商品）", "(empty item)")}</td>
@@ -176,7 +195,7 @@ export function ProductRenameContent({
     </div>
     <div className="asset-track-product-rename-form">
       <label>{t("修改为商品名称", "Change to item name")}
-        <input value={targetProduct} onChange={(event) => { setTargetProduct(event.target.value); setPreview(null); }} />
+        <input value={targetProduct} disabled={loading} onChange={(event) => { previewRequestSequence.current += 1; setTargetProduct(event.target.value); setPreview(null); setLoading(false); }} />
       </label>
       <button type="button" className="mod-cta" disabled={loading || !selectedRows.length} onClick={() => void previewRename()}>{t("修改商品", "Edit item")}</button>
       {preview && <button type="button" className="mod-warning" disabled={loading} onClick={() => void applyRename()}>{t(`确认修改 ${preview.transaction_count} 条`, `Confirm ${preview.transaction_count} edits`)}</button>}

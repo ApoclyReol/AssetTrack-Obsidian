@@ -12,6 +12,12 @@ You do not need to record every purchase as it happens. Asset Track is built for
 focused monthly review: import what already exists, resolve the few things that need your
 judgment, check the result, and move on.
 
+> [!IMPORTANT]
+> Current recommended version: **1.8.0**. It includes serious fixes for rule-loop conflicts
+> and draft-saving failures under specific rule setups, plus the schema 11 upgrade with
+> automatic backup and migration. Version 1.7.1 is not published separately; upgrade directly
+> to 1.8.0.
+
 ## Why Asset Track
 
 - **Once a month:** replace continuous manual entry with a focused monthly routine.
@@ -50,7 +56,7 @@ Asset Track is a good fit if you:
 - CSV, XLSX, and XLS bill import with reusable field mappings;
 - monthly transactions, accounts, loans, investments, and fixed assets;
 - investment-account selection for deposits and withdrawals, with account-level monthly investment analysis;
-- category and precise product, counterparty, and combined rules for repeated cleanup;
+- category and precise product, counterparty, combined, and daifu rules for repeated cleanup;
 - outgoing, incoming, and investment transaction tabs with detail and grouped views;
 - previewed batch edits, income/daifu conversion, and local audit records;
 - optional AI classification that never writes without confirmation;
@@ -82,10 +88,23 @@ explicitly configure and use the optional AI classifier; only the selected rows 
 definitions needed for that request are sent to the endpoint you choose. Backups and restores
 are initiated by you, and disabling or uninstalling the plugin does not delete your database or backups.
 
+### About the direct filesystem access warning
+
+Obsidian may show a **Direct Filesystem Access** warning because Asset Track uses desktop
+SQLite and local file operations. This access is used to create and open the SQLite database,
+keep SQLite sidecar files safe, create protection snapshots before migrations or restores,
+and export or restore complete backups.
+
+The warning describes the capability class, not hidden behavior. Asset Track does not use it
+to scan your vault or system. The normal database path is always the data directory you choose
+inside the current vault: `<dataDirectory>/accounting_system.db`, with automatic protection
+snapshots under `<dataDirectory>/backups/`. Files outside that directory are touched only when
+you explicitly choose a backup export destination or restoration file.
+
 ## Compatibility
 
 - Desktop Obsidian only: macOS, Windows, and Linux.
-- Version 1.7.0 requires Obsidian 1.13.0 or later. Update to the latest available 1.13.x desktop release before installing or updating.
+- Version 1.8.0 requires Obsidian 1.13.0 or later. Update to the latest available 1.13.x desktop release before installing or updating.
 - The plugin does not require Python, a separate Node.js installation, or a sidecar.
 
 ## Read more

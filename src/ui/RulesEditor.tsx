@@ -52,6 +52,10 @@ const EMPTY_RULE_HEALTH_SUMMARY: RuleHealthSummary = {
   stable_products_without_rule: 0
 };
 
+function isRevisionConflict(error: unknown): boolean {
+  return error instanceof AssetTrackError && error.code === "revision_conflict";
+}
+
 export type RulesEditorHandle = EditorSession;
 
 interface RulesEditorProps {
@@ -92,6 +96,18 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
   const [ruleState, setRuleState] = useState<OperationState>({ kind: "idle" });
   const [state, setState] = useState<OperationState>({ kind: "idle" });
   const rulesSectionRef = useRef<HTMLElement | null>(null);
+  const editorRequestSequence = useRef(0);
+  const mounted = useRef(true);
+  const saveBlockedRef = useRef(false);
+  const [saveBlocked, setSaveBlocked] = useState(false);
+  const blockSaves = useCallback(() => {
+    saveBlockedRef.current = true;
+    setSaveBlocked(true);
+  }, []);
+  const clearSaveBlock = useCallback(() => {
+    saveBlockedRef.current = false;
+    setSaveBlocked(false);
+  }, []);
   const session = useConfigurationSession(initialDraft, dataVersion);
   const {
     workspace,
@@ -99,11 +115,13 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
     categoryDirty,
     ruleDirty,
     dirtyFlagsRef,
+    draftGeneration,
     lastDataVersion,
     skipNextDataVersion,
     restoredDraft,
     setDirtyFlags,
     markCategoryDirty,
+    markRuleDirty,
     updateCategories,
     updateRules,
     getDraftSnapshot
@@ -131,14 +149,26 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
     hasUnsavedChanges: () => false,
     getDraftSnapshot: () => null,
     save: async () => false,
-    discard: async () => undefined
+    saveAll: async () => false,
+    discard: async () => undefined,
+    discardAll: async () => undefined
   });
   const currentSection = section ?? "health";
+  const getRulesDraftSnapshot = useCallback(() => {
+    const snapshot = getDraftSnapshot(analyticsReady);
+    return snapshot ? { ...snapshot, active_section: currentSection } : null;
+  }, [analyticsReady, currentSection, getDraftSnapshot]);
+  useEffect(() => () => {
+    mounted.current = false;
+    editorRequestSequence.current += 1;
+  }, []);
   useImperativeHandle(ref, () => ({
     hasUnsavedChanges: () => actionRef.current.hasUnsavedChanges(),
     getDraftSnapshot: () => actionRef.current.getDraftSnapshot(),
     save: () => actionRef.current.save(),
-    discard: () => actionRef.current.discard()
+    saveAll: () => actionRef.current.saveAll(),
+    discard: () => actionRef.current.discard(),
+    discardAll: () => actionRef.current.discardAll()
   }), [ref]);
 
   const handleHistorySaved = useCallback(() => {
@@ -148,27 +178,32 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
   }, [loadAnalytics, onSaved]);
 
   const load = useCallback(async () => {
+    const sequence = ++editorRequestSequence.current;
     setState({ kind: "pending", message: t("加载数据健康…", "Loading data health…") });
     try {
       const shell: RuleWorkspaceShell = await api.ruleWorkspaceShell();
+      if (!mounted.current || sequence !== editorRequestSequence.current) return;
       setWorkspace({ ...shell, recommendations: [], historical_products: [], rule_conflicts: [], summary: EMPTY_RULE_HEALTH_SUMMARY });
       setAnalyticsReady(false);
       setDirtyFlags(false, false);
+      clearSaveBlock();
       onSessionChange(null);
       setState({ kind: "idle" });
       scheduleAnalyticsLoad();
     } catch (error) {
+      if (!mounted.current || sequence !== editorRequestSequence.current) return;
       const message = messageFor(error);
       new Notice(message);
       setState({ kind: "error", message });
     }
-  }, [api, onSessionChange, scheduleAnalyticsLoad, setDirtyFlags]);
+  }, [api, clearSaveBlock, onSessionChange, scheduleAnalyticsLoad, setDirtyFlags]);
 
   useEffect(() => {
     const restored = restoredDraft.current;
     if (!restored) {
       void load();
     } else {
+      const sequence = ++editorRequestSequence.current;
       restoredDraft.current = null;
       onSessionChange(restored);
       const message = t("未保存的分类和规则草稿已恢复。", "The unsaved category and rule draft was restored.");
@@ -176,7 +211,9 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
       new Notice(message);
       void api.ruleWorkspaceShell()
         .then((current) => {
+          if (!mounted.current || sequence !== editorRequestSequence.current) return;
           if (current.categories_revision !== restored.workspace.categories_revision || current.rules_revision !== restored.workspace.rules_revision) {
+            blockSaves();
             const message = t("草稿已恢复，但其他窗口已修改分类或规则；重新加载前不能覆盖保存。", "The draft was restored, but another window changed categories or rules. Reload before saving.");
             setState({ kind: "error", message });
             new Notice(message);
@@ -184,16 +221,17 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
           scheduleAnalyticsLoad();
         })
         .catch((error: unknown) => {
+          if (!mounted.current || sequence !== editorRequestSequence.current) return;
           const message = messageFor(error);
           new Notice(message);
           setState({ kind: "error", message });
         });
     }
-  }, [api, load, onSessionChange, scheduleAnalyticsLoad]);
+  }, [api, blockSaves, load, onSessionChange, scheduleAnalyticsLoad]);
 
   useEffect(() => {
-    onSessionChange(getDraftSnapshot(analyticsReady));
-  }, [analyticsReady, getDraftSnapshot, onSessionChange]);
+    onSessionChange(getRulesDraftSnapshot());
+  }, [getRulesDraftSnapshot, onSessionChange]);
 
   useEffect(() => {
     if (lastDataVersion.current === dataVersion) return;
@@ -203,15 +241,28 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
       return;
     }
     if (dirtyFlagsRef.current.category || dirtyFlagsRef.current.rule) {
+      blockSaves();
+      editorRequestSequence.current += 1;
       const message = t("其他窗口已修改规则或历史流水；当前草稿保留，保存前请先重新加载。", "Another window changed rules or historical transactions. The current draft is preserved; reload before saving.");
       new Notice(message);
       setState({ kind: "error", message });
       return;
     }
     void load();
-  }, [dataVersion, load]);
+  }, [blockSaves, dataVersion, load]);
 
   if (!workspace) return <Status state={state} />;
+
+  const reportCommittedConfigurationSave = () => {
+    skipNextDataVersion.current = false;
+    onSaved();
+    onDataChanged();
+  };
+
+  const currentConfigurationRequest = (sequence: number, generation: number): boolean =>
+    mounted.current
+    && sequence === editorRequestSequence.current
+    && generation === draftGeneration.current;
 
   const removeRule = async (index: number, rule: SavedRule) => {
     const occurrences = Number(rule.occurrences ?? 0);
@@ -223,20 +274,104 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
       );
       if (!confirmed) return;
     }
-    updateRules(workspace.rules.filter((_, rowIndex) => rowIndex !== index));
+    setWorkspace((current) => {
+      if (!current) return current;
+      const currentIndex = current.rules.findIndex((candidate, rowIndex) =>
+        rule.id !== undefined ? candidate.id === rule.id : candidate === rule || rowIndex === index
+      );
+      return currentIndex < 0
+        ? current
+        : { ...current, rules: current.rules.filter((_, rowIndex) => rowIndex !== currentIndex) };
+    });
+    markRuleDirty();
   };
 
-  const saveCategories = async (): Promise<boolean> => {
+  const saveCategories = async (): Promise<{
+    saved: boolean;
+    rulesRevision?: number;
+  }> => {
+    if (saveBlockedRef.current) return { saved: false };
+    const sequence = ++editorRequestSequence.current;
+    const generation = draftGeneration.current;
+    const submittedCategories = workspace.categories;
     setCategoryState({ kind: "pending", message: t("保存分类…", "Saving categories…") });
+    let result: Awaited<ReturnType<ConfigurationEditorPort["saveCategories"]>>;
     try {
-      const result = await api.saveCategories(workspace.categories_revision, workspace.categories);
-      const analytics = await api.ruleWorkspaceAnalytics();
+      result = await api.saveCategories(workspace.categories_revision, submittedCategories);
+    } catch (error) {
+      if (mounted.current && isRevisionConflict(error)) blockSaves();
+      if (!mounted.current || sequence !== editorRequestSequence.current) return { saved: false };
+      const message = messageFor(error);
+      new Notice(message);
+      setCategoryState({ kind: "error", message });
+      return { saved: false };
+    }
+
+    let analytics: Awaited<ReturnType<ConfigurationEditorPort["ruleWorkspaceAnalytics"]>>;
+    try {
+      analytics = await api.ruleWorkspaceAnalytics();
+      if (
+        analytics.categories_revision < result.revision
+        || analytics.rules_revision < (result.rules_revision ?? workspace.rules_revision)
+      ) throw new Error("stale analytics snapshot");
+    } catch {
+      if (!mounted.current) return { saved: false };
+      reportCommittedConfigurationSave();
+      if (currentConfigurationRequest(sequence, generation)) {
+        const categoryNames = new Map(result.rows.map((category) => [category.category_key, category.name]));
+        setWorkspace((current) => current ? {
+          ...current,
+          categories_revision: result.revision,
+          rules_revision: result.rules_revision,
+          categories: result.rows,
+          rules: dirtyFlagsRef.current.rule
+            ? current.rules.map((rule) => ({
+                ...rule,
+                category: categoryNames.get(rule.category_key) ?? rule.category
+              }))
+            : current.rules
+        } : current);
+        setDirtyFlags(false, dirtyFlagsRef.current.rule);
+        const message = t(
+          "分类已保存，但数据健康刷新失败；当前草稿已保留，请稍后重载。",
+          "Categories were saved, but data-health refresh failed; the current draft was preserved. Reload later."
+        );
+        new Notice(message);
+        setCategoryState({ kind: "success", message });
+        return { saved: true, rulesRevision: result.rules_revision };
+      }
+      const message = t(
+        "分类已保存，但保存期间产生了新修改；当前草稿已保留，请重新加载后再保存。",
+        "Categories were saved, but new edits were made during the save; the current draft was preserved. Reload before saving again."
+      );
+      blockSaves();
+      new Notice(message);
+      setCategoryState({ kind: "success", message });
+      return { saved: false };
+    }
+
+    if (!currentConfigurationRequest(sequence, generation)) {
+      if (mounted.current) {
+        blockSaves();
+        reportCommittedConfigurationSave();
+        const message = t(
+          "分类已保存，但保存期间产生了新修改；当前草稿已保留，请重新加载后再保存。",
+          "Categories were saved, but new edits were made during the save; the current draft was preserved. Reload before saving again."
+        );
+        new Notice(message);
+        setCategoryState({ kind: "success", message });
+      }
+      return { saved: false };
+    }
+
+    {
       const categoryNames = new Map(result.rows.map((category) => [category.category_key, category.name]));
+      const rulesRevision = result.rules_revision ?? analytics.rules_revision;
       setWorkspace((current) => current ? {
         ...current,
         categories_revision: result.revision,
         categories: analytics.categories,
-        rules_revision: analytics.rules_revision,
+        rules_revision: rulesRevision,
         rules: dirtyFlagsRef.current.rule ? current.rules.map((rule) => ({ ...rule, category: categoryNames.get(rule.category_key) ?? rule.category })) : analytics.rules,
         recommendations: analytics.recommendations,
         historical_products: analytics.historical_products,
@@ -244,28 +379,28 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
         summary: analytics.summary
       } : current);
       setDirtyFlags(false, dirtyFlagsRef.current.rule);
+      applyAnalytics(analytics);
       skipNextDataVersion.current = true;
       onSaved();
       onDataChanged();
       new Notice(t("分类已保存。", "Categories saved."));
       setCategoryState({ kind: "success", message: t("分类已保存。", "Categories saved.") });
-      return true;
-    } catch (error) {
-      const message = messageFor(error);
-      new Notice(message);
-      setCategoryState({ kind: "error", message });
-      return false;
+      return { saved: true, rulesRevision };
     }
   };
 
-  const saveRules = async (): Promise<boolean> => {
+  const saveRules = async (expectedRevisionOverride?: number): Promise<boolean> => {
+    if (saveBlockedRef.current) return false;
     if (dirtyFlagsRef.current.category) {
       const message = t("请先保存分类，再保存匹配规则。", "Save categories before saving matching rules.");
       new Notice(message);
       setRuleState({ kind: "error", message });
       return false;
     }
+    const sequence = ++editorRequestSequence.current;
+    const generation = draftGeneration.current;
     setRuleState({ kind: "pending", message: t("保存匹配规则…", "Saving matching rules…") });
+    let result: Awaited<ReturnType<ConfigurationEditorPort["saveRules"]>>;
     try {
       const categoryNames = new Map(workspace.categories.map((category) => [category.category_key, category.name]));
       const nextRules = workspace.rules.map((rule) => ({
@@ -276,8 +411,70 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
         }) ?? undefined,
         category: categoryNames.get(rule.category_key) ?? rule.category
       }));
-      await api.saveRules(workspace.rules_revision, nextRules, { source_page: "配置/匹配规则" });
-      const analytics = await api.ruleWorkspaceAnalytics();
+      result = await api.saveRules(
+        expectedRevisionOverride ?? workspace.rules_revision,
+        nextRules,
+        { source_page: "配置/匹配规则" }
+      );
+    } catch (error) {
+      if (mounted.current && isRevisionConflict(error)) blockSaves();
+      if (!mounted.current || sequence !== editorRequestSequence.current) return false;
+      const message = messageFor(error);
+      new Notice(message);
+      setRuleState({ kind: "error", message });
+      return false;
+    }
+
+    let analytics: Awaited<ReturnType<ConfigurationEditorPort["ruleWorkspaceAnalytics"]>>;
+    try {
+      analytics = await api.ruleWorkspaceAnalytics();
+      if (
+        analytics.categories_revision < workspace.categories_revision
+        || (result?.revision !== undefined && analytics.rules_revision < result.revision)
+      ) throw new Error("stale analytics snapshot");
+    } catch {
+      if (!mounted.current) return false;
+      reportCommittedConfigurationSave();
+      if (currentConfigurationRequest(sequence, generation)) {
+        setWorkspace((current) => current ? {
+          ...current,
+          rules_revision: result.revision,
+          rules: result.rows as unknown as SavedRule[]
+        } : current);
+        setDirtyFlags(dirtyFlagsRef.current.category, false);
+        const message = t(
+          "匹配规则已保存，但数据健康刷新失败；当前规则已保留，请稍后重载。",
+          "Matching rules were saved, but data-health refresh failed; the saved rules were kept. Reload later."
+        );
+        new Notice(message);
+        setRuleState({ kind: "success", message });
+        return true;
+      }
+      const message = t(
+        "匹配规则已保存，但保存期间产生了新修改；当前草稿已保留，请重新加载后再保存。",
+        "Matching rules were saved, but new edits were made during the save; the current draft was preserved. Reload before saving again."
+      );
+      blockSaves();
+      new Notice(message);
+      setRuleState({ kind: "success", message });
+      return false;
+    }
+
+    if (!currentConfigurationRequest(sequence, generation)) {
+      if (mounted.current) {
+        blockSaves();
+        reportCommittedConfigurationSave();
+        const message = t(
+          "匹配规则已保存，但保存期间产生了新修改；当前草稿已保留，请重新加载后再保存。",
+          "Matching rules were saved, but new edits were made during the save; the current draft was preserved. Reload before saving again."
+        );
+        new Notice(message);
+        setRuleState({ kind: "success", message });
+      }
+      return false;
+    }
+
+    {
       setWorkspace((current) => current ? {
         ...current,
         categories_revision: analytics.categories_revision,
@@ -289,39 +486,67 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
         summary: analytics.summary
       } : current);
       setDirtyFlags(dirtyFlagsRef.current.category, false);
+      applyAnalytics(analytics);
       skipNextDataVersion.current = true;
       onSaved();
       onDataChanged();
       new Notice(t("匹配规则已保存。", "Matching rules saved."));
       setRuleState({ kind: "success", message: t("匹配规则已保存。", "Matching rules saved.") });
       return true;
-    } catch (error) {
-      const message = messageFor(error);
-      new Notice(message);
-      setRuleState({ kind: "error", message });
-      return false;
     }
   };
 
   const saveCurrentSection = async (): Promise<boolean> => {
+    if (saveBlockedRef.current) return false;
     if (currentSection === "categories") {
-      return saveCategories();
+      return (await saveCategories()).saved;
     }
     if (currentSection === "matching") {
       return saveRules();
     }
     let saved = true;
-    if (dirtyFlagsRef.current.category) saved = await saveCategories();
-    if (saved && dirtyFlagsRef.current.rule) saved = await saveRules();
+    let rulesRevision: number | undefined;
+    if (dirtyFlagsRef.current.category) {
+      const categoryResult = await saveCategories();
+      saved = categoryResult.saved;
+      rulesRevision = categoryResult.rulesRevision;
+    }
+    if (saved && dirtyFlagsRef.current.rule) saved = await saveRules(rulesRevision);
+    return saved;
+  };
+
+  const saveAllSections = async (): Promise<boolean> => {
+    if (saveBlockedRef.current) return false;
+    let saved = true;
+    let rulesRevision: number | undefined;
+    if (dirtyFlagsRef.current.category) {
+      const categoryResult = await saveCategories();
+      saved = categoryResult.saved;
+      rulesRevision = categoryResult.rulesRevision;
+    }
+    if (saved && dirtyFlagsRef.current.rule) saved = await saveRules(rulesRevision);
     return saved;
   };
 
   const reloadCurrentSection = async () => {
+    const sequence = ++editorRequestSequence.current;
+    const generation = draftGeneration.current;
     setState({ kind: "pending", message: t("重载当前规则页面…", "Reloading this rules page…") });
     try {
       const analytics = await api.ruleWorkspaceAnalytics();
-      const reloadCategories = currentSection === "categories";
-      const reloadRules = currentSection === "matching" || currentSection === "health";
+      if (!mounted.current || sequence !== editorRequestSequence.current) return;
+      if (generation !== draftGeneration.current) {
+        const message = t(
+          "重载期间产生了新修改，当前草稿已保留。",
+          "New edits were made while reloading; the current draft was preserved."
+        );
+        new Notice(message);
+        setState({ kind: "error", message });
+        return;
+      }
+      const reloadAll = saveBlockedRef.current;
+      const reloadCategories = reloadAll || currentSection === "categories";
+      const reloadRules = reloadAll || currentSection === "matching" || currentSection === "health";
       const nextCategoryDirty = reloadCategories ? false : dirtyFlagsRef.current.category;
       const nextRuleDirty = reloadRules ? false : dirtyFlagsRef.current.rule;
       setDirtyFlags(nextCategoryDirty, nextRuleDirty);
@@ -342,10 +567,13 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
       } : current);
       setAnalyticsReady(true);
       setHistoryPanelKey((value) => value + 1);
+      applyAnalytics(analytics);
+      if (reloadAll) clearSaveBlock();
       const message = t("当前规则页面已重载。", "The current rules page was reloaded.");
       new Notice(message);
       setState({ kind: "success", message });
     } catch (error) {
+      if (!mounted.current || sequence !== editorRequestSequence.current) return;
       const message = messageFor(error);
       new Notice(message);
       setState({ kind: "error", message });
@@ -353,6 +581,9 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
   };
 
   const createRuleImmediately = async (rule: SavedRule) => {
+    if (saveBlockedRef.current) {
+      throw new AssetTrackError({ code: "revision_conflict", status: 409 });
+    }
     if (dirtyFlagsRef.current.category || dirtyFlagsRef.current.rule) {
       throw new AssetTrackError({ code: "rules.unsaved_changes", status: 422 });
     }
@@ -363,25 +594,74 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
     if (duplicate) {
       throw new AssetTrackError({ code: "rules.duplicate", status: 422 });
     }
+    const sequence = ++editorRequestSequence.current;
+    const generation = draftGeneration.current;
     setRuleState({ kind: "pending", message: t("正在保存规则…", "Saving rule…") });
     let savedToDatabase = false;
+    let commitReported = false;
+    let savedResult: Awaited<ReturnType<ConfigurationEditorPort["saveRules"]>>;
+    const reportConcurrentCommit = () => {
+      if (commitReported || !mounted.current) return;
+      commitReported = true;
+      blockSaves();
+      reportCommittedConfigurationSave();
+      const message = t(
+        "规则已保存，但保存期间产生了新修改；当前草稿已保留，请重新加载后继续。",
+        "The rule was saved, but new edits were made while saving; the current draft was preserved. Reload before continuing."
+      );
+      new Notice(message);
+      setRuleState({ kind: "success", message });
+    };
     try {
       const nextRules = rule.id
         ? workspace.rules.map((current) => current.id === rule.id ? { ...rule } : { ...current })
         : [...workspace.rules.map((current) => ({ ...current })), { ...rule }];
-      await api.saveRules(workspace.rules_revision, nextRules, { source_page: "配置/规则工作台" });
+      savedResult = await api.saveRules(workspace.rules_revision, nextRules, { source_page: "配置/规则工作台" });
       savedToDatabase = true;
-      const analytics = await api.ruleWorkspaceAnalytics();
+      if (!currentConfigurationRequest(sequence, generation)) {
+        reportConcurrentCommit();
+        return;
+      }
+      let analytics: Awaited<ReturnType<ConfigurationEditorPort["ruleWorkspaceAnalytics"]>>;
+      try {
+        analytics = await api.ruleWorkspaceAnalytics();
+      } catch {
+        if (!currentConfigurationRequest(sequence, generation)) {
+          reportConcurrentCommit();
+          return;
+        }
+        setWorkspace((current) => current ? {
+          ...current,
+          rules_revision: savedResult.revision,
+          rules: savedResult.rows as unknown as SavedRule[]
+        } : current);
+        setHistoryPanelKey((value) => value + 1);
+        commitReported = true;
+        reportCommittedConfigurationSave();
+        const message = t(
+          "规则已保存，但数据健康刷新失败；已保留本次规则，请稍后重载。",
+          "The rule was saved, but data-health refresh failed; the saved rule was kept. Reload later."
+        );
+        new Notice(message);
+        setRuleState({ kind: "success", message });
+        return;
+      }
+      if (!currentConfigurationRequest(sequence, generation)) {
+        reportConcurrentCommit();
+        return;
+      }
       applyAnalytics(analytics);
       setHistoryPanelKey((value) => value + 1);
       setRuleState({ kind: "success", message: t("规则已保存，数据健康表已刷新。", "Rule saved and the data-health table was refreshed.") });
       new Notice(t("规则已直接保存，数据健康表已刷新。", "Rule saved directly and the data-health table was refreshed."));
       skipNextDataVersion.current = true;
+      commitReported = true;
       onSaved();
       onDataChanged();
     } catch (error) {
-      if (savedToDatabase) {
+      if (savedToDatabase && !commitReported) {
         skipNextDataVersion.current = false;
+        commitReported = true;
         onSaved();
         onDataChanged();
       }
@@ -437,15 +717,20 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
     }
     const confirmed = await confirmAction(t("确认删除分类？", "Confirm category deletion?"), t(`分类“${category.name}”没有历史流水或规则引用，删除后不可恢复。`, `Category “${category.name}” has no historical transactions or rule references and cannot be restored after deletion.`), t("确认删除", "Delete category"));
     if (!confirmed) return;
-    setWorkspace({ ...workspace, categories: workspace.categories.filter((_, rowIndex) => rowIndex !== index) });
+    setWorkspace((current) => current ? {
+      ...current,
+      categories: current.categories.filter((candidate) => candidate.category_key !== category.category_key)
+    } : current);
     markCategoryDirty();
   };
 
   actionRef.current = {
     hasUnsavedChanges: () => dirtyFlagsRef.current.category || dirtyFlagsRef.current.rule,
-    getDraftSnapshot: () => getDraftSnapshot(analyticsReady),
+    getDraftSnapshot: getRulesDraftSnapshot,
     save: saveCurrentSection,
-    discard: reloadCurrentSection
+    saveAll: saveAllSections,
+    discard: reloadCurrentSection,
+    discardAll: load
   };
 
   return <main className="asset-track-editor">
@@ -495,7 +780,8 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
       onRemove={removeCategory}
       onOpenHistory={openCategoryHistory}
       showSectionActions={section === "categories"}
-      dirty={categoryDirty}
+      dirty={categoryDirty && !saveBlocked}
+      saveBlocked={saveBlocked}
       pageState={state}
       saveState={categoryState}
       onReload={reloadCurrentSection}
@@ -510,7 +796,7 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
       onChange={updateRules}
       onRemove={removeRule}
       showSectionActions={section === "matching"}
-      dirty={ruleDirty}
+      dirty={ruleDirty && !saveBlocked}
       pageState={state}
       saveState={ruleState}
       onReload={reloadCurrentSection}

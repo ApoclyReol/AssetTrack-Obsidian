@@ -9,7 +9,7 @@
 映射为 `zh-CN`，其他语言映射为英文。React 界面、Setting API、Modal、Notice
 和 Electron 原生文件选择器共享该入口。
 
-国际化只存在于展示层。Repository、Service、schema 10、CSV 解析和财务计算继续
+国际化只存在于展示层。Repository、Service、schema 11、CSV 解析和财务计算继续
 使用既有规范值；中文业务枚举在展示时映射为英文标签，提交时仍写入原规范值。
 结构化错误不再依赖中文原文反向匹配英文；跨层错误统一使用
 `AssetTrackError { code, status, params, cause }`，由 `i18n.ts` 根据错误码和参数渲染。
@@ -23,7 +23,7 @@ flowchart LR
     B --> C["AssetTrackService"]
     C --> D["TypeScript Repository"]
     D --> E["node:sqlite"]
-    E --> F["SQLite schema 10"]
+    E --> F["SQLite schema 11"]
 ```
 
 | 层 | 当前职责 |
@@ -38,8 +38,8 @@ flowchart LR
 ## 产品定位对架构的约束
 
 运行链服务的是“月度结算”，不是高频手工记账：账单从用户明确选择的文件进入导入
-预览，经过统一字段语义、规则匹配和质检后写入月度草稿，再由 Repository 在单个
-SQLite 事务中提交。手工编辑用于纠错、补漏和特殊交易；不能因为增加快捷录入入口，
+预览，经过统一字段语义和质检后写入月度草稿；规则匹配由流水区的独立预览确认入口触发，
+再由 Repository 在单个 SQLite 事务中提交。手工编辑用于纠错、补漏和特殊交易；不能因为增加快捷录入入口，
 就绕过同一套校验、revision 和事务边界。
 
 SQLite 是唯一事实层。界面草稿、导入映射、分析缓存、Markdown 内容和导出文件都
@@ -76,13 +76,14 @@ SQLite 事实模型中并由同一 Service/Repository 管理；不得引入云�
 插件 `data.json` 只保存 `dataDirectory`、账单映射和显示/AI 配置，不保存财务事实。
 schema 10 在流水和自动规则中分别保存 `counterparty`；加仓、提现流水还通过可空的
 `transactions.account_key` 指向理财账户。流水字段继续作为事实和统计数据使用，规则可以按交易对手、
-商品或二者组合做精确匹配。schema 9 到 schema 10 的迁移在 `DatabaseManager`
-初始化阶段完成，迁移前建立 `before-schema10-*.db` 保护备份；schema 9→10 在同一事务中完成。
+商品或二者组合做精确匹配。schema 11 放宽 `auto_rules.transaction_type`，允许代付拥有独立规则，
+但代付规则仍使用支出分类。schema 9/10 到最新 schema 的迁移在 `DatabaseManager`
+初始化阶段按版本链完成，迁移前建立 `before-schema11-*.db` 保护备份；完整迁移链在同一事务中提交。
 规则作用域无法判定、重复、分类无效或数据库完整性校验失败时
 阻止完成，不静默选择。
 
 当前版本起，`data.json` 还保存基础货币、金额格式、平账容差、大额支出阈值和可选 AI
-地址、模型、超时；v1.7.0
+地址、模型、超时；v1.8.0
 不改变这些设置的兼容方式。
 API Key 只通过 Obsidian SecretStorage 保存；AI 仅发送选中可分类流水的最小字段，结果必须
 预览、确认后才进入草稿。这些字段只影响展示、分析和可选建议，不改变财务事实。月度草稿使用 reducer
@@ -155,7 +156,8 @@ API Key 只通过 Obsidian SecretStorage 保存；AI 仅发送选中可分类流
   `full`，同时记录命中、未命中和冲突次数。无规则筛选包含完全未覆盖和部分覆盖商品；
   建议只使用未覆盖且没有未解决规则冲突的流水计算。
   规则解析使用固定优先级“交易对手 + 商品 > 商品 > 交易对手”，每笔流水只解析一轮；不同
-  作用域的正常覆盖不会被当成硬冲突，同条件重复和重写链在保存前阻止。
+  作用域的正常覆盖不会被当成硬冲突；同条件重复和最高优先级目标指向不同分类的重写链在保存前阻止，
+  同分类字段规范化链允许保存。
 - `previewCategoryBackfill()` / `applyCategoryBackfill()` 携带流水 ID 和每月 revision，在一个 SQLite
   事务中只更新分类字段，并对所有受影响月份各增加一次 revision；商品名称统一使用同样的事务边界，
   只更新 `transactions.product`。

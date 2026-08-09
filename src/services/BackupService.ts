@@ -34,8 +34,8 @@ const CONFIG = [
     name: "transactions",
     filename: "transactions_backup.csv",
     columns: [
-      "month", "transaction_date", "type", "category_key",
-      "category", "counterparty", "product", "source", "amount"
+      "id", "month", "transaction_date", "type", "category_key",
+      "category", "counterparty", "product", "source", "account_key", "amount"
     ]
   },
   {
@@ -65,7 +65,7 @@ const CONFIG = [
     name: "fixed_assets",
     filename: "fixed_assets_backup.csv",
     columns: [
-      "month", "asset_key", "asset_name", "category", "purchase_date",
+      "id", "month", "asset_key", "asset_name", "category", "purchase_date",
       "purchase_price", "status", "note"
     ]
   },
@@ -73,7 +73,7 @@ const CONFIG = [
     name: "debt_manager",
     filename: "debts_backup.csv",
     columns: [
-      "description", "counterparty", "amount", "start_date", "is_paid", "paid_date"
+      "id", "description", "counterparty", "amount", "start_date", "is_paid", "paid_date"
     ]
   },
   {
@@ -153,6 +153,17 @@ function timestamp(date = new Date()): string {
     .replace("Z", "");
   const [seconds, fraction = "000"] = base.split(".");
   return `${seconds}-${fraction.padEnd(6, "0")}`;
+}
+
+function uniquePath(base: string): string {
+  if (!existsSync(base) && !existsSync(`${base}.tmp`)) return base;
+  let sequence = 1;
+  let candidate = `${base}-${sequence}`;
+  while (existsSync(candidate) || existsSync(`${candidate}.tmp`)) {
+    sequence += 1;
+    candidate = `${base}-${sequence}`;
+  }
+  return candidate;
 }
 
 function sha256Buffer(value: Buffer): string {
@@ -501,10 +512,10 @@ export class BackupService {
         ...CONFIG.map((config) => config.filename),
         MANIFEST_NAME
       ].sort();
-      const output = join(
+      const output = uniquePath(join(
         targetDirectory,
         `asset-track-backup-${timestamp()}.zip`
-      );
+      ));
       const pending = `${output}.tmp`;
       writeFileSync(pending, zipFiles(fileNames.map((name) => ({
         name,
@@ -545,6 +556,20 @@ export class BackupService {
           !== JSON.stringify([...REQUIRED_TABLES].sort())
         ) {
           fail("backup.manifest_summary_invalid");
+        }
+        const expectedFileNames = [
+          DATABASE_NAME,
+          ...CONFIG.map((config) => config.filename)
+        ].sort();
+        if (JSON.stringify(Object.keys(manifest.files).sort()) !== JSON.stringify(expectedFileNames)) {
+          fail("backup.manifest_files_invalid");
+        }
+        for (const config of CONFIG) {
+          const metadata = manifest.tables[config.name];
+          if (metadata.filename !== config.filename
+            || JSON.stringify(metadata.columns) !== JSON.stringify(config.columns)) {
+            fail("backup.manifest_summary_invalid");
+          }
         }
         for (const [filename, metadata] of Object.entries(manifest.files)) {
           const path = join(materialized.root, filename);
@@ -622,19 +647,22 @@ export class BackupService {
     }
   }
 
-  async restore(source: string): Promise<Record<string, unknown>> {
-    const validation = await this.validate(source);
+  async restore(
+    source: string,
+    beforeCommit?: () => void
+  ): Promise<Record<string, unknown>> {
     const materialized = await materialize(source);
     try {
+      const validation = await this.validate(materialized.root);
       const incomingSource = join(materialized.root, DATABASE_NAME);
       const target = this.manager.getPath();
       const incoming = `${target}.incoming`;
       const rollback = `${target}.rollback`;
-      const safety = join(
+      const safety = uniquePath(join(
         dirname(target),
         "backups",
         `before-restore-${timestamp()}`
-      );
+      ));
       rmSync(incoming, { force: true });
       const runtime = loadSqliteModule();
       const sourceDb = new runtime.DatabaseSync(incomingSource, { readOnly: true });
@@ -644,24 +672,44 @@ export class BackupService {
         sourceDb.close();
       }
       validateSqlite(incoming);
-      if (existsSync(target)) await this.exportSafetyDirectory(safety);
+      let hadTarget = false;
       await this.manager.withRestoreLock(async () => {
-        rmSync(`${target}-wal`, { force: true });
-        rmSync(`${target}-shm`, { force: true });
-        rmSync(rollback, { force: true });
-        if (existsSync(target)) renameSync(target, rollback);
+        let originalMoved = false;
+        let candidateInstalled = false;
         try {
+          beforeCommit?.();
+          rmSync(`${target}-wal`, { force: true });
+          rmSync(`${target}-shm`, { force: true });
+          rmSync(rollback, { force: true });
+          if (existsSync(target)) {
+            renameSync(target, rollback);
+            originalMoved = true;
+          }
           renameSync(incoming, target);
+          candidateInstalled = true;
           this.manager.open();
           validateSqlite(target);
           rmSync(rollback, { force: true });
         } catch (error) {
           this.manager.close();
-          rmSync(target, { force: true });
-          if (existsSync(rollback)) renameSync(rollback, target);
-          this.manager.open();
+          if (candidateInstalled) {
+            rmSync(target, { force: true });
+          }
+          if (originalMoved && existsSync(rollback)) {
+            renameSync(rollback, target);
+          }
+          if (hadTarget) {
+            this.manager.open();
+          }
           throw error;
         }
+      }, async () => {
+        // The safety snapshot must be created after the restore lock drains
+        // the write queue. Otherwise a write committed between the snapshot
+        // and the swap could be silently overwritten without being present in
+        // either the restored database or the safety copy.
+        hadTarget = existsSync(target);
+        if (hadTarget) await this.exportSafetyDirectory(safety);
       });
       return {
         mode: validation.mode,
@@ -669,6 +717,7 @@ export class BackupService {
         safety_snapshot: existsSync(safety) ? safety : null
       };
     } finally {
+      rmSync(`${this.manager.getPath()}.incoming`, { force: true });
       materialized.cleanup();
     }
   }

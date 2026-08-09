@@ -65,6 +65,9 @@ export class MonthWriteRepository {
     month: string,
     expectedRevision: number
   ): Record<string, number> {
+    if (this.context.monthStatus(db, month)?.status === "locked") {
+      throw new RepositoryValidationError({ code: "month.locked", params: { month } });
+    }
     this.context.checkMonthRevision(db, month, expectedRevision);
     let exists = Boolean(this.context.monthStatus(db, month));
     const deleted: Record<string, number> = {};
@@ -136,8 +139,15 @@ export class MonthWriteRepository {
     const byKey = new Map(categories.map((row) => [row.category_key, row]));
     const byName = new Map(categories.map((row) => [row.name, row]));
     const accounts = this.accountDefinitions(db);
-    const defaultInvestmentAccount = [...accounts.entries()]
-      .find(([, accountType]) => accountType === "investment")?.[0] ?? null;
+    const investmentAccounts = [...accounts.entries()]
+      .filter(([, accountType]) => accountType === "investment");
+    // A missing account is safe to infer only when the database has one
+    // possible investment destination.  With multiple destinations, an
+    // imported deposit/withdrawal must be explicitly assigned in the draft;
+    // silently choosing the first account corrupts account-level history.
+    const defaultInvestmentAccount = investmentAccounts.length === 1
+      ? investmentAccounts[0][0]
+      : null;
     const issues = validateTransactions(input, month, categories);
     const normalized = input.map((row, index) => {
       const type = text(row.type);
@@ -226,6 +236,7 @@ export class MonthWriteRepository {
     ));
     const submittedByKey = new Map(input.map((row, index) => [transactionKey(row, index), row] as const));
     const rulesRevision = this.context.rules(db).revision;
+    const currentRevision = this.context.getRevision(month, db);
     const reconciled: PendingOperationLog[] = [];
     const touchedIds = new Set<number>();
     const touchedKeys = new Set<string>();
@@ -238,7 +249,6 @@ export class MonthWriteRepository {
         throw new RevisionConflictError(expectedRulesRevision, rulesRevision);
       }
       const expectedRevision = Number(metadata.expected_revision);
-      const currentRevision = this.context.getRevision(month, db);
       if (metadata.expected_revision !== undefined
         && (!Number.isFinite(expectedRevision) || expectedRevision !== currentRevision)) {
         throw new RevisionConflictError(
@@ -352,7 +362,7 @@ export class MonthWriteRepository {
         changes,
         metadata: {
           ...metadata,
-          expected_revision: this.context.getRevision(month, db),
+          expected_revision: currentRevision,
           committed_from_canonical_rows: true
         }
       };
@@ -488,71 +498,54 @@ export class MonthWriteRepository {
       rows: DebtRecord[];
     }
   ): number {
+    if (this.context.monthStatus(db, month)?.status === "locked") {
+      throw new RepositoryValidationError({ code: "month.locked", params: { month } });
+    }
     const current = this.context.checkMonthRevision(db, month, expectedRevision);
     if (debts) this.saveMonthDebtRows(db, month, debts.expected_revision, debts.rows);
-    const definitions = new Map(rows(db.prepare(
-        "SELECT account_key,account_type FROM account_definitions"
-      ).all()).map((row) => [text(row.account_key), text(row.account_type)]));
-      db.prepare("DELETE FROM cash_account_balances WHERE month=?").run(month);
-      const seenCash = new Set<string>();
-      const cashInsert = db.prepare(
-        "INSERT INTO cash_account_balances(month,account_key,balance) VALUES (?,?,?)"
-      );
-      cashAccounts.forEach((row) => {
-        const key = text(row.account_key);
-        if (definitions.get(key) !== "cash" || seenCash.has(key)) {
-          throw new RepositoryValidationError({ code: "account.cash_invalid" });
-        }
-        seenCash.add(key);
-        cashInsert.run(month, key, finiteNumber(row.balance, { nonNegative: true }));
-      });
-      db.prepare("DELETE FROM investment_account_balances WHERE month=?").run(month);
-      const seenInvestment = new Set<string>();
-      const investmentInsert = db.prepare(`
-        INSERT INTO investment_account_balances
-          (month,account_key,principal,market_value,cash_balance)
-        VALUES (?,?,?,?,?)
-      `);
-      investmentAccounts.forEach((row) => {
-        const key = text(row.account_key);
-        if (definitions.get(key) !== "investment" || seenInvestment.has(key)) {
-          throw new RepositoryValidationError({ code: "account.investment_invalid" });
-        }
-        seenInvestment.add(key);
-        investmentInsert.run(
-          month, key,
-          finiteNumber(row.principal, { nonNegative: true }),
-          finiteNumber(row.market_value, { nonNegative: true }),
-          finiteNumber(row.cash_balance, { nonNegative: true })
-        );
-      });
-      this.saveTransactionRows(db, month, transactions);
-      this.saveFixedAssets(db, month, fixedAssets);
+    this.saveAccountBalances(db, month, cashAccounts, investmentAccounts);
+    this.saveTransactionRows(db, month, transactions);
+    this.saveFixedAssets(db, month, fixedAssets);
     return this.context.touchMonth(db, month, current, 1);
   }
 
   saveMonthSection(db: DatabaseSync, month: string, payload: MonthSectionSaveRequest): number {
+    if (this.context.monthStatus(db, month)?.status === "locked") {
+      throw new RepositoryValidationError({ code: "month.locked", params: { month } });
+    }
     const current = this.context.checkMonthRevision(db, month, payload.expected_revision);
     switch (payload.section) {
-        case "assets":
-          this.saveAccountBalances(db, month, payload.cash_accounts, payload.investment_accounts);
-          break;
-        case "transactions":
-          this.saveTransactionRows(db, month, payload.transactions);
-          break;
-        case "debts":
-          this.saveMonthDebtRows(db, month, payload.debt_revision, payload.debts);
-          break;
-        case "fixed_assets":
-          this.saveFixedAssets(db, month, payload.fixed_assets);
-          break;
+      case "assets":
+        this.saveAccountBalances(db, month, payload.cash_accounts, payload.investment_accounts);
+        break;
+      case "transactions":
+        this.saveTransactionRows(db, month, payload.transactions);
+        break;
+      case "debts":
+        this.saveMonthDebtRows(db, month, payload.debt_revision, payload.debts);
+        break;
+      case "fixed_assets":
+        this.saveFixedAssets(db, month, payload.fixed_assets);
+        break;
+      default: {
+        const section = (payload as { section?: unknown }).section;
+        const sectionText = typeof section === "string" || typeof section === "number"
+          ? String(section)
+          : "";
+        throw new RepositoryValidationError({
+          code: "month.section_invalid",
+          params: { section: sectionText }
+        });
       }
+    }
     return this.context.touchMonth(db, month, current, 1);
   }
 
   private accountDefinitions(db: DatabaseSync): Map<string, string> {
     return new Map(rows(db.prepare(
-      "SELECT account_key,account_type FROM account_definitions"
+      `SELECT account_key,account_type
+       FROM account_definitions
+       ORDER BY account_type,is_active DESC,sort_order,account_key`
     ).all()).map((row) => [text(row.account_key), text(row.account_type)]));
   }
 
@@ -563,6 +556,20 @@ export class MonthWriteRepository {
     investmentAccounts: InvestmentAccountBalance[]
   ): void {
     const definitions = this.accountDefinitions(db);
+    const requiredCash = new Set(rows(db.prepare(`
+      SELECT d.account_key
+      FROM account_definitions d
+      LEFT JOIN cash_account_balances b
+        ON b.account_key=d.account_key AND b.month=?
+      WHERE d.account_type='cash' AND (d.is_active=1 OR b.account_key IS NOT NULL)
+    `).all(month)).map((row) => text(row.account_key)));
+    const requiredInvestment = new Set(rows(db.prepare(`
+      SELECT d.account_key
+      FROM account_definitions d
+      LEFT JOIN investment_account_balances b
+        ON b.account_key=d.account_key AND b.month=?
+      WHERE d.account_type='investment' AND (d.is_active=1 OR b.account_key IS NOT NULL)
+    `).all(month)).map((row) => text(row.account_key)));
     db.prepare("DELETE FROM cash_account_balances WHERE month=?").run(month);
     const seenCash = new Set<string>();
     const cashInsert = db.prepare(
@@ -576,6 +583,13 @@ export class MonthWriteRepository {
       seenCash.add(key);
       cashInsert.run(month, key, finiteNumber(row.balance, { nonNegative: true }));
     });
+    const missingCash = [...requiredCash].filter((key) => !seenCash.has(key));
+    if (missingCash.length) {
+      throw new RepositoryValidationError({
+        code: "account.cash_missing",
+        params: { account_keys: missingCash }
+      });
+    }
     db.prepare("DELETE FROM investment_account_balances WHERE month=?").run(month);
     const seenInvestment = new Set<string>();
     const investmentInsert = db.prepare(`
@@ -596,6 +610,13 @@ export class MonthWriteRepository {
         finiteNumber(row.cash_balance, { nonNegative: true })
       );
     });
+    const missingInvestment = [...requiredInvestment].filter((key) => !seenInvestment.has(key));
+    if (missingInvestment.length) {
+      throw new RepositoryValidationError({
+        code: "account.investment_missing",
+        params: { account_keys: missingInvestment }
+      });
+    }
   }
 
   private saveFixedAssets(
@@ -606,6 +627,9 @@ export class MonthWriteRepository {
     const existingAssets = new Map(rows(db.prepare(
       "SELECT id,asset_key FROM fixed_assets WHERE month=?"
     ).all(month)).map((row) => [text(row.asset_key), Number(row.id)]));
+    const existingById = new Map(rows(db.prepare(
+      "SELECT id,asset_key FROM fixed_assets WHERE month=?"
+    ).all(month)).map((row) => [Number(row.id), text(row.asset_key)]));
     const submittedAssets = new Set<string>();
     const insertAsset = db.prepare(`
       INSERT INTO fixed_assets
@@ -618,7 +642,21 @@ export class MonthWriteRepository {
       WHERE id=? AND month=?
     `);
     fixedAssets.forEach((source, index) => {
-      const row = normalizeAsset(source, index);
+      const sourceId = source.id === undefined || source.id === null
+        ? null : Number(source.id);
+      const existingKey = sourceId === null ? undefined : existingById.get(sourceId);
+      if (sourceId !== null && !existingKey) {
+        throw new RepositoryValidationError({ code: "fixed_asset.id_invalid" });
+      }
+      const row = normalizeAsset(
+        existingKey && !text(source.asset_key)
+          ? { ...source, asset_key: existingKey }
+          : source,
+        index
+      );
+      if (sourceId !== null && row.asset_key !== existingKey) {
+        throw new RepositoryValidationError({ code: "fixed_asset.identity_conflict" });
+      }
       if (submittedAssets.has(row.asset_key)) {
         throw new RepositoryValidationError({ code: "fixed_asset.key_duplicate" });
       }
@@ -631,8 +669,9 @@ export class MonthWriteRepository {
       if (id) updateAsset.run(...values, id, month);
       else insertAsset.run(month, row.asset_key, ...values);
     });
+    const deleteAsset = db.prepare("DELETE FROM fixed_assets WHERE id=?");
     for (const [key, id] of existingAssets) {
-      if (!submittedAssets.has(key)) db.prepare("DELETE FROM fixed_assets WHERE id=?").run(id);
+      if (!submittedAssets.has(key)) deleteAsset.run(id);
     }
   }
 
@@ -646,45 +685,34 @@ export class MonthWriteRepository {
     const end = monthEnd(month);
     return rows(db.prepare(`
       SELECT * FROM debt_manager
-      WHERE REPLACE(start_date,'/','-')<=?
+      WHERE start_date<=?
         AND (
           is_paid=0
-          OR REPLACE(paid_date,'/','-')>?
+          OR paid_date>?
           OR (
-            REPLACE(paid_date,'/','-')>=?
-            AND REPLACE(paid_date,'/','-')<=?
+            paid_date>=?
+            AND paid_date<=?
           )
           OR (
-            REPLACE(start_date,'/','-')>=?
-            AND REPLACE(start_date,'/','-')<=?
+            start_date>=?
+            AND start_date<=?
           )
         )
       ORDER BY
         CASE
-          WHEN is_paid=0 OR REPLACE(paid_date,'/','-')>? THEN 0
+          WHEN is_paid=0 OR paid_date>? THEN 0
           ELSE 1
         END,
         start_date DESC,
         id
     `).all(end, end, start, end, start, end, end)).map((row) => {
       const debt = debtFromRow(row);
-      const normalized: DebtRecord = {
-        ...debt,
-        start_date: (() => {
-          try { return normalizeDate(debt.start_date); } catch { return debt.start_date; }
-        })(),
-        paid_date: debt.paid_date
-          ? (() => {
-            try { return normalizeDate(debt.paid_date); } catch { return debt.paid_date; }
-          })()
-          : null
-      };
       return viewState
         ? {
-            ...normalized,
-            is_paid: Boolean(normalized.is_paid && normalized.paid_date && normalized.paid_date <= end)
+            ...debt,
+            is_paid: Boolean(debt.is_paid && debt.paid_date && debt.paid_date <= end)
           }
-        : normalized;
+        : debt;
     });
   }
 
@@ -763,7 +791,7 @@ export class MonthWriteRepository {
       else update.run(...values, id);
     }
     const remove = db.prepare("DELETE FROM debt_manager WHERE id=?");
-    for (const row of current.rows) {
+    for (const row of currentFacts.values()) {
       if (row.id === undefined || submitted.has(Number(row.id))) continue;
       if (row.start_date.slice(0, 7) === month) {
         if (row.is_paid && row.paid_date && row.paid_date > end) {
@@ -779,58 +807,87 @@ export class MonthWriteRepository {
 
   saveDebts(db: DatabaseSync, expectedRevision: number, input: Row[]): void {
     const current = this.context.debts(db);
-      if (current.revision !== expectedRevision) {
-        throw new RevisionConflictError(expectedRevision, current.revision);
+    if (current.revision !== expectedRevision) {
+      throw new RevisionConflictError(expectedRevision, current.revision);
+    }
+    const existingRows = rows(db.prepare("SELECT * FROM debt_manager").all())
+      .map(debtFromRow);
+    const existing = new Map(existingRows.flatMap((row) =>
+      row.id === undefined ? [] : [[Number(row.id), row] as const]
+    ));
+    const submitted = new Set<number>();
+    const currentEnd = monthEnd(localMonth());
+    const isFutureLocked = (row: DebtRecord): boolean => Boolean(
+      row.is_paid && row.paid_date && row.paid_date > currentEnd
+    );
+    const insert = db.prepare(`
+      INSERT INTO debt_manager
+        (description,counterparty,amount,start_date,is_paid,paid_date)
+      VALUES (?,?,?,?,?,?)
+    `);
+    const update = db.prepare(`
+      UPDATE debt_manager SET
+        description=?,counterparty=?,amount=?,start_date=?,is_paid=?,paid_date=?
+      WHERE id=?
+    `);
+    for (const row of input) {
+      let startDate: string;
+      let paidDate: string | null = null;
+      try {
+        startDate = normalizeDate(row.start_date);
+      } catch {
+        throw new RepositoryValidationError({ code: "debt.start_date_invalid" });
       }
-      const existing = new Set(rows(db.prepare(
-        "SELECT id FROM debt_manager"
-      ).all()).map((row) => Number(row.id)));
-      const submitted = new Set<number>();
-      const insert = db.prepare(`
-        INSERT INTO debt_manager
-          (description,counterparty,amount,start_date,is_paid,paid_date)
-        VALUES (?,?,?,?,?,?)
-      `);
-      const update = db.prepare(`
-        UPDATE debt_manager SET
-          description=?,counterparty=?,amount=?,start_date=?,is_paid=?,paid_date=?
-        WHERE id=?
-      `);
-      for (const row of input) {
-        let startDate: string;
-        let paidDate: string | null = null;
-        try {
-          startDate = normalizeDate(row.start_date);
-        } catch {
-            throw new RepositoryValidationError({ code: "debt.start_date_invalid" });
-        }
-        if (text(row.paid_date)) {
-          try { paidDate = normalizeDate(row.paid_date); } catch {
-            throw new RepositoryValidationError({ code: "debt.paid_date_invalid" });
-          }
-        }
-        const isPaid = boolean(row.is_paid);
-        if (isPaid && !paidDate) throw new RepositoryValidationError({ code: "debt.paid_date_required" });
-        if (paidDate && paidDate < startDate) {
-          throw new RepositoryValidationError({ code: "debt.paid_date_before_start" });
-        }
-        const values = [
-          text(row.description), text(row.counterparty), finiteNumber(row.amount),
-          startDate, isPaid ? 1 : 0, paidDate
-        ] as const;
-        if (row.id === undefined || row.id === null) {
-          insert.run(...values);
-        } else {
-          const id = Number(row.id);
-          if (!existing.has(id) || submitted.has(id)) {
-            throw new RepositoryValidationError({ code: "debt.id_invalid" });
-          }
-          submitted.add(id);
-          update.run(...values, id);
+      if (text(row.paid_date)) {
+        try { paidDate = normalizeDate(row.paid_date); } catch {
+          throw new RepositoryValidationError({ code: "debt.paid_date_invalid" });
         }
       }
-    for (const id of existing) if (!submitted.has(id)) {
-      db.prepare("DELETE FROM debt_manager WHERE id=?").run(id);
+      const isPaid = boolean(row.is_paid);
+      if (isPaid && !paidDate) throw new RepositoryValidationError({ code: "debt.paid_date_required" });
+      if (!isPaid && paidDate) throw new RepositoryValidationError({ code: "debt.paid_date_unexpected" });
+      if (paidDate && paidDate < startDate) {
+        throw new RepositoryValidationError({ code: "debt.paid_date_before_start" });
+      }
+      const id = row.id === undefined || row.id === null ? null : Number(row.id);
+      const source = id === null ? null : existing.get(id);
+      if (id !== null && (!source || submitted.has(id))) {
+        throw new RepositoryValidationError({ code: "debt.id_invalid" });
+      }
+      if (source && isFutureLocked(source) && (
+        text(source.description) !== text(row.description)
+        || text(source.counterparty) !== text(row.counterparty)
+        || source.amount !== finiteNumber(row.amount)
+        || source.start_date !== startDate
+        || source.is_paid !== isPaid
+        || (source.paid_date ?? null) !== paidDate
+      )) {
+        throw new RepositoryValidationError({
+          code: "debt.future_locked",
+          params: { paid_date: source.paid_date ?? "" }
+        });
+      }
+      const values = [
+        text(row.description), text(row.counterparty), finiteNumber(row.amount),
+        startDate, isPaid ? 1 : 0, paidDate
+      ] as const;
+      if (id === null) {
+        insert.run(...values);
+      } else {
+        submitted.add(id);
+        update.run(...values, id);
+      }
+    }
+    const remove = db.prepare("DELETE FROM debt_manager WHERE id=?");
+    for (const [id, row] of existing) {
+      if (submitted.has(id)) continue;
+      if (isFutureLocked(row)) {
+        throw new RepositoryValidationError({
+          code: "debt.future_locked",
+          params: { paid_date: row.paid_date ?? "" }
+        });
+      }
+      remove.run(id);
     }
   }
 }

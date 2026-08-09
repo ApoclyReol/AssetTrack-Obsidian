@@ -10,6 +10,7 @@ import type {
   ProductRenameRequest,
   ProductRenameResult
 } from "../types/history";
+import { ruleCategoryType } from "../domain/rules";
 import { transactionFromRow, RepositoryValidationError, RevisionConflictError, rows, text, type Row } from "./repositoryPrimitives";
 import type { HistoryWriteDependencies } from "./repositoryWriteContext";
 
@@ -31,7 +32,7 @@ export class HistoryWriteRepository {
              t.counterparty,t.product,t.source,t.amount
       FROM transactions t
       JOIN month_status m ON m.month=t.month AND m.status='saved'
-      WHERE t.id IN (${placeholders})
+      WHERE t.id IN (${placeholders}) AND t.type IN ('支出','收入','代付')
       ORDER BY t.month,t.transaction_date,t.id
     `).all(...uniqueIds));
     if (selected.length !== uniqueIds.length) {
@@ -51,7 +52,7 @@ export class HistoryWriteRepository {
     if (!target || !target.is_active) {
       throw new RepositoryValidationError({ code: "history.category_invalid" });
     }
-    const types = new Set(selected.map((row) => text(row.type)));
+    const types = new Set(selected.map((row) => ruleCategoryType(text(row.type))));
     if (types.size !== 1 || !types.has(target.transaction_type)) {
       throw new RepositoryValidationError({ code: "history.category_type_mismatch" });
     }

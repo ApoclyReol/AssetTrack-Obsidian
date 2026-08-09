@@ -81,15 +81,11 @@ export function draftMonthMetrics(workspace: MonthWorkspace): MonthMetrics {
   };
 }
 
-function normalizedDebtDate(value: string | null | undefined): string {
-  return String(value ?? "").replace(/\//g, "-");
-}
-
 function draftDebtPaidDate(
   row: MonthWorkspace["debts"][number],
   currentMonthEnd: string
 ): string | null {
-  const paidDate = normalizedDebtDate(row.paid_date);
+  const paidDate = String(row.paid_date ?? "");
   if (row.is_paid) return paidDate || currentMonthEnd;
   return paidDate && paidDate > currentMonthEnd ? paidDate : null;
 }
@@ -100,7 +96,7 @@ function draftDebtActiveAt(
   currentMonthEnd: string
 ): number {
   return sum(rows.map((row) => {
-    const startDate = normalizedDebtDate(row.start_date);
+    const startDate = String(row.start_date ?? "");
     if (!startDate || startDate > boundary) return 0;
     const paidDate = draftDebtPaidDate(row, currentMonthEnd);
     if (paidDate && paidDate <= boundary) return 0;

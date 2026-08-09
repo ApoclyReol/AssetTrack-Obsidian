@@ -250,9 +250,21 @@ export class LocalAssetTrackService implements AssetTrackService {
         });
       }
     }
+    const normalizedRequest = request.operation_type === "bulk-edit-category"
+      && request.target_category_key?.trim()
+      ? {
+          ...request,
+          // category_key is the identity; always carry the current canonical
+          // name into the preview so the operation log cannot fail later only
+          // because a caller supplied a stale display label.
+          target_value: this.repository.categories().rows.find((row) =>
+            row.category_key === request.target_category_key?.trim()
+          )?.name ?? request.target_value
+        }
+      : request;
     return buildTransactionOperationPreview(
-      request.rows,
-      request,
+      normalizedRequest.rows,
+      normalizedRequest,
       ruleRows as import("../domain/rules").RuleRow[]
     );
   }
@@ -402,7 +414,7 @@ export class LocalAssetTrackService implements AssetTrackService {
     revision: number,
     rows: Array<Record<string, unknown>>,
     audit?: OperationAuditContext
-  ): Promise<unknown> {
+  ): Promise<{ revision: number; rows: Array<Record<string, unknown>> }> {
     this.ready();
     return this.repository.saveRules(revision, rows, audit);
   }
@@ -419,7 +431,11 @@ export class LocalAssetTrackService implements AssetTrackService {
     revision: number,
     rows: CategoryDefinition[],
     audit?: OperationAuditContext
-  ): Promise<{ revision: number; rows: CategoryDefinition[] }> {
+  ): Promise<{
+    revision: number;
+    rows: CategoryDefinition[];
+    rules_revision: number;
+  }> {
     this.ready();
     return this.repository.saveCategories(revision, rows, audit);
   }
@@ -462,9 +478,13 @@ export class LocalAssetTrackService implements AssetTrackService {
     return this.backups.validate(path) as unknown as Record<string, unknown>;
   }
 
-  async restoreBackup(path: string): Promise<Record<string, unknown>> {
-    const result = await this.backups.restore(path);
+  async restoreBackup(
+    path: string,
+    beforeCommit?: () => void
+  ): Promise<Record<string, unknown>> {
+    const result = await this.backups.restore(path, beforeCommit);
     this.ready();
+    this.repository.invalidateCaches();
     return result;
   }
 

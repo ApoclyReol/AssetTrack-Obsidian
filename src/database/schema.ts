@@ -5,9 +5,10 @@ import { scalarText } from "../domain/text";
 import { AssetTrackError } from "../application/errors";
 
 export const SCHEMA9_VERSION = 9;
+export const SCHEMA10_VERSION = 10;
 export const PREVIOUS_SCHEMA_VERSION = SCHEMA9_VERSION;
-export const CURRENT_SCHEMA_VERSION = 10;
-export const BACKUP_FORMAT_VERSION = 5;
+export const CURRENT_SCHEMA_VERSION = 11;
+export const BACKUP_FORMAT_VERSION = 8;
 
 const NORMALIZE_MATCH_KEY_FUNCTION = "asset_track_normalize_match_key";
 
@@ -15,7 +16,9 @@ export type SchemaMigrationIssueCode =
   | "legacy_schema_invalid"
   | "ambiguous_rule_scope"
   | "duplicate_rule"
-  | "invalid_category_reference";
+  | "invalid_category_reference"
+  | "invalid_rule_type"
+  | "ambiguous_investment_account";
 
 export interface SchemaMigrationIssue {
   code: SchemaMigrationIssueCode;
@@ -65,7 +68,8 @@ export class SchemaMigrationError extends AssetTrackError {
       params: {
         fromVersion: report.from_version,
         toVersion: report.to_version,
-        issueCodes: report.issues.map((issue) => issue.code)
+        issueCodes: report.issues.map((issue) => issue.code),
+        details
       }
     });
     this.name = "SchemaMigrationError";
@@ -336,6 +340,77 @@ export const REQUIRED_FOREIGN_KEYS: readonly RequiredForeignKey[] = [
   }
 ];
 
+export interface RequiredUniqueConstraint {
+  table: typeof REQUIRED_TABLES[number];
+  columns: readonly string[];
+}
+
+/**
+ * These are table constraints, rather than merely equivalent application
+ * checks.  They keep a damaged or hand-edited SQLite file from being treated
+ * as a canonical database just because the expected columns and indexes are
+ * still present.
+ */
+export const REQUIRED_PRIMARY_KEYS: readonly RequiredUniqueConstraint[] = [
+  { table: "category_definitions", columns: ["category_key"] },
+  { table: "account_definitions", columns: ["account_key"] },
+  { table: "transactions", columns: ["id"] },
+  { table: "cash_account_balances", columns: ["month", "account_key"] },
+  { table: "investment_account_balances", columns: ["month", "account_key"] },
+  { table: "fixed_assets", columns: ["id"] },
+  { table: "debt_manager", columns: ["id"] },
+  { table: "auto_rules", columns: ["id"] },
+  { table: "month_status", columns: ["month"] },
+  { table: "operation_logs", columns: ["id"] }
+] as const;
+
+export const REQUIRED_UNIQUE_CONSTRAINTS: readonly RequiredUniqueConstraint[] = [
+  { table: "category_definitions", columns: ["name"] },
+  { table: "account_definitions", columns: ["account_type", "name"] },
+  { table: "fixed_assets", columns: ["month", "asset_key"] },
+  { table: "operation_logs", columns: ["operation_id"] }
+] as const;
+
+export interface RequiredCheckConstraint {
+  table: typeof REQUIRED_TABLES[number];
+  expression: string;
+}
+
+export const REQUIRED_CHECK_CONSTRAINTS: readonly RequiredCheckConstraint[] = [
+  {
+    table: "category_definitions",
+    expression: "CHECK(transaction_type IN ('支出','收入'))"
+  },
+  {
+    table: "category_definitions",
+    expression: "CHECK(necessity IN ('必要','可控','不适用'))"
+  },
+  {
+    table: "category_definitions",
+    expression: "CHECK(pattern IN ('周期','日常','偶尔','不适用'))"
+  },
+  {
+    table: "account_definitions",
+    expression: "CHECK(account_type IN ('cash','investment'))"
+  },
+  {
+    table: "transactions",
+    expression: "CHECK(type IN ('支出','收入','代付','加仓','提现'))"
+  },
+  {
+    table: "auto_rules",
+    expression: "CHECK(transaction_type IN ('支出','收入','代付'))"
+  },
+  {
+    table: "auto_rules",
+    expression: "CHECK(match_scope IN ('product','merchant','merchant_product'))"
+  },
+  {
+    table: "auto_rules",
+    expression: "CHECK((match_scope='product' AND match_counterparty_key='' AND match_product_key<>'') OR (match_scope='merchant' AND match_counterparty_key<>'' AND match_product_key='') OR (match_scope='merchant_product' AND match_counterparty_key<>'' AND match_product_key<>''))"
+  }
+] as const;
+
 export function categoryKey(name: string): string {
   return `cat-${createHash("sha256").update(name, "utf8").digest("hex").slice(0, 16)}`;
 }
@@ -401,8 +476,8 @@ function legacySchemaIssues(db: DatabaseSync): SchemaMigrationIssue[] {
 }
 
 /**
- * Read-only gates used by the settings and startup loaders. A schema 9 file
- * must pass the legacy table/column check before the writable migration is
+ * Read-only gates used by the settings and startup loaders. Older schema
+ * files must pass their table/column checks before the writable migration is
  * attempted; rule-level issues are deliberately left for the migration
  * transaction so the user receives the complete migration report.
  */
@@ -410,7 +485,38 @@ export function canMigrateSchema9(db: DatabaseSync): boolean {
   const version = Number(
     (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version
   );
-  return version === PREVIOUS_SCHEMA_VERSION && legacySchemaIssues(db).length === 0;
+  return version === SCHEMA9_VERSION && legacySchemaIssues(db).length === 0;
+}
+
+function schema10Issues(db: DatabaseSync): SchemaMigrationIssue[] {
+  const tables = tableNames(db);
+  const issues: SchemaMigrationIssue[] = [];
+  const missingTables = REQUIRED_TABLES.filter((table) => !tables.includes(table));
+  const missingColumns = Object.entries(REQUIRED_COLUMNS).flatMap(([table, columns]) => {
+    if (!tables.includes(table)) return [];
+    const actual = tableColumns(db, table);
+    const missing = columns.filter((column) => !actual.includes(column));
+    return missing.length ? [`${table}(${missing.join(",")})`] : [];
+  });
+  if (missingTables.length || missingColumns.length) {
+    issues.push({
+      code: "legacy_schema_invalid",
+      message: `schema ${SCHEMA10_VERSION} 结构不完整：缺少表=${missingTables.join(",") || "无"}，缺少字段=${missingColumns.join(";") || "无"}`,
+      rule_ids: []
+    });
+  }
+  return issues;
+}
+
+export function canMigrateSchema10(db: DatabaseSync): boolean {
+  const version = Number(
+    (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version
+  );
+  return version === SCHEMA10_VERSION && schema10Issues(db).length === 0;
+}
+
+export function canMigrateSchema(db: DatabaseSync): boolean {
+  return canMigrateSchema9(db) || canMigrateSchema10(db);
 }
 
 interface LegacyRuleRow {
@@ -420,6 +526,12 @@ interface LegacyRuleRow {
   product: string;
   category_key: string;
   category: string;
+}
+
+interface Schema10RuleRow extends LegacyRuleRow {
+  match_scope: "product" | "merchant" | "merchant_product";
+  rewrite_merchant: string;
+  rewrite_product: string;
 }
 
 interface MigratedRuleFields {
@@ -518,10 +630,87 @@ function migrationRuleIssues(
   return issues;
 }
 
+function migrationCategoryType(transactionType: string): "支出" | "收入" | "" {
+  if (transactionType === "代付") return "支出";
+  if (transactionType === "支出" || transactionType === "收入") return transactionType;
+  return "";
+}
+
+function schema10RuleIssues(
+  db: DatabaseSync,
+  rows: Schema10RuleRow[]
+): SchemaMigrationIssue[] {
+  const issues: SchemaMigrationIssue[] = [];
+  const categories = new Map(
+    (db.prepare(
+      "SELECT category_key, transaction_type FROM category_definitions"
+    ).all() as Array<{ category_key: string; transaction_type: string }>)
+      .map((row) => [String(row.category_key), String(row.transaction_type)] as const)
+  );
+  const byCondition = new Map<string, Schema10RuleRow[]>();
+  for (const row of rows) {
+    const transactionType = String(row.transaction_type ?? "");
+    const categoryType = migrationCategoryType(transactionType);
+    if (!categoryType) {
+      issues.push({
+        code: "invalid_rule_type",
+        message: `规则 ${row.id} 的收支类型无效：${transactionType || "空"}`,
+        rule_ids: [Number(row.id)]
+      });
+      continue;
+    }
+    const categoryTransactionType = categories.get(String(row.category_key ?? ""));
+    if (!categoryTransactionType || categoryTransactionType !== categoryType) {
+      issues.push({
+        code: "invalid_category_reference",
+        message: `规则 ${row.id} 的分类引用与规则类型不匹配：category_key=${row.category_key || "空"}`,
+        rule_ids: [Number(row.id)]
+      });
+    }
+    const matchScope = String(row.match_scope ?? "");
+    const counterpartyKey = matchScope === "merchant" || matchScope === "merchant_product"
+      ? normalizeMatchKey(row.counterparty)
+      : "";
+    const productKey = matchScope === "product" || matchScope === "merchant_product"
+      ? normalizeMatchKey(row.product)
+      : "";
+    const conditionKey = [
+      transactionType,
+      matchScope,
+      counterpartyKey,
+      productKey
+    ].join("\u0000");
+    const group = byCondition.get(conditionKey) ?? [];
+    group.push(row);
+    byCondition.set(conditionKey, group);
+  }
+  for (const group of byCondition.values()) {
+    if (group.length < 2) continue;
+    const first = group[0];
+    const matchScope = String(first.match_scope ?? "");
+    const counterpartyKey = matchScope === "merchant" || matchScope === "merchant_product"
+      ? normalizeMatchKey(first.counterparty)
+      : "";
+    const productKey = matchScope === "product" || matchScope === "merchant_product"
+      ? normalizeMatchKey(first.product)
+      : "";
+    issues.push({
+      code: "duplicate_rule",
+      message: `规则 ${group.map((row) => row.id).join("、")} 在同一收支类型、匹配范围和规范化条件下重复`,
+      rule_ids: group.map((row) => Number(row.id)),
+      transaction_type: String(first.transaction_type ?? ""),
+      match_scope: matchScope,
+      counterparty_key: counterpartyKey,
+      product_key: productKey
+    });
+  }
+  return issues;
+}
+
 function migrateSchema9To10InTransaction(db: DatabaseSync): SchemaMigrationReport {
   const report: SchemaMigrationReport = {
     from_version: SCHEMA9_VERSION,
-    to_version: CURRENT_SCHEMA_VERSION,
+    to_version: SCHEMA10_VERSION,
     category_count: 0,
     rule_count: 0,
     preserved_row_counts: migrationRowCounts(db),
@@ -533,7 +722,7 @@ function migrateSchema9To10InTransaction(db: DatabaseSync): SchemaMigrationRepor
   if (version !== SCHEMA9_VERSION) {
     report.issues.push({
       code: "legacy_schema_invalid",
-      message: `只支持从 schema ${SCHEMA9_VERSION} 迁移到 schema ${CURRENT_SCHEMA_VERSION}，当前版本为 ${version}`,
+      message: `只支持从 schema ${SCHEMA9_VERSION} 迁移到 schema ${SCHEMA10_VERSION}，当前版本为 ${version}`,
       rule_ids: []
     });
     throw new SchemaMigrationError(report);
@@ -557,6 +746,24 @@ function migrateSchema9To10InTransaction(db: DatabaseSync): SchemaMigrationRepor
   report.rule_count = rows.length;
   report.issues = migrationRuleIssues(db, rows);
   if (report.issues.length) throw new SchemaMigrationError(report);
+
+  const investmentAccounts = db.prepare(`
+    SELECT account_key FROM account_definitions
+    WHERE account_type='investment'
+    ORDER BY is_active DESC, sort_order, account_key
+  `).all() as Array<{ account_key?: string }>;
+  const unassignedInvestmentTransactions = Number((db.prepare(`
+    SELECT COUNT(*) AS count FROM transactions
+    WHERE type IN ('加仓','提现')
+  `).get() as { count: number }).count);
+  if (investmentAccounts.length > 1 && unassignedInvestmentTransactions > 0) {
+    report.issues.push({
+      code: "ambiguous_investment_account",
+      message: `schema 9 中有 ${unassignedInvestmentTransactions} 条理财流水，但存在 ${investmentAccounts.length} 个理财账户，无法安全推断归属账户`,
+      rule_ids: []
+    });
+    throw new SchemaMigrationError(report);
+  }
 
   db.exec(`
     ALTER TABLE category_definitions
@@ -666,7 +873,7 @@ function migrateSchema9To10InTransaction(db: DatabaseSync): SchemaMigrationRepor
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_transactions_account
       ON transactions(account_key,type,month);
-    PRAGMA user_version=${CURRENT_SCHEMA_VERSION};
+    PRAGMA user_version=${SCHEMA10_VERSION};
   `);
   const migratedRuleCount = Number(
     (db.prepare("SELECT COUNT(*) AS count FROM auto_rules").get() as { count: number }).count
@@ -710,13 +917,13 @@ export function migrateSchema9To10(db: DatabaseSync): SchemaMigrationReport {
   if (version !== SCHEMA9_VERSION) {
     const report: SchemaMigrationReport = {
       from_version: SCHEMA9_VERSION,
-      to_version: CURRENT_SCHEMA_VERSION,
+      to_version: SCHEMA10_VERSION,
       category_count: 0,
       rule_count: 0,
       preserved_row_counts: {},
       issues: [{
         code: "legacy_schema_invalid",
-        message: `只支持从 schema ${SCHEMA9_VERSION} 迁移到 schema ${CURRENT_SCHEMA_VERSION}，当前版本为 ${version}`,
+        message: `只支持从 schema ${SCHEMA9_VERSION} 迁移到 schema ${SCHEMA10_VERSION}，当前版本为 ${version}`,
         rule_ids: []
       }]
     };
@@ -725,6 +932,240 @@ export function migrateSchema9To10(db: DatabaseSync): SchemaMigrationReport {
   db.exec("BEGIN IMMEDIATE");
   try {
     const report = migrateSchema9To10InTransaction(db);
+    db.exec("COMMIT");
+    return report;
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // Keep the original migration error authoritative.
+    }
+    throw error;
+  }
+}
+
+function migrateSchema10To11InTransaction(db: DatabaseSync): SchemaMigrationReport {
+  const report: SchemaMigrationReport = {
+    from_version: SCHEMA10_VERSION,
+    to_version: CURRENT_SCHEMA_VERSION,
+    category_count: 0,
+    rule_count: 0,
+    preserved_row_counts: migrationRowCounts(db),
+    issues: []
+  };
+  const version = Number(
+    (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version
+  );
+  if (version !== SCHEMA10_VERSION) {
+    report.issues.push({
+      code: "legacy_schema_invalid",
+      message: `只支持从 schema ${SCHEMA10_VERSION} 迁移到 schema ${CURRENT_SCHEMA_VERSION}，当前版本为 ${version}`,
+      rule_ids: []
+    });
+    throw new SchemaMigrationError(report);
+  }
+  const shapeIssues = schema10Issues(db);
+  if (shapeIssues.length) {
+    report.issues = shapeIssues;
+    throw new SchemaMigrationError(report);
+  }
+  const categories = db.prepare(
+    "SELECT category_key FROM category_definitions"
+  ).all() as Array<{ category_key: string }>;
+  const rows = db.prepare(`
+    SELECT id,transaction_type,match_scope,counterparty,product,
+           rewrite_merchant,rewrite_product,category_key,category
+    FROM auto_rules ORDER BY id
+  `).all() as unknown as Schema10RuleRow[];
+  report.category_count = categories.length;
+  report.rule_count = rows.length;
+  report.issues = schema10RuleIssues(db, rows);
+  if (report.issues.length) throw new SchemaMigrationError(report);
+
+  db.exec(`
+    DROP INDEX IF EXISTS idx_auto_rules_match;
+    ALTER TABLE auto_rules RENAME TO auto_rules_schema10;
+    CREATE TABLE auto_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      transaction_type TEXT NOT NULL CHECK(transaction_type IN ('支出','收入','代付')),
+      match_scope TEXT NOT NULL DEFAULT 'product'
+        CHECK(match_scope IN ('product','merchant','merchant_product')),
+      counterparty TEXT NOT NULL DEFAULT '',
+      product TEXT NOT NULL DEFAULT '',
+      match_counterparty_key TEXT GENERATED ALWAYS AS (
+        CASE
+          WHEN match_scope IN ('merchant','merchant_product')
+            THEN ${NORMALIZE_MATCH_KEY_FUNCTION}(counterparty)
+          ELSE ''
+        END
+      ) STORED,
+      match_product_key TEXT GENERATED ALWAYS AS (
+        CASE
+          WHEN match_scope IN ('product','merchant_product')
+            THEN ${NORMALIZE_MATCH_KEY_FUNCTION}(product)
+          ELSE ''
+        END
+      ) STORED,
+      rewrite_merchant TEXT NOT NULL DEFAULT '',
+      rewrite_product TEXT NOT NULL DEFAULT '',
+      category_key TEXT NOT NULL,
+      category TEXT NOT NULL,
+      CHECK(
+        (match_scope='product' AND match_counterparty_key='' AND match_product_key<>'')
+        OR (match_scope='merchant' AND match_counterparty_key<>'' AND match_product_key='')
+        OR (match_scope='merchant_product' AND match_counterparty_key<>'' AND match_product_key<>'')
+      ),
+      FOREIGN KEY(category_key) REFERENCES category_definitions(category_key)
+    );
+    INSERT INTO auto_rules
+      (id,transaction_type,match_scope,counterparty,product,
+       rewrite_merchant,rewrite_product,category_key,category)
+    SELECT id,transaction_type,match_scope,counterparty,product,
+           rewrite_merchant,rewrite_product,category_key,category
+    FROM auto_rules_schema10
+    ORDER BY id;
+    DROP TABLE auto_rules_schema10;
+    CREATE UNIQUE INDEX idx_auto_rules_match
+      ON auto_rules(transaction_type, match_scope, match_counterparty_key, match_product_key);
+    PRAGMA user_version=${CURRENT_SCHEMA_VERSION};
+  `);
+
+  const migratedRuleCount = Number(
+    (db.prepare("SELECT COUNT(*) AS count FROM auto_rules").get() as { count: number }).count
+  );
+  const foreignKeyViolations = db.prepare("PRAGMA foreign_key_check").all().length;
+  const integrity = String(
+    (db.prepare("PRAGMA integrity_check").get() as { integrity_check: string }).integrity_check
+  );
+  const migratedRowCounts = migrationRowCounts(db);
+  const rowCountMismatch = Object.entries(report.preserved_row_counts).find(
+    ([table, count]) => migratedRowCounts[table] !== count
+  );
+  if (
+    migratedRuleCount !== report.rule_count
+    || rowCountMismatch
+    || foreignKeyViolations !== 0
+    || integrity !== "ok"
+  ) {
+    throw new AssetTrackError({
+      code: "database.migration_validation_failed",
+      status: 422,
+      params: {
+        migratedRuleCount,
+        expectedRuleCount: report.rule_count,
+        rowCountMismatch: rowCountMismatch?.[0] ?? "",
+        foreignKeyViolations,
+        integrity
+      }
+    });
+  }
+  return report;
+}
+
+export function migrateSchema10To11(db: DatabaseSync): SchemaMigrationReport {
+  registerSchemaFunctions(db);
+  const version = Number(
+    (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version
+  );
+  if (version !== SCHEMA10_VERSION) {
+    const report: SchemaMigrationReport = {
+      from_version: SCHEMA10_VERSION,
+      to_version: CURRENT_SCHEMA_VERSION,
+      category_count: 0,
+      rule_count: 0,
+      preserved_row_counts: {},
+      issues: [{
+        code: "legacy_schema_invalid",
+        message: `只支持从 schema ${SCHEMA10_VERSION} 迁移到 schema ${CURRENT_SCHEMA_VERSION}，当前版本为 ${version}`,
+        rule_ids: []
+      }]
+    };
+    throw new SchemaMigrationError(report);
+  }
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const report = migrateSchema10To11InTransaction(db);
+    db.exec("COMMIT");
+    return report;
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // Keep the original migration error authoritative.
+    }
+    throw error;
+  }
+}
+
+function combineMigrationReports(
+  initialVersion: number,
+  reports: SchemaMigrationReport[]
+): SchemaMigrationReport {
+  if (reports.length === 1) return reports[0];
+  const last = reports.at(-1)!;
+  return {
+    from_version: initialVersion,
+    to_version: CURRENT_SCHEMA_VERSION,
+    category_count: last.category_count,
+    rule_count: last.rule_count,
+    preserved_row_counts: reports[0].preserved_row_counts,
+    issues: reports.flatMap((report) => report.issues)
+  };
+}
+
+export function migrateSchemaToCurrent(db: DatabaseSync): SchemaMigrationReport {
+  registerSchemaFunctions(db);
+  const initialVersion = Number(
+    (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version
+  );
+  if (initialVersion === CURRENT_SCHEMA_VERSION) {
+    throw new AssetTrackError({
+      code: "database.migration_not_required",
+      status: 409,
+      params: { version: initialVersion }
+    });
+  }
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const reports: SchemaMigrationReport[] = [];
+    let version = initialVersion;
+    while (version !== CURRENT_SCHEMA_VERSION) {
+      const previousVersion = version;
+      switch (version) {
+        case SCHEMA9_VERSION:
+          reports.push(migrateSchema9To10InTransaction(db));
+          break;
+        case SCHEMA10_VERSION:
+          reports.push(migrateSchema10To11InTransaction(db));
+          break;
+        default: {
+          const report: SchemaMigrationReport = {
+            from_version: initialVersion,
+            to_version: CURRENT_SCHEMA_VERSION,
+            category_count: 0,
+            rule_count: 0,
+            preserved_row_counts: {},
+            issues: [{
+              code: "legacy_schema_invalid",
+              message: `不支持从 schema ${version} 自动迁移到 schema ${CURRENT_SCHEMA_VERSION}`,
+              rule_ids: []
+            }]
+          };
+          throw new SchemaMigrationError(report);
+        }
+      }
+      version = Number(
+        (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version
+      );
+      if (version === previousVersion) {
+        throw new AssetTrackError({
+          code: "database.migration_version_stalled",
+          status: 422,
+          params: { version, current: CURRENT_SCHEMA_VERSION }
+        });
+      }
+    }
+    const report = combineMigrationReports(initialVersion, reports);
     db.exec("COMMIT");
     return report;
   } catch (error) {
@@ -828,7 +1269,7 @@ export function createSchema(db: DatabaseSync): void {
     );
     CREATE TABLE auto_rules (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      transaction_type TEXT NOT NULL CHECK(transaction_type IN ('支出','收入')),
+      transaction_type TEXT NOT NULL CHECK(transaction_type IN ('支出','收入','代付')),
       match_scope TEXT NOT NULL DEFAULT 'product'
         CHECK(match_scope IN ('product','merchant','merchant_product')),
       counterparty TEXT NOT NULL DEFAULT '',
