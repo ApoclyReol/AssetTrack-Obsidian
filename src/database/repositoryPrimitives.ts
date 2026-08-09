@@ -7,6 +7,7 @@ import type {
   Transaction
 } from "../types/transactions";
 import { finiteNumber } from "../domain/money";
+import { normalizeDate } from "../domain/dates";
 import { scalarText } from "../domain/text";
 import type { ValidationIssue } from "../domain/validators";
 import { AssetTrackError, type AssetTrackErrorParams } from "../application/errors";
@@ -86,16 +87,34 @@ export function normalizeAsset(source: Partial<FixedAsset>, index: number): Requ
     });
   }
   const status = text(source.status) || "在用";
+  if (!ASSET_STATUSES.has(status)) {
+    throw new RepositoryValidationError({
+      code: "fixed_asset.status_invalid",
+      params: { row: index + 1, status }
+    });
+  }
+  let purchaseDate: string | null = null;
+  const rawPurchaseDate = text(source.purchase_date);
+  if (rawPurchaseDate) {
+    try {
+      purchaseDate = normalizeDate(rawPurchaseDate);
+    } catch {
+      throw new RepositoryValidationError({
+        code: "fixed_asset.date_invalid",
+        params: { row: index + 1, date: rawPurchaseDate }
+      });
+    }
+  }
   return {
     asset_key: text(source.asset_key) || randomUUID().replaceAll("-", ""),
     asset_name: name,
     category: text(source.category),
-    purchase_date: text(source.purchase_date) || null,
+    purchase_date: purchaseDate,
     purchase_price: finiteNumber(source.purchase_price, {
       nonNegative: true,
       label: "固定资产金额"
     }),
-    status: ASSET_STATUSES.has(status) ? status : "在用",
+    status,
     note: text(source.note)
   };
 }

@@ -14,13 +14,13 @@ manifest.json
 styles.css
 ```
 
-插件不依赖 Python、sidecar、平台原生扩展或 CPU 架构包。v1.7.0 已完成自动化构建、
+插件不依赖 Python、sidecar、平台原生扩展或 CPU 架构包。v1.7.1 已完成自动化构建、
 跨平台 CI、标准三文件发布和 attestation；真实 Obsidian smoke 与复制 Vault 回归
 仍按发布日志作为发布后的人工质量门禁持续补充。Linux 验证属于发布后持续质量工作。
 
 ## 稳定兼容边界
 
-- `manifest.json` 最低 Obsidian 版本为 1.13.0；安装或更新 v1.7.0 前要求用户先升级
+- `manifest.json` 最低 Obsidian 版本为 1.13.0；安装或更新 v1.7.1 前要求用户先升级
   到当前最新的 1.13.x 桌面版。
 - 运行时探测 Node ≥22.16、`DatabaseSync` 和 `sqlite.backup`；旧桌面安装器只显示
   升级提示，不修改数据。
@@ -45,7 +45,7 @@ styles.css
 4. 保持 Ubuntu、macOS 和 Windows CI 的
    `npm ci → typecheck → lint → test → build → release:check` 全部通过。
 5. 每次发布继续只上传标准三文件，并为每个文件生成 artifact attestation。
-6. v1.7.0 发布后持续记录复制 Vault 升级、中文/英文界面、商品-分类冲突与回溯事务、商品
+6. v1.7.1 发布后持续记录复制 Vault 升级、中文/英文界面、商品-分类冲突与回溯事务、商品
    统一、部分覆盖、批量操作日志、AI SecretStorage、月流水借款区块、关闭草稿恢复和分类删除弹窗；不能把这些真实 Obsidian smoke
    结果冒充为自动测试结果。
 

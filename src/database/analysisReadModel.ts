@@ -22,10 +22,12 @@ import {
   buildAnnualRows,
   calculateMonthly,
   explainReconciliation,
+  LEGACY_CATEGORY_ALIASES,
   previousMonths,
   type ExtendedAnnualRow,
   type MonthlyCalculation
 } from "../domain/calculator";
+import { normalizeProductKey } from "../domain/rules";
 import {
   monthEnd,
   previousMonth,
@@ -43,6 +45,7 @@ export interface AnalysisReadContext {
   readonly largeExpenseThreshold: number;
   readonly reconciliationTolerance: number;
   getMonths(db: DatabaseSync): string[];
+  savedMonths(db: DatabaseSync): string[];
   categoryDefinitions(db: DatabaseSync): CategoryDefinition[];
   cashAccounts(db: DatabaseSync, month: string): CashAccountBalance[];
   investmentAccounts(db: DatabaseSync, month: string): InvestmentAccountBalance[];
@@ -159,12 +162,21 @@ export class AnalysisReadModel {
     history: Array<Transaction & { month: string }>,
     categories: CategoryDefinition[]
   ): MonthOverview["anomalies"] {
+    const categoryByKey = new Map(categories.map((row) => [row.category_key, row]));
+    const categoryByName = new Map(categories.map((row) => [row.name, row]));
+    const categoryName = (row: Transaction): string => {
+      const definition = row.category_key
+        ? categoryByKey.get(row.category_key)
+        : categoryByName.get(row.category);
+      return definition?.name ?? row.category;
+    };
     const currentExpense = current.filter((row) => row.type === "支出");
     const currentByCategory = new Map<string, number>();
     currentExpense.forEach((row) => {
+      const category = categoryName(row);
       currentByCategory.set(
-        row.category,
-        (currentByCategory.get(row.category) ?? 0) + row.amount
+        category,
+        (currentByCategory.get(category) ?? 0) + row.amount
       );
     });
     const periodic = new Set(categories.filter(
@@ -185,7 +197,7 @@ export class AnalysisReadModel {
       months.forEach((value) => monthCategory.set(value, new Map()));
       selected.forEach((row) => {
         const values = monthCategory.get(row.month)!;
-        const category = row.category;
+        const category = categoryName(row);
         values.set(category, (values.get(category) ?? 0) + row.amount);
       });
       const allCategories = new Set(currentByCategory.keys());
@@ -237,21 +249,26 @@ export class AnalysisReadModel {
       String(left["对比口径"]).localeCompare(String(right["对比口径"]))
       || Math.abs(Number(right["增减金额"])) - Math.abs(Number(left["增减金额"]))
     );
-    const historyProducts = new Set(history.map((row) => row.product));
-    const products = new Map<string, { category: string; amount: number }>();
+    const historyProducts = new Set(history.map((row) => normalizeProductKey(row.product)));
+    const products = new Map<string, { product: string; category: string; amount: number }>();
     currentExpense.forEach((row) => {
-      const existing = products.get(row.product) ?? { category: row.category, amount: 0 };
+      const productKey = normalizeProductKey(row.product);
+      const existing = products.get(productKey) ?? {
+        product: row.product,
+        category: categoryName(row),
+        amount: 0
+      };
       existing.amount += row.amount;
-      products.set(row.product, existing);
+      products.set(productKey, existing);
     });
     const newBig = [...products]
-      .filter(([product, value]) =>
-        product
+      .filter(([productKey, value]) =>
+        productKey
         && value.amount >= this.context.largeExpenseThreshold
-        && !historyProducts.has(product)
+        && !historyProducts.has(productKey)
       )
-      .map(([product, value]) => ({
-        "商品": product,
+      .map(([, value]) => ({
+        "商品": value.product,
         "分类": value.category,
         "金额": roundHalfEven(value.amount),
         "判断": "过去 12 个月未出现的大额商品"
@@ -270,10 +287,33 @@ export class AnalysisReadModel {
     transactions: Transaction[],
     categories: CategoryDefinition[]
   ): MonthOverview {
+    return this.monthOverviewInternal(db, month, transactions, categories, false);
+  }
+
+  draftMonthOverview(
+    db: DatabaseSync,
+    month: string,
+    transactions: Transaction[],
+    categories: CategoryDefinition[]
+  ): MonthOverview {
+    return this.monthOverviewInternal(db, month, transactions, categories, true);
+  }
+
+  private monthOverviewInternal(
+    db: DatabaseSync,
+    month: string,
+    transactions: Transaction[],
+    categories: CategoryDefinition[],
+    includeDraftMonth: boolean
+  ): MonthOverview {
+    const savedMonths = this.context.savedMonths(db);
+    const currentIsSaved = savedMonths.includes(month);
+    if (!currentIsSaved && !includeDraftMonth) return { available: false };
     const windowFrom = shiftMonth(month, -(MONTHLY_ANALYSIS_MONTHS - 1));
-    const analysisMonths = this.context.getMonths(db)
+    const analysisMonths = savedMonths
       .filter((candidate) => candidate >= windowFrom && candidate <= month);
-    if (!analysisMonths.includes(month)) analysisMonths.push(month);
+    if (includeDraftMonth && !analysisMonths.includes(month)) analysisMonths.push(month);
+    analysisMonths.sort();
     const transactionRows = this.transactionsByMonth(
       db,
       analysisMonths,
@@ -299,20 +339,22 @@ export class AnalysisReadModel {
     const aggregateWithdraw = monthly.total_withdraw;
     const flowAdjustedPosition = position - aggregateDeposit + aggregateWithdraw;
     const flowAdjustedPrincipal = principal - aggregateDeposit + aggregateWithdraw;
-    const previous = rowIndex > 0 ? allRows[rowIndex - 1] : null;
     const previousValue = previousMonth(month);
-    let previousTransactions = previousValue
+    const previous = rowIndex > 0
+      && previousValue !== null
+      && savedMonths.includes(previousValue)
+      && allRows[rowIndex - 1]?.month === previousValue
+      ? allRows[rowIndex - 1]
+      : null;
+    const previousTransactions = previousValue && savedMonths.includes(previousValue)
       ? transactionRows.get(previousValue) ?? []
       : [];
-    if (previousValue && !transactionRows.has(previousValue)) {
-      previousTransactions = this.transactionsByMonth(db, [previousValue]).get(previousValue) ?? [];
-    }
     const previousMonthly = calculateMonthly(
       previousTransactions,
       categories,
       this.context.largeExpenseThreshold
     );
-    const previousInvestmentAccounts = previousValue
+    const previousInvestmentAccounts = previousValue && savedMonths.includes(previousValue)
       ? this.context.investmentAccounts(db, previousValue)
       : [];
     const previousPosition = previousInvestmentAccounts.length
@@ -499,7 +541,7 @@ export class AnalysisReadModel {
         ).map((category) => category.name)
       },
       category_summary: Object.entries(monthly.category_summary)
-        .filter(([, amount]) => amount > 0)
+        .filter(([, amount]) => amount !== 0)
         .sort((left, right) => right[1] - left[1])
         .map(([category, amount]) => ({ category, amount })),
       category_comparison: {
@@ -518,15 +560,25 @@ export class AnalysisReadModel {
     transactionsByMonth: Map<string, Transaction[]>
   ): AnnualCostAudit {
     const metadata = new Map(categories.map((row) => [row.name, row]));
+    const metadataByKey = new Map(categories.map((row) => [row.category_key, row]));
+    const categoryName = (row: Transaction): string => {
+      const rawCategory = row.category ?? "";
+      const legacyCategory = LEGACY_CATEGORY_ALIASES[rawCategory] ?? rawCategory;
+      const definition = row.category_key
+        ? metadataByKey.get(row.category_key)
+        : metadata.get(legacyCategory);
+      return definition?.name ?? legacyCategory;
+    };
     const expenses = [...transactionsByMonth.entries()]
       .filter(([month]) => month.startsWith(year))
       .flatMap(([month, transactions]) => transactions
-        .filter((row) => row.type === "支出")
+        .filter((row) => row.type === "支出" || row.type === "代付")
         .map((row) => ({
           month,
-          category: row.category,
+          type: row.type,
+          category: categoryName(row),
           product: row.product,
-          amount: row.amount
+          amount: row.type === "代付" ? -row.amount : row.amount
         })));
     const monthsCount = Math.max(1, new Set(annualRows.map((row) => row.month)).size);
     const total = sum(expenses.map((row) => row.amount));
@@ -534,6 +586,7 @@ export class AnalysisReadModel {
     const byPattern = new Map<string, number>();
     expenses.forEach((row) => {
       const category = row.category;
+      if (!category) return;
       const amount = row.amount;
       byCategory.set(category, (byCategory.get(category) ?? 0) + amount);
       const pattern = metadata.get(category)?.pattern ?? "偶尔";
@@ -547,7 +600,7 @@ export class AnalysisReadModel {
     ).map((row) => row.amount));
     const productSummary = (category: string, divisor: number) => {
       const grouped = new Map<string, number>();
-      expenses.filter((row) => row.category === category).forEach((row) => {
+      expenses.filter((row) => row.type === "支出" && row.category === category).forEach((row) => {
         const product = row.product;
         grouped.set(product, (grouped.get(product) ?? 0) + row.amount);
       });
@@ -590,8 +643,10 @@ export class AnalysisReadModel {
         }),
       big_tickets: expenses.filter((row) => {
         const category = row.category;
-        return metadata.get(category)?.is_big_ticket
-          || row.amount >= this.context.largeExpenseThreshold;
+        return row.type === "支出" && (
+          Boolean(metadata.get(category)?.is_big_ticket)
+          || row.amount >= this.context.largeExpenseThreshold
+        );
       }).map((row) => ({
         month: row.month,
         product: row.product,
@@ -607,7 +662,7 @@ export class AnalysisReadModel {
     if (!/^\d{4}$/.test(year)) {
       throw new RepositoryValidationError({ code: "analysis.year_invalid", params: { year } });
     }
-    const availableMonths = this.context.getMonths(db).sort();
+    const availableMonths = this.context.savedMonths(db).sort();
     const annualMonths = availableMonths.filter((month) => month.startsWith(year));
     if (!annualMonths.length) {
       return {
@@ -672,11 +727,13 @@ export class AnalysisReadModel {
       (row) => row.month >= rollingStart && row.month <= latestMonth
     );
     const annualFixedAssets = new Map<string, AnnualFixedAsset>();
+    const fixedAssetMonths = annualMonths.filter((month) => month.startsWith(year));
+    const fixedAssetPlaceholders = fixedAssetMonths.map(() => "?").join(",");
     for (const row of rows(db.prepare(`
       SELECT * FROM fixed_assets
-      WHERE month LIKE ?
+      WHERE month IN (${fixedAssetPlaceholders})
       ORDER BY month DESC, id DESC
-    `).all(`${year}-%`))) {
+    `).all(...fixedAssetMonths))) {
       const assetKey = text(row.asset_key);
       if (!annualFixedAssets.has(assetKey)) {
         annualFixedAssets.set(assetKey, {
@@ -719,7 +776,7 @@ export class AnalysisReadModel {
   }
 
   currentAsset(db: DatabaseSync): CurrentAsset {
-    const latest = this.context.getMonths(db).at(-1);
+    const latest = this.context.savedMonths(db).at(-1);
     if (!latest) {
       return {
         month: null,

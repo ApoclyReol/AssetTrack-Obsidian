@@ -141,7 +141,8 @@ export function validateTransactions(
           index,
           "分类",
           `${type}使用了不匹配的分类`,
-          `请选择${type}类分类`
+          `请选择${type}类分类`,
+          "错误"
         ));
       }
     } else if (category || categoryKey) {

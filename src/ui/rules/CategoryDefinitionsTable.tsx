@@ -31,6 +31,7 @@ export interface CategoryDefinitionsTableProps {
   onOpenHistory: (query: ProductHistoryQuery) => void;
   showSectionActions: boolean;
   dirty: boolean;
+  saveBlocked: boolean;
   pageState: OperationState;
   saveState: OperationState;
   onReload: () => Promise<void>;
@@ -47,6 +48,7 @@ export function CategoryDefinitionsTable({
   onOpenHistory,
   showSectionActions,
   dirty,
+  saveBlocked,
   pageState,
   saveState,
   onReload,
@@ -98,7 +100,7 @@ export function CategoryDefinitionsTable({
         <button type="button" disabled={pageState.kind === "pending"} onClick={() => void onReload()}>
           {t("放弃并重载", "Discard and reload")}
         </button>
-        <button type="button" className="mod-cta" disabled={!dirty || saveState.kind === "pending"} onClick={() => void onSave()}>
+        <button type="button" className="mod-cta" disabled={saveBlocked || !dirty || saveState.kind === "pending"} onClick={() => void onSave()}>
           {t("保存分类", "Save categories")}
         </button>
         {readWindow && <span className="asset-track-section-scope-note" role="note">

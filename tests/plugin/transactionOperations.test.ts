@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   previewTransactionOperation,
+  transactionCategoryType,
   validateTransactionOperationRequest
 } from "../../src/domain/transactionOperations";
 import type {
@@ -56,6 +57,13 @@ function request(
 }
 
 describe("transaction operation previews", () => {
+  it("uses the expense category namespace for paid-on-behalf rows", () => {
+    expect(transactionCategoryType("支出")).toBe("支出");
+    expect(transactionCategoryType("代付")).toBe("支出");
+    expect(transactionCategoryType("收入")).toBe("收入");
+    expect(transactionCategoryType("加仓")).toBeNull();
+  });
+
   it("validates selection and category type contracts before preview generation", () => {
     expect(validateTransactionOperationRequest(rows, request("bulk-edit-product", []))).toEqual([
       { code: "transaction.selection.empty", params: {} }

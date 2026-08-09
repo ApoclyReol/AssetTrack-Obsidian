@@ -5,6 +5,7 @@ export type MonthCreationReason = {
 
 export interface MonthCreationPolicy {
   months: string[];
+  saved_months: string[];
   draft_month: string | null;
   next_target: string;
   max_creatable_month: string;

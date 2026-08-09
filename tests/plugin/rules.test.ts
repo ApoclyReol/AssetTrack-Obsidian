@@ -278,7 +278,26 @@ describe("current schema rule scopes", () => {
       }
     ])).toMatchObject([{
       rule_id: 1,
-      target_rule_ids: [6]
+      target_rule_ids: [6],
+      category_conflict: true
+    }]);
+
+    const sameCategoryTarget = detectRewriteChains([
+      rules[0],
+      rules[2],
+      {
+        id: 7,
+        transaction_type: "支出",
+        match_scope: "product" as const,
+        product: "咖啡",
+        counterparty: "",
+        category_key: "cat-combo",
+        category: "组合分类"
+      }
+    ]);
+    expect(sameCategoryTarget).toMatchObject([{
+      target_rule_ids: [7],
+      category_conflict: false
     }]);
   });
 });

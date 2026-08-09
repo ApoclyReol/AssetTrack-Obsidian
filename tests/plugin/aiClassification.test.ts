@@ -33,6 +33,7 @@ const row: Transaction = {
   category: "",
   counterparty: "咖啡店",
   product: "拿铁",
+  account_key: "cash-default",
   amount: 20
 };
 
@@ -91,6 +92,8 @@ describe("AI classification preview", () => {
     expect(result.batch.classified_count).toBe(1);
     expect(result.preview.change_count).toBe(1);
     expect(result.rows[0]).toMatchObject({ category_key: "cat-food", category: "餐饮基础" });
+    expect(result.preview.changes[0].before).toMatchObject({ account_key: "cash-default" });
+    expect(result.preview.changes[0].after).toMatchObject({ account_key: "cash-default" });
   });
 
   it("allows daifu rows to use expense categories", async () => {
@@ -229,6 +232,72 @@ describe("AI classification preview", () => {
       "cat-food",
       "cat-grocery"
     ]);
+  });
+
+  it("rejects a response whose id and key point to different rows", async () => {
+    const secondRow: Transaction = { ...row, id: 8, product: "水果" };
+    requestUrlResult([{
+      transaction_id: 7,
+      transaction_key: "id:8",
+      category_key: "cat-food",
+      rewrite_merchant: null,
+      rewrite_product: null,
+      status: "classified",
+      confidence: 0.9
+    }]);
+    const result = await previewAiClassification(
+      [row, secondRow],
+      {
+        month: "2026-01",
+        operation_type: "ai-classification",
+        transaction_ids: [7, 8],
+        expected_revision: 1,
+        source_page: "记录/流水"
+      },
+      [category],
+      settings,
+      "secret-key"
+    );
+    expect(result.batch.error_count).toBe(2);
+    expect(result.preview.failure_count).toBe(2);
+    expect(result.rows.map((item) => item.category_key)).toEqual([null, null]);
+  });
+
+  it("rejects duplicate AI results for the same row", async () => {
+    requestUrlResult([
+      {
+        transaction_id: 7,
+        category_key: "cat-food",
+        rewrite_merchant: null,
+        rewrite_product: null,
+        status: "classified",
+        confidence: 0.9
+      },
+      {
+        transaction_id: 7,
+        category_key: "cat-food",
+        rewrite_merchant: null,
+        rewrite_product: null,
+        status: "classified",
+        confidence: 0.9
+      }
+    ]);
+    const result = await previewAiClassification(
+      [row],
+      {
+        month: "2026-01",
+        operation_type: "ai-classification",
+        transaction_ids: [7],
+        expected_revision: 1,
+        source_page: "记录/流水"
+      },
+      [category],
+      settings,
+      "secret-key"
+    );
+    expect(result.batch.error_count).toBe(1);
+    expect(result.preview.failure_count).toBe(1);
+    expect(result.rows[0].category_key).toBeNull();
   });
 
   it("does not send protected rows until the user includes them", async () => {

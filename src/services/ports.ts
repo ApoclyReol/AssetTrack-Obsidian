@@ -68,7 +68,7 @@ export interface RuleWritePort {
     revision: number,
     rows: Array<Record<string, unknown>>,
     audit?: OperationAuditContext
-  ): Promise<unknown>;
+  ): Promise<{ revision: number; rows: Array<Record<string, unknown>> }>;
 }
 
 export interface MonthEditorPort extends RuleLookupPort, RuleWritePort {
@@ -115,7 +115,11 @@ export interface ConfigurationEditorPort extends RuleLookupPort, RuleWritePort {
     revision: number,
     rows: CategoryDefinition[],
     audit?: OperationAuditContext
-  ): Promise<{ revision: number; rows: CategoryDefinition[] }>;
+  ): Promise<{
+    revision: number;
+    rows: CategoryDefinition[];
+    rules_revision: number;
+  }>;
 }
 
 /** Capabilities composed by the editor shell while each child receives a narrower port. */
@@ -138,7 +142,7 @@ export interface BackupPort {
     validation: Record<string, unknown>;
   }>;
   validateBackup(path: string): Promise<Record<string, unknown>>;
-  restoreBackup(path: string): Promise<Record<string, unknown>>;
+  restoreBackup(path: string, beforeCommit?: () => void): Promise<Record<string, unknown>>;
 }
 
 export interface RuntimePort {

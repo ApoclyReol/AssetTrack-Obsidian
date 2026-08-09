@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { createRef } from "react";
 import type { App } from "obsidian";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AssetTrackError } from "../../src/application/errors";
 import type {
   ConfigurationEditorPort,
   MonthEditorPort
@@ -14,12 +16,14 @@ import type {
   MonthWorkspace
 } from "../../src/types/month";
 import type {
-  RuleWorkspace
+  RuleWorkspace,
+  SavedRule
 } from "../../src/types/rules";
 import {
   MonthEditor,
   RulesEditor
 } from "../../src/ui/AssetTrackEditorApp";
+import type { RulesEditorHandle } from "../../src/ui/RulesEditor";
 import type {
   MonthEditorDraftSnapshot,
   RulesEditorDraftSnapshot
@@ -89,6 +93,22 @@ function createRuleWorkspaceFixture(): RuleWorkspace {
       uncategorized_transactions: 0,
       stable_products_without_rule: 0
     }
+  };
+}
+
+function ruleWorkspaceWithRule(): RuleWorkspace {
+  const rule: SavedRule = {
+    id: 1,
+    transaction_type: "支出",
+    match_scope: "product",
+    counterparty: "",
+    product: "恢复商品",
+    category_key: "food",
+    category: "恢复分类"
+  };
+  return {
+    ...createRuleWorkspaceFixture(),
+    rules: [rule]
   };
 }
 
@@ -283,6 +303,238 @@ describe("editor draft restoration", () => {
       category_dirty: true,
       rule_dirty: false
     }));
+  });
+
+  it("blocks every configuration save entry after a revision conflict", async () => {
+    const workspace = createRuleWorkspaceFixture();
+    const snapshot: RulesEditorDraftSnapshot = {
+      kind: "rules",
+      workspace,
+      category_dirty: true,
+      rule_dirty: false,
+      analytics_ready: true,
+      active_section: "matching"
+    };
+    const analytics = {
+      categories_revision: workspace.categories_revision,
+      rules_revision: workspace.rules_revision,
+      categories: workspace.categories,
+      rules: workspace.rules,
+      recommendations: [],
+      historical_products: [],
+      rule_conflicts: [],
+      summary: workspace.summary
+    };
+    const api = configurationApi({
+      ruleWorkspaceShell: vi.fn().mockResolvedValue({
+        categories_revision: workspace.categories_revision,
+        rules_revision: workspace.rules_revision,
+        categories: workspace.categories,
+        rules: workspace.rules
+      }),
+      ruleWorkspaceAnalytics: vi.fn().mockResolvedValue(analytics),
+      saveCategories: vi.fn().mockRejectedValue(new AssetTrackError({ code: "revision_conflict", status: 409 }))
+    });
+    const onSessionChange = vi.fn();
+    const ref = createRef<RulesEditorHandle>();
+
+    render(
+      <RulesEditor
+        ref={ref}
+        app={{} as App}
+        api={api}
+        hostWindow={window}
+        dataVersion={0}
+        section="categories"
+        initialDraft={snapshot}
+        onSessionChange={onSessionChange}
+        onSaved={vi.fn()}
+        onDataChanged={vi.fn()}
+        confirmAction={vi.fn()}
+      />
+    );
+
+    const saveButton = await screen.findByRole("button", { name: "保存分类" });
+    expect(onSessionChange).toHaveBeenCalledWith(expect.objectContaining({ active_section: "categories" }));
+    fireEvent.click(saveButton);
+    await waitFor(() => expect(saveButton).toHaveProperty("disabled", true));
+    await expect(ref.current?.save()).resolves.toBe(false);
+    await expect(ref.current?.saveAll()).resolves.toBe(false);
+  });
+
+  it("does not let an older analytics response replace a saved category snapshot", async () => {
+    const workspace = createRuleWorkspaceFixture();
+    const snapshot: RulesEditorDraftSnapshot = {
+      kind: "rules",
+      workspace,
+      category_dirty: true,
+      rule_dirty: false,
+      analytics_ready: true
+    };
+    let resolveOld!: (value: typeof workspace & Record<string, unknown>) => void;
+    let resolveNew!: (value: typeof workspace & Record<string, unknown>) => void;
+    const oldAnalytics = new Promise<typeof workspace & Record<string, unknown>>((resolve) => { resolveOld = resolve; });
+    const newAnalytics = new Promise<typeof workspace & Record<string, unknown>>((resolve) => { resolveNew = resolve; });
+    const savedCategory = { ...category, name: "保存后分类" };
+    const ruleWorkspaceAnalytics = vi.fn()
+      .mockImplementationOnce(() => oldAnalytics)
+      .mockImplementationOnce(() => newAnalytics);
+    const api = configurationApi({
+      ruleWorkspaceShell: vi.fn().mockResolvedValue({
+        categories_revision: workspace.categories_revision,
+        rules_revision: workspace.rules_revision,
+        categories: workspace.categories,
+        rules: workspace.rules
+      }),
+      ruleWorkspaceAnalytics,
+      saveCategories: vi.fn().mockResolvedValue({
+        revision: workspace.categories_revision + 1,
+        rules_revision: workspace.rules_revision,
+        rows: [savedCategory]
+      })
+    });
+    const ref = createRef<RulesEditorHandle>();
+
+    render(
+      <RulesEditor
+        ref={ref}
+        app={{} as App}
+        api={api}
+        hostWindow={window}
+        dataVersion={0}
+        section="categories"
+        initialDraft={snapshot}
+        onSessionChange={vi.fn()}
+        onSaved={vi.fn()}
+        onDataChanged={vi.fn()}
+        confirmAction={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(ruleWorkspaceAnalytics).toHaveBeenCalledTimes(1));
+    const savePromise = ref.current?.save();
+    await waitFor(() => expect(ruleWorkspaceAnalytics).toHaveBeenCalledTimes(2));
+    resolveNew({
+      ...workspace,
+      categories_revision: workspace.categories_revision + 1,
+      categories: [savedCategory],
+      rules: workspace.rules,
+      recommendations: [],
+      historical_products: [],
+      rule_conflicts: [],
+      summary: workspace.summary
+    });
+    await expect(savePromise).resolves.toBe(true);
+    resolveOld({
+      ...workspace,
+      categories: [{ ...category, name: "旧 analytics 分类" }],
+      rules: workspace.rules,
+      recommendations: [],
+      historical_products: [],
+      rule_conflicts: [],
+      summary: workspace.summary
+    });
+    await waitFor(() => expect(screen.getByDisplayValue("保存后分类")).toBeTruthy());
+    expect(screen.queryByDisplayValue("旧 analytics 分类")).toBeNull();
+  });
+
+  it("uses the new rules revision when saving category and rule drafts together", async () => {
+    const workspace = ruleWorkspaceWithRule();
+    const snapshot: RulesEditorDraftSnapshot = {
+      kind: "rules",
+      workspace,
+      category_dirty: true,
+      rule_dirty: true,
+      analytics_ready: true
+    };
+    const analytics = {
+      categories_revision: 6,
+      rules_revision: 7,
+      categories: [{ ...category, name: "恢复分类" }],
+      rules: workspace.rules,
+      recommendations: [],
+      historical_products: [],
+      rule_conflicts: [],
+      summary: workspace.summary
+    };
+    const api = configurationApi({
+      ruleWorkspaceShell: vi.fn().mockResolvedValue({
+        categories_revision: 4,
+        rules_revision: 5,
+        categories: [{ ...category, name: "数据库分类" }],
+        rules: workspace.rules
+      }),
+      saveCategories: vi.fn().mockResolvedValue({
+        revision: 6,
+        rows: [{ ...category, name: "恢复分类" }]
+      }),
+      ruleWorkspaceAnalytics: vi.fn().mockResolvedValue(analytics),
+      saveRules: vi.fn().mockResolvedValue(undefined)
+    });
+    const ref = createRef<RulesEditorHandle>();
+
+    render(
+      <RulesEditor
+        ref={ref}
+        app={{} as App}
+        api={api}
+        hostWindow={window}
+        dataVersion={0}
+        initialDraft={snapshot}
+        onSessionChange={vi.fn()}
+        onSaved={vi.fn()}
+        onDataChanged={vi.fn()}
+        confirmAction={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(screen.getAllByDisplayValue("恢复分类").length).toBeGreaterThan(0));
+    await expect(ref.current?.save()).resolves.toBe(true);
+    const mocks = api as unknown as Record<string, { mock: { calls: unknown[][] } }>;
+    expect(mocks.saveCategories.mock.calls)
+      .toContainEqual([4, workspace.categories]);
+    expect(mocks.saveRules.mock.calls)
+      .toContainEqual([7, expect.any(Array), { source_page: "配置/匹配规则" }]);
+  });
+
+  it("keeps transaction validation messages off other month subpages", async () => {
+    const snapshot: MonthEditorDraftSnapshot = {
+      kind: "transactions",
+      month: "2026-08",
+      workspace: monthWorkspace(1),
+      categories: [category],
+      issues: [{
+        row_index: 0,
+        type: "支出",
+        field: "分类",
+        issue: "支出未选择有效分类",
+        severity: "警告",
+        blocking: false
+      }],
+      active_section: "assets",
+      dirty_sections: ["transactions"]
+    };
+
+    render(
+      <MonthEditor
+        api={monthApi()}
+        hostWindow={window}
+        month="2026-08"
+        months={["2026-08"]}
+        dataVersion={0}
+        reconciliationTolerance={100}
+        activeSection="assets"
+        onDeleted={vi.fn()}
+        onSaved={vi.fn()}
+        initialDraft={snapshot}
+        onSessionChange={vi.fn()}
+        getCsvMapping={vi.fn()}
+        saveCsvMapping={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("heading", { name: "资产账户" })).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("recalculates draft reconciliation immediately after marking inherited debt paid", async () => {

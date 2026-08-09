@@ -1,15 +1,24 @@
-import { existsSync, mkdirSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  renameSync,
+  rmSync
+} from "node:fs";
 import { dirname, join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import {
   CURRENT_SCHEMA_VERSION,
   PREVIOUS_SCHEMA_VERSION,
   REQUIRED_COLUMNS,
+  REQUIRED_CHECK_CONSTRAINTS,
   REQUIRED_FOREIGN_KEYS,
   REQUIRED_GENERATED_COLUMNS,
   REQUIRED_INDEX_DEFINITIONS,
   REQUIRED_INDEXES,
+  REQUIRED_PRIMARY_KEYS,
   REQUIRED_TABLES,
+  REQUIRED_UNIQUE_CONSTRAINTS,
   canMigrateSchema9,
   createSchema,
   migrateSchema9To10,
@@ -31,7 +40,11 @@ export interface SchemaValidation {
   invalid_columns: Record<string, string[]>;
   missing_indexes: string[];
   invalid_indexes: string[];
+  invalid_primary_keys: string[];
+  missing_unique_constraints: string[];
+  missing_check_constraints: string[];
   missing_foreign_keys: string[];
+  invalid_foreign_keys: string[];
   integrity_check: string;
   foreign_key_violations: number | null;
 }
@@ -40,6 +53,7 @@ export interface DatabaseInspection {
   exists: boolean;
   valid: boolean;
   migration_required?: boolean;
+  recovery_available?: boolean;
   validation: SchemaValidation | null;
   error: string | AssetTrackError | null;
 }
@@ -78,6 +92,16 @@ function tableNames(db: DatabaseSync): string[] {
     "SELECT name FROM sqlite_master "
     + "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
   ).all() as Array<{ name: string }>).map((row) => row.name);
+}
+
+function normalizedSql(value: unknown): string {
+  return (typeof value === "string" ? value : "")
+    .toLocaleLowerCase("zh-CN")
+    .replace(/[\s`"]+/g, "");
+}
+
+function constraintLabel(table: string, columns: readonly string[]): string {
+  return `${table}(${columns.join(",")})`;
 }
 
 function schemaValidation(db: DatabaseSync, full: boolean): SchemaValidation {
@@ -134,13 +158,65 @@ function schemaValidation(db: DatabaseSync, full: boolean): SchemaValidation {
       ? [definition.name]
       : []
   );
+  const invalidPrimaryKeys = REQUIRED_PRIMARY_KEYS.flatMap((expected) => {
+    if (missingTables.includes(expected.table)) return [];
+    const columns = (db.prepare(`PRAGMA table_info("${expected.table}")`).all() as Array<{
+      name: string;
+      pk: number;
+    }>)
+      .filter((column) => column.pk > 0)
+      .sort((left, right) => left.pk - right.pk)
+      .map((column) => column.name);
+    return JSON.stringify(columns) === JSON.stringify(expected.columns)
+      ? []
+      : [constraintLabel(expected.table, expected.columns)];
+  });
+  const missingUniqueConstraints = REQUIRED_UNIQUE_CONSTRAINTS.flatMap((expected) => {
+    if (missingTables.includes(expected.table)) return [];
+    const present = (db.prepare(`PRAGMA index_list("${expected.table}")`).all() as Array<{
+      name: string;
+      unique: number;
+      origin?: string;
+    }>).some((index) => {
+      if (index.unique !== 1 || index.origin !== "u") return false;
+      const columns = (db.prepare(`PRAGMA index_info("${index.name}")`).all() as Array<{
+        seqno: number;
+        name: string | null;
+      }>)
+        .sort((left, right) => left.seqno - right.seqno)
+        .map((column) => column.name);
+      return JSON.stringify(columns) === JSON.stringify(expected.columns);
+    });
+    return present ? [] : [constraintLabel(expected.table, expected.columns)];
+  });
+  const tableSql = new Map(
+    REQUIRED_TABLES.flatMap((table) => {
+      if (missingTables.includes(table)) return [];
+      const row = db.prepare(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name=?"
+      ).get(table) as { sql?: string | null } | undefined;
+      return [[table, normalizedSql(row?.sql)] as const];
+    })
+  );
+  const missingCheckConstraints = REQUIRED_CHECK_CONSTRAINTS.flatMap((expected) => {
+    const sql = tableSql.get(expected.table);
+    return sql?.includes(normalizedSql(expected.expression))
+      ? []
+      : [`${expected.table}:${expected.expression}`];
+  });
   const missingForeignKeys = REQUIRED_FOREIGN_KEYS.flatMap((expected) => {
     if (missingTables.includes(expected.table)) {
       return [];
     }
     const foreignKeys = db.prepare(
       `PRAGMA foreign_key_list("${expected.table}")`
-    ).all() as Array<{ table: string; from: string; to: string }>;
+    ).all() as Array<{
+      table: string;
+      from: string;
+      to: string;
+      on_delete?: string;
+      on_update?: string;
+    }>;
     const present = foreignKeys.some(
       (foreignKey) =>
         foreignKey.table === expected.targetTable
@@ -153,6 +229,36 @@ function schemaValidation(db: DatabaseSync, full: boolean): SchemaValidation {
           `${expected.table}.${expected.from}`
           + `→${expected.targetTable}.${expected.targetColumn}`
         ];
+  });
+  const invalidForeignKeys = REQUIRED_FOREIGN_KEYS.flatMap((expected) => {
+    if (missingTables.includes(expected.table)) return [];
+    const foreignKeys = db.prepare(
+      `PRAGMA foreign_key_list("${expected.table}")`
+    ).all() as Array<{
+      table: string;
+      from: string;
+      to: string;
+      on_delete?: string;
+      on_update?: string;
+    }>;
+    const present = foreignKeys.some(
+      (foreignKey) =>
+        foreignKey.table === expected.targetTable
+        && foreignKey.from === expected.from
+        && foreignKey.to === expected.targetColumn
+    );
+    if (!present) return [];
+    return foreignKeys.some(
+      (foreignKey) =>
+        foreignKey.table === expected.targetTable
+        && foreignKey.from === expected.from
+        && foreignKey.to === expected.targetColumn
+        && String(foreignKey.on_delete ?? "NO ACTION").toUpperCase() === "NO ACTION"
+        && String(foreignKey.on_update ?? "NO ACTION").toUpperCase() === "NO ACTION"
+    )
+      ? []
+      : [`${expected.table}.${expected.from}`
+        + `→${expected.targetTable}.${expected.targetColumn}`];
   });
   const version = Number(
     (db.prepare("PRAGMA user_version").get() as { user_version: number })
@@ -175,7 +281,11 @@ function schemaValidation(db: DatabaseSync, full: boolean): SchemaValidation {
     && Object.keys(invalidColumns).length === 0
     && missingIndexes.length === 0
     && invalidIndexes.length === 0
+    && invalidPrimaryKeys.length === 0
+    && missingUniqueConstraints.length === 0
+    && missingCheckConstraints.length === 0
     && missingForeignKeys.length === 0
+    && invalidForeignKeys.length === 0
     && (integrity === "ok" || integrity === "skipped")
     && (foreignKeyViolations === 0 || foreignKeyViolations === null);
   return {
@@ -187,10 +297,38 @@ function schemaValidation(db: DatabaseSync, full: boolean): SchemaValidation {
     invalid_columns: invalidColumns,
     missing_indexes: missingIndexes,
     invalid_indexes: invalidIndexes,
+    invalid_primary_keys: invalidPrimaryKeys,
+    missing_unique_constraints: missingUniqueConstraints,
+    missing_check_constraints: missingCheckConstraints,
     missing_foreign_keys: missingForeignKeys,
+    invalid_foreign_keys: invalidForeignKeys,
     integrity_check: integrity,
     foreign_key_violations: foreignKeyViolations
   };
+}
+
+function isRecoverableDatabase(path: string): boolean {
+  if (!existsSync(path)) return false;
+  let db: DatabaseSync | null = null;
+  try {
+    const runtime = sqliteRuntime();
+    db = new runtime.DatabaseSync(path, { readOnly: true, timeout: 5000 });
+    registerSchemaFunctions(db);
+    const validation = schemaValidation(db, true);
+    return validation.valid || canMigrateSchema9(db);
+  } catch {
+    return false;
+  } finally {
+    db?.close();
+  }
+}
+
+function recoveryArtifact(path: string): string | null {
+  const rollback = `${path}.rollback`;
+  if (isRecoverableDatabase(rollback)) return rollback;
+  const incoming = `${path}.incoming`;
+  if (isRecoverableDatabase(incoming)) return incoming;
+  return null;
 }
 
 function validationError(validation: SchemaValidation): string {
@@ -205,7 +343,11 @@ function validationError(validation: SchemaValidation): string {
       .map(([table, columns]) => `${table}(${columns.join(",")})`).join(";") || "无"}，`
     + `缺少索引=${validation.missing_indexes.join(",") || "无"}，`
     + `非法索引=${validation.invalid_indexes.join(",") || "无"}，`
+    + `非法主键=${validation.invalid_primary_keys.join(",") || "无"}，`
+    + `缺少唯一约束=${validation.missing_unique_constraints.join(",") || "无"}，`
+    + `缺少检查约束=${validation.missing_check_constraints.join(",") || "无"}，`
     + `缺少外键=${validation.missing_foreign_keys.join(",") || "无"}，`
+    + `非法外键=${validation.invalid_foreign_keys.join(",") || "无"}，`
     + `外键违规=${validation.foreign_key_violations ?? "未检查"}，`
     + `完整性=${validation.integrity_check}`;
 }
@@ -214,13 +356,20 @@ export class DatabaseManager {
   private db: DatabaseSync | null = null;
   private writeTail: Promise<unknown> = Promise.resolve();
   private restoring = false;
+  private acceptingWrites = true;
   private migrationReport: SchemaMigrationReport | null = null;
 
   constructor(private path: string) {}
 
   static inspect(path: string): DatabaseInspection {
     if (!existsSync(path)) {
-      return { exists: false, valid: false, validation: null, error: null };
+      return {
+        exists: false,
+        valid: false,
+        ...(recoveryArtifact(path) ? { recovery_available: true } : {}),
+        validation: null,
+        error: null
+      };
     }
     let db: DatabaseSync | null = null;
     try {
@@ -228,10 +377,14 @@ export class DatabaseManager {
       db = new runtime.DatabaseSync(path, { readOnly: true, timeout: 5000 });
       registerSchemaFunctions(db);
       const validation = schemaValidation(db, true);
+      const migrationRequired = canMigrateSchema9(db);
       return {
         exists: true,
         valid: validation.valid,
-        migration_required: canMigrateSchema9(db),
+        migration_required: migrationRequired,
+        ...(!validation.valid && !migrationRequired && recoveryArtifact(path)
+          ? { recovery_available: true }
+          : {}),
         validation,
         error: validation.valid ? null : validationError(validation)
       };
@@ -239,6 +392,7 @@ export class DatabaseManager {
       return {
         exists: true,
         valid: false,
+        ...(recoveryArtifact(path) ? { recovery_available: true } : {}),
         validation: null,
         error: error instanceof AssetTrackError
           ? error
@@ -267,6 +421,7 @@ export class DatabaseManager {
 
   open(): DatabaseSync {
     if (this.db) return this.db;
+    if (!this.restoring) this.recoverRestoreArtifacts();
     const runtime = sqliteRuntime();
     mkdirSync(dirname(this.path), { recursive: true });
     const db = new runtime.DatabaseSync(this.path, {
@@ -274,11 +429,11 @@ export class DatabaseManager {
       readOnly: false,
       timeout: 5000
     });
+    let migrationProtectionBackup: string | null = null;
     try {
       registerSchemaFunctions(db);
       db.exec("PRAGMA foreign_keys=ON");
       db.exec("PRAGMA busy_timeout=5000");
-      db.exec("PRAGMA journal_mode=WAL");
       const tables = this.tableNames(db);
       const version = Number(
         (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version
@@ -301,6 +456,7 @@ export class DatabaseManager {
         }
       } else if (version === PREVIOUS_SCHEMA_VERSION) {
         const protectionBackup = this.createMigrationProtectionBackup(db, version);
+        migrationProtectionBackup = protectionBackup;
         try {
           this.migrationReport = migrateSchema9To10(db);
           this.migrationReport.protection_backup_path = protectionBackup;
@@ -320,36 +476,23 @@ export class DatabaseManager {
           params: { version: validation.schema_version }
         });
       }
-      const accountCount = Number(
-        (db.prepare("SELECT COUNT(*) AS count FROM account_definitions").get() as { count: number }).count
-      );
-      if (accountCount === 0) {
-        db.exec("BEGIN IMMEDIATE");
-        try {
-          db.prepare(
-            "INSERT INTO account_definitions "
-            + "(account_key,name,account_type,is_active,sort_order) VALUES (?,?,?,?,?)"
-          ).run("cash-default", "默认现金账户", "cash", 1, 0);
-          db.prepare(
-            "INSERT INTO account_definitions "
-            + "(account_key,name,account_type,is_active,sort_order) VALUES (?,?,?,?,?)"
-          ).run("investment-default", "默认理财账户", "investment", 1, 1);
-          db.exec("COMMIT");
-        } catch (error) {
-          db.exec("ROLLBACK");
-          throw error;
-        }
-      }
+      db.exec("PRAGMA journal_mode=WAL");
       this.db = db;
+      this.acceptingWrites = true;
       return db;
     } catch (error) {
       db.close();
+      if (migrationProtectionBackup && existsSync(migrationProtectionBackup)) {
+        rmSync(`${this.path}-wal`, { force: true });
+        rmSync(`${this.path}-shm`, { force: true });
+        copyFileSync(migrationProtectionBackup, this.path);
+      }
       throw error;
     }
   }
 
   connection(): DatabaseSync {
-    if (this.restoring) {
+    if (this.restoring || !this.acceptingWrites) {
       throw new AssetTrackError({
         code: "database.restoring",
         status: 423
@@ -385,32 +528,45 @@ export class DatabaseManager {
   }
 
   close(): void {
+    this.acceptingWrites = false;
     if (!this.db) return;
     this.db.close();
     this.db = null;
   }
 
   async reopen(): Promise<void> {
+    this.acceptingWrites = false;
     await this.drain();
     this.close();
     this.open();
+    this.acceptingWrites = true;
   }
 
-  async withRestoreLock<T>(operation: () => Promise<T>): Promise<T> {
+  async withRestoreLock<T>(
+    operation: () => Promise<T>,
+    beforeClose?: () => Promise<void>
+  ): Promise<T> {
+    this.acceptingWrites = false;
     await this.drain();
-    this.restoring = true;
-    this.close();
     try {
+      // The callback runs after the write queue has drained but before the
+      // connection is closed. This lets restore create its safety snapshot
+      // while the restore lock already blocks every new write.
+      await beforeClose?.();
+      this.restoring = true;
+      this.close();
       return await operation();
     } finally {
       this.restoring = false;
+      this.acceptingWrites = true;
     }
   }
 
   async snapshot(targetPath: string): Promise<void> {
     await this.drain();
     mkdirSync(dirname(targetPath), { recursive: true });
-    await sqliteRuntime().backup(this.connection(), targetPath);
+    const db = this.db ?? this.open();
+    await sqliteRuntime().backup(db, targetPath);
   }
 
   validate(full = true): SchemaValidation {
@@ -423,6 +579,65 @@ export class DatabaseManager {
 
   private validateDatabase(db: DatabaseSync, full: boolean): SchemaValidation {
     return schemaValidation(db, full);
+  }
+
+  private recoverRestoreArtifacts(): void {
+    const rollback = `${this.path}.rollback`;
+    const incoming = `${this.path}.incoming`;
+    const wal = `${this.path}-wal`;
+    const shm = `${this.path}-shm`;
+    const targetExists = existsSync(this.path);
+    const targetValid = targetExists && isRecoverableDatabase(this.path);
+    const rollbackExists = existsSync(rollback);
+    const incomingExists = existsSync(incoming);
+    const rollbackValid = rollbackExists && isRecoverableDatabase(rollback);
+    const incomingValid = incomingExists && isRecoverableDatabase(incoming);
+
+    // A valid installed target is authoritative. Only remove sidecars after
+    // all candidate validation is complete, so an invalid rollback cannot
+    // cause a valid incoming restore candidate to be deleted.
+    if (targetValid) {
+      rmSync(rollback, { force: true });
+      rmSync(incoming, { force: true });
+      return;
+    }
+
+    // An incoming database is the user's requested restore and therefore has
+    // priority over the old target kept in rollback. This covers a crash after
+    // target validation failed but before the incoming file was installed.
+    const selected = incomingValid
+      ? incoming
+      : rollbackValid
+        ? rollback
+        : null;
+    if (!selected) {
+      if (rollbackExists) rmSync(rollback, { force: true });
+      if (incomingExists) rmSync(incoming, { force: true });
+      return;
+    }
+
+    const displaced = targetExists
+      ? `${this.path}.recovery-invalid-${process.pid}-${Date.now()}`
+      : null;
+    try {
+      rmSync(wal, { force: true });
+      rmSync(shm, { force: true });
+      if (displaced) renameSync(this.path, displaced);
+      renameSync(selected, this.path);
+      if (displaced) rmSync(displaced, { force: true });
+      if (selected !== rollback) rmSync(rollback, { force: true });
+      if (selected !== incoming) rmSync(incoming, { force: true });
+    } catch (error) {
+      // Keep the valid candidate available for the next open and restore the
+      // malformed target when installation did not complete.
+      if (existsSync(this.path) && selected !== this.path) {
+        try { renameSync(this.path, selected); } catch { /* preserve original error */ }
+      }
+      if (displaced && existsSync(displaced) && !existsSync(this.path)) {
+        try { renameSync(displaced, this.path); } catch { /* preserve original error */ }
+      }
+      throw error;
+    }
   }
 
   private createMigrationProtectionBackup(db: DatabaseSync, sourceVersion: number): string {

@@ -11,6 +11,7 @@ import type {
 import { businessLabel, t } from "../i18n";
 import { scalarText } from "../domain/text";
 import { money } from "../domain/moneyFormat";
+import { messageFor } from "./editorPrimitives";
 
 export interface TransactionOperationModalOptions {
   app: App;
@@ -101,6 +102,7 @@ function OperationPreviewContent({
   const [busy, setBusy] = useState(false);
   const [current, setCurrent] = useState(preview);
   const [currentRows, setCurrentRows] = useState<Transaction[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const retryStatuses = ["error", "need_review", "unclassified"] as const;
   const availableRetryStatuses = retryStatuses.filter((status) =>
     current.metadata
@@ -116,12 +118,15 @@ function OperationPreviewContent({
   }));
   const confirm = async (includeProtected: boolean) => {
     setBusy(true);
+    setError(null);
     try {
       await onConfirm(
         includeProtected,
         currentRows ? { preview: current, rows: currentRows } : undefined
       );
       onClose();
+    } catch (reason) {
+      setError(messageFor(reason));
     } finally {
       setBusy(false);
     }
@@ -129,10 +134,13 @@ function OperationPreviewContent({
   const retry = async (status: AiBatchResult["rows"][number]["status"]) => {
     if (!onRetry) return;
     setBusy(true);
+    setError(null);
     try {
       const result = await onRetry([status]);
       setCurrent(result.preview);
       setCurrentRows(result.rows);
+    } catch (reason) {
+      setError(messageFor(reason));
     } finally {
       setBusy(false);
     }
@@ -142,6 +150,7 @@ function OperationPreviewContent({
     || current.operation_type === "daifu-to-income";
   const isAiClassification = current.operation_type === "ai-classification";
   return <div className="asset-track-operation-preview">
+    {error && <p role="alert" className="asset-track-operation-error">{error}</p>}
     <p>{t("写入前预览。确认后只会进入当前月份草稿，仍需保存当前区块。", "Preview before writing. Confirmation only changes the current-month draft; save the section to persist it.")}</p>
     <div className="asset-track-operation-preview-metrics" role="status">
       <span>{t("总数", "Total")} {current.total_count}</span>

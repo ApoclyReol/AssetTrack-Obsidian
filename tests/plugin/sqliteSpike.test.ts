@@ -35,13 +35,6 @@ describe("node:sqlite technical spike", () => {
       );
     }
     db.exec("COMMIT");
-    const started = performance.now();
-    const annual = repository.annual("2026");
-    const elapsed = performance.now() - started;
-    expect(annual.rows).toHaveLength(12);
-    expect(annual.metrics.total_expense).toBeGreaterThan(0);
-    expect(elapsed).toBeLessThan(2_000);
-
     const saveMonth = db.prepare(
       "INSERT INTO month_status (month,status,updated_at) VALUES (?,?,?)"
     );
@@ -49,6 +42,13 @@ describe("node:sqlite technical spike", () => {
       const month = `${2017 + Math.floor(index / 12)}-${String(index % 12 + 1).padStart(2, "0")}`;
       saveMonth.run(month, "saved", "2026-12-31T00:00:00.000Z");
     }
+    const started = performance.now();
+    const annual = repository.annual("2026");
+    const elapsed = performance.now() - started;
+    expect(annual.rows).toHaveLength(12);
+    expect(annual.metrics.total_expense).toBeGreaterThan(0);
+    expect(elapsed).toBeLessThan(2_000);
+
     const monthlyStarted = performance.now();
     const monthly = await repository.getMonth("2026-12");
     const monthlyElapsed = performance.now() - monthlyStarted;

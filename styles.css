@@ -781,6 +781,10 @@
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 }
 
+.asset-track-import-filtered-rows {
+  grid-column: 1 / -1;
+}
+
 @media (max-width: 900px) {
   .asset-track-investment-row,
   .asset-track-mapping-grid {
@@ -849,14 +853,7 @@
 }
 
 .asset-track-filter-grid--overview {
-  grid-template-columns:
-    minmax(72px, 0.3fr)
-    minmax(78px, 0.35fr)
-    minmax(144px, 0.4fr)
-    minmax(96px, 0.4fr)
-    minmax(58px, 0.35fr)
-    minmax(58px, 0.35fr)
-    minmax(58px, 0.35fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .asset-track-filter-grid label {
@@ -1691,9 +1688,15 @@
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  padding-left: 30px;
-  padding-right: 8px;
+  min-height: var(--input-height);
+  padding-left: 8px;
+  /* Leave a dedicated lane for the native calendar indicator. Narrow
+   * overview grids otherwise let the date text run underneath the icon. */
+  padding-right: 38px;
   text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
 }
 
 .asset-track-rule-history-selection-actions,
@@ -2354,6 +2357,12 @@
   border: 1px solid rgba(var(--color-red-rgb), 0.25);
   border-radius: var(--radius-s);
   background: rgba(var(--color-red-rgb), 0.08);
+}
+
+.asset-track-issues-omitted {
+  display: block;
+  margin-top: 8px;
+  color: var(--text-muted);
 }
 
 .asset-track-settings-status {

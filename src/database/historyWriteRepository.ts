@@ -31,7 +31,7 @@ export class HistoryWriteRepository {
              t.counterparty,t.product,t.source,t.amount
       FROM transactions t
       JOIN month_status m ON m.month=t.month AND m.status='saved'
-      WHERE t.id IN (${placeholders})
+      WHERE t.id IN (${placeholders}) AND t.type IN ('支出','收入')
       ORDER BY t.month,t.transaction_date,t.id
     `).all(...uniqueIds));
     if (selected.length !== uniqueIds.length) {

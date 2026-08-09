@@ -1,7 +1,9 @@
+import { dirname } from "node:path";
 import { describe, expect, it } from "vitest";
 import { categoryKey } from "../../src/database/schema";
 import { fixture } from "./databaseTestFixtures";
 import { previewTransactionOperation } from "../../src/domain/transactionOperations";
+import { LocalAssetTrackService } from "../../src/services/LocalAssetTrackService";
 describe("operation repository", () => {
 
 it("rechecks operation revision, selection, and transaction identity before saving", async () => {
@@ -79,6 +81,276 @@ it("rechecks operation revision, selection, and transaction identity before savi
     ]);
     await expect(saveWithLog(preview.preview)).rejects.toMatchObject({ status: 409 });
     expect((await repository.getMonth("2026-01")).transactions[0].product).toBe("原商品");
+  });
+
+it("accepts the rule workspace revision for an operation preview", async () => {
+    const { manager, path, repository } = fixture();
+    const food = categoryKey("餐饮基础");
+    const initial = await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 100 }],
+      [{ account_key: "investment-default", principal: 0, market_value: 0, cash_balance: 0 }],
+      [{
+        transaction_date: "2026-01-01",
+        type: "支出",
+        category_key: null,
+        category: "",
+        counterparty: "商户",
+        product: "规则商品",
+        amount: 20
+      }],
+      []
+    );
+    const currentRules = repository.rules();
+    await repository.saveRules(currentRules.revision, [{
+      transaction_type: "支出",
+      match_scope: "product",
+      counterparty: "",
+      product: "规则商品",
+      category_key: food,
+      category: "餐饮基础"
+    }]);
+
+    const shell = repository.ruleWorkspaceShell();
+    expect(shell.rules_revision).toBe(repository.rules().revision);
+    const service = new LocalAssetTrackService(manager, dirname(path), "test");
+    const row = initial.transactions[0];
+    const result = await service.previewTransactionOperation({
+      month: "2026-01",
+      operation_type: "apply-rules",
+      transaction_ids: [row.id!],
+      transaction_keys: [`id:${row.id}`],
+      expected_revision: initial.revision,
+      source_page: "记录/流水",
+      rules_revision: shell.rules_revision,
+      rows: initial.transactions,
+      rules: shell.rules
+    });
+
+    expect(result.rows[0]).toMatchObject({
+      category_key: food,
+      category: "餐饮基础"
+    });
+});
+
+it("canonicalizes a category label from its category key before logging the operation", async () => {
+    const { manager, path, repository } = fixture();
+    const food = categoryKey("餐饮基础");
+    const initial = await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 100 }],
+      [{ account_key: "investment-default", principal: 0, market_value: 0, cash_balance: 0 }],
+      [{
+        transaction_date: "2026-01-01",
+        type: "支出",
+        category_key: null,
+        category: "",
+        product: "待分类商品",
+        amount: 20
+      }],
+      []
+    );
+    const service = new LocalAssetTrackService(manager, dirname(path), "test");
+    const row = initial.transactions[0];
+    const result = await service.previewTransactionOperation({
+      month: "2026-01",
+      operation_type: "bulk-edit-category",
+      transaction_ids: [row.id!],
+      transaction_keys: [`id:${row.id}`],
+      expected_revision: initial.revision,
+      source_page: "记录/流水",
+      target_category_key: food,
+      target_value: "旧的显示名称",
+      rows: initial.transactions
+    });
+
+    expect(result.rows[0]).toMatchObject({
+      category_key: food,
+      category: "餐饮基础"
+    });
+    expect(result.preview.metadata?.target_value).toBe("餐饮基础");
+    const saved = await repository.saveMonthSection("2026-01", {
+      expected_revision: initial.revision,
+      section: "transactions",
+      transactions: result.rows,
+      operation_logs: [{
+        preview: result.preview,
+        selection: [`id:${row.id}`]
+      }]
+    });
+    expect(saved.transactions[0]).toMatchObject({ category_key: food, category: "餐饮基础" });
+  });
+
+it("saves imported draft rows after the rule preview", async () => {
+    const { repository } = fixture();
+    const initial = await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 100 }],
+      [{ account_key: "investment-default", principal: 0, market_value: 0, cash_balance: 0 }],
+      [],
+      []
+    );
+    const imported = {
+      client_id: "import:test:0",
+      transaction_date: "2026-01-02",
+      type: "支出",
+      category_key: null,
+      category: "",
+      counterparty: "导入商户",
+      product: "导入商品",
+      source: "账单.csv",
+      amount: 20
+    } as const;
+    const preparedRows = [imported];
+    const operationRequest = {
+      month: "2026-01",
+      operation_type: "apply-rules" as const,
+      transaction_ids: [],
+      transaction_keys: ["client:import:test:0"],
+      expected_revision: initial.revision,
+      source_page: "记录/流水",
+      business_tab: "all" as const
+    };
+    const preview = previewTransactionOperation(preparedRows, operationRequest, []);
+    const saved = await repository.saveMonthSection("2026-01", {
+      expected_revision: initial.revision,
+      section: "transactions",
+      transactions: preview.rows,
+      operation_logs: [{
+        preview: preview.preview,
+        selection: ["client:import:test:0"]
+      }]
+    });
+
+    expect(saved.transactions).toHaveLength(1);
+    expect(saved.transactions[0]).toMatchObject({
+      product: "导入商品",
+      source: "账单.csv"
+    });
+});
+
+it("saves appended imported rows with existing draft rows after the rule preview", async () => {
+    const { repository } = fixture();
+    const food = categoryKey("餐饮基础");
+    const initial = await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 100 }],
+      [{ account_key: "investment-default", principal: 0, market_value: 0, cash_balance: 0 }],
+      [{
+        transaction_date: "2026-01-01",
+        type: "支出",
+        category_key: food,
+        category: "餐饮基础",
+        counterparty: "已有商户",
+        product: "已有商品",
+        source: "手工",
+        amount: 10
+      }],
+      []
+    );
+    const imported = {
+      client_id: "import:test:1",
+      transaction_date: "2026-01-02",
+      type: "支出",
+      category_key: null,
+      category: "",
+      counterparty: "导入商户",
+      product: "导入商品",
+      source: "账单.csv",
+      amount: 20
+    } as const;
+    const preview = previewTransactionOperation(
+      [...initial.transactions, imported],
+      {
+        month: "2026-01",
+        operation_type: "apply-rules",
+        transaction_ids: [],
+        transaction_keys: ["client:import:test:1"],
+        expected_revision: initial.revision,
+        source_page: "记录/流水",
+        business_tab: "all"
+      },
+      []
+    );
+    const saved = await repository.saveMonthSection("2026-01", {
+      expected_revision: initial.revision,
+      section: "transactions",
+      transactions: preview.rows,
+      operation_logs: [{
+        preview: preview.preview,
+        selection: ["client:import:test:1"]
+      }]
+    });
+
+    expect(saved.transactions).toHaveLength(2);
+    expect(saved.transactions.map((row) => row.product)).toEqual(["已有商品", "导入商品"]);
+});
+
+it("saves imported rows after a rewriting rule preview", async () => {
+    const { repository } = fixture();
+    const food = categoryKey("餐饮基础");
+    const initial = await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 100 }],
+      [{ account_key: "investment-default", principal: 0, market_value: 0, cash_balance: 0 }],
+      [],
+      []
+    );
+    const ruleRows = [{
+      transaction_type: "支出" as const,
+      match_scope: "product" as const,
+      counterparty: "",
+      product: "导入商品",
+      category_key: food,
+      category: "餐饮基础",
+      rewrite_product: "规范商品"
+    }];
+    const rules = await repository.saveRules(repository.rules().revision, ruleRows);
+    const imported = {
+      client_id: "import:test:2",
+      transaction_date: "2026-01-02",
+      type: "支出",
+      category_key: null,
+      category: "",
+      counterparty: "导入商户",
+      product: "导入商品",
+      source: "账单.csv",
+      amount: 20
+    } as const;
+    const preview = previewTransactionOperation(
+      [imported],
+      {
+        month: "2026-01",
+        operation_type: "apply-rules",
+        transaction_ids: [],
+        transaction_keys: ["client:import:test:2"],
+        expected_revision: initial.revision,
+        rules_revision: rules.revision,
+        source_page: "记录/流水",
+        business_tab: "all"
+      },
+      ruleRows
+    );
+    const saved = await repository.saveMonthSection("2026-01", {
+      expected_revision: initial.revision,
+      section: "transactions",
+      transactions: preview.rows,
+      operation_logs: [{
+        preview: preview.preview,
+        selection: ["client:import:test:2"]
+      }]
+    });
+
+    expect(saved.transactions[0]).toMatchObject({
+      product: "规范商品",
+      category_key: food,
+      category: "餐饮基础"
+    });
   });
 
 it("allows a category operation preview to clear a classification", async () => {

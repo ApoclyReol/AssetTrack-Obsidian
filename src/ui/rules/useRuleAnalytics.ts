@@ -35,9 +35,14 @@ export function useRuleAnalytics({
   const [analyticsReady, setAnalyticsReady] = useState(initialAnalyticsReady);
   const [historyPanelKey, setHistoryPanelKey] = useState(0);
   const analyticsTimer = useRef<number | null>(null);
-  const applyAnalytics = useCallback((analytics: RuleWorkspaceAnalytics) => {
+  const analyticsRequestSequence = useRef(0);
+  const applyAnalyticsSnapshot = useCallback((analytics: RuleWorkspaceAnalytics) => {
     setWorkspace((current) => {
       if (!current) return current;
+      if (
+        analytics.categories_revision < current.categories_revision
+        || analytics.rules_revision < current.rules_revision
+      ) return current;
       if (!dirtyFlagsRef.current.category && !dirtyFlagsRef.current.rule) {
         return {
           ...current,
@@ -90,15 +95,24 @@ export function useRuleAnalytics({
     setAnalyticsReady(true);
   }, [dirtyFlagsRef, setWorkspace]);
 
+  const applyAnalytics = useCallback((analytics: RuleWorkspaceAnalytics) => {
+    analyticsRequestSequence.current += 1;
+    applyAnalyticsSnapshot(analytics);
+  }, [applyAnalyticsSnapshot]);
+
   const loadAnalytics = useCallback(async () => {
+    const sequence = ++analyticsRequestSequence.current;
     try {
-      applyAnalytics(await api.ruleWorkspaceAnalytics());
+      const analytics = await api.ruleWorkspaceAnalytics();
+      if (sequence !== analyticsRequestSequence.current) return;
+      applyAnalyticsSnapshot(analytics);
     } catch (error) {
+      if (sequence !== analyticsRequestSequence.current) return;
       const message = messageFor(error);
       new Notice(message);
       onError(message);
     }
-  }, [api, applyAnalytics, onError]);
+  }, [api, applyAnalyticsSnapshot, onError]);
 
   const scheduleAnalyticsLoad = useCallback(() => {
     if (analyticsTimer.current !== null) hostWindow.clearTimeout(analyticsTimer.current);
@@ -106,6 +120,7 @@ export function useRuleAnalytics({
   }, [hostWindow, loadAnalytics]);
 
   useEffect(() => () => {
+    analyticsRequestSequence.current += 1;
     if (analyticsTimer.current !== null) hostWindow.clearTimeout(analyticsTimer.current);
   }, [hostWindow]);
 

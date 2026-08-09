@@ -51,6 +51,60 @@ it("loads product history only after a filter and keeps the shell lightweight", 
     expect(repository.productHistoryIndex({ min_occurrences: 2 }).groups).toEqual([]);
   });
 
+  it("does not allow history rename operations to rewrite investment facts", async () => {
+    const { repository } = fixture();
+    const saved = await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 100 }],
+      [{ account_key: "investment-default", principal: 0, market_value: 0, cash_balance: 0 }],
+      [{
+        transaction_date: "2026-01-01",
+        type: "加仓",
+        account_key: "investment-default",
+        category: "",
+        product: "investment-default",
+        amount: 20
+      }],
+      []
+    );
+    const id = saved.transactions[0].id!;
+    expect(() => repository.previewProductRename({
+      transaction_ids: [id],
+      target_product: "错误改写"
+    })).toThrowError("history.selection_not_saved");
+    expect(() => repository.previewCounterpartyRename({
+      transaction_ids: [id],
+      target_counterparty: "错误改写"
+    })).toThrowError("history.selection_not_saved");
+    expect((await repository.getMonth("2026-01")).transactions[0]).toMatchObject({
+      product: "investment-default",
+      counterparty: "加仓"
+    });
+  });
+
+  it("matches product searches after normalizing repeated whitespace", async () => {
+    const { repository } = fixture();
+    const food = categoryKey("餐饮基础");
+    await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 100 }],
+      [{ account_key: "investment-default", principal: 0, market_value: 0, cash_balance: 0 }],
+      [{
+        transaction_date: "2026-01-01",
+        type: "支出",
+        category_key: food,
+        category: "餐饮基础",
+        product: "奶茶  大杯",
+        amount: 20
+      }],
+      []
+    );
+    expect(repository.productHistoryIndex({ product_search: "奶茶 大杯" }).groups)
+      .toEqual([expect.objectContaining({ product: "奶茶  大杯", occurrences: 1 })]);
+  });
+
 it("previews and atomically applies category backfills across months", async () => {
     const { repository } = fixture();
     const food = categoryKey("餐饮基础");

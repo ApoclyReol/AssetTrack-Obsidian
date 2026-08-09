@@ -167,8 +167,13 @@ export function AssetTrackEditorApp({
       ? recoveryDraft.current.active_section ?? "transactions"
       : "transactions"
   );
-  const [rulesMode, setRulesMode] = useState<RulesMode>("health");
+  const [rulesMode, setRulesMode] = useState<RulesMode>(
+    recoveryDraft.current?.kind === "rules"
+      ? recoveryDraft.current.active_section ?? "health"
+      : "health"
+  );
   const [months, setMonths] = useState<string[]>([]);
+  const [savedMonths, setSavedMonths] = useState<string[]>([]);
   const [monthPolicy, setMonthPolicy] = useState<MonthCreationPolicy | null>(null);
   const [month, setMonth] = useState(
     recoveryDraft.current?.kind === "transactions"
@@ -176,7 +181,9 @@ export function AssetTrackEditorApp({
       : initialMonth ?? ""
   );
   const [dataVersion, setDataVersion] = useState(0);
-  const [monthMetrics, setMonthMetrics] = useState<MonthMetrics | null>(null);
+  const monthRefreshSequence = useRef(0);
+  const navigationSequence = useRef(0);
+  const [monthMetrics, setMonthMetrics] = useState<{ month: string; metrics: MonthMetrics } | null>(null);
   const monthEditorRef = useRef<MonthEditorHandle>(null);
   const rulesEditorRef = useRef<RulesEditorHandle>(null);
   const [initializing, setInitializing] = useState(true);
@@ -231,7 +238,7 @@ export function AssetTrackEditorApp({
     key: string;
     state: LoadState<MonthOverview>;
   }>({ key: "", state: { kind: "loading" } });
-  const analysisYears = [...new Set(months.map((item) => item.slice(0, 4)))].sort().reverse();
+  const analysisYears = [...new Set(savedMonths.map((item) => item.slice(0, 4)))].sort().reverse();
   useEffect(() => {
     if (mode !== "analysis") return;
     if (analysisMode === "annual") {
@@ -275,7 +282,7 @@ export function AssetTrackEditorApp({
     ? monthlyLoad.state
     : { kind: "loading" as const };
   useEffect(() => {
-    if (mode !== "transactions" || !month) setMonthMetrics(null);
+    setMonthMetrics((current) => mode === "transactions" && month && current?.month === month ? current : null);
   }, [mode, month]);
   useEffect(() => setMode(initialMode), [initialMode]);
   useEffect(() => setAnalysisMode(initialAnalysisMode), [initialAnalysisMode]);
@@ -286,21 +293,27 @@ export function AssetTrackEditorApp({
   }, [analysisYear, analysisYears.join(",")]);
   useEffect(() => {
     if (initializing) return;
-    if (analysisMode === "monthly" && months.length === 0) {
+    if (analysisMode === "monthly" && savedMonths.length === 0) {
       setAnalysisMode("annual");
     }
-  }, [analysisMode, analysisYears.length, initializing, months.length]);
+    if (analysisMode === "monthly" && month && !savedMonths.includes(month)) {
+      setMonth(savedMonths.at(-1) ?? "");
+    }
+  }, [analysisMode, analysisYears.length, initializing, month, savedMonths.join(","), savedMonths.length]);
   useEffect(() => {
     if (initialMonth) setMonth(initialMonth);
   }, [initialMonth]);
   const refreshMonths = useCallback(async () => {
+    const sequence = ++monthRefreshSequence.current;
     try {
       const response = await api.months();
+      if (sequence !== monthRefreshSequence.current) return;
       setMonths(response.months);
+      setSavedMonths(response.saved_months ?? response.months);
       setMonthPolicy(response);
       setMonth((current) => current || initialMonth || response.months.at(-1) || "");
     } finally {
-      setInitializing(false);
+      if (sequence === monthRefreshSequence.current) setInitializing(false);
     }
   }, [api, initialMonth]);
 
@@ -318,7 +331,7 @@ export function AssetTrackEditorApp({
   useEffect(
     () => subscribeDataChanges(() => {
       setDataVersion((value) => value + 1);
-      void refreshMonths();
+      void refreshMonths().catch((error) => new Notice(messageFor(error)));
     }),
     [refreshMonths, subscribeDataChanges]
   );
@@ -326,6 +339,10 @@ export function AssetTrackEditorApp({
     () => onStateChange(mode, analysisMode, month),
     [analysisMode, mode, month, onStateChange]
   );
+
+  const handleMonthMetricsChange = useCallback((metrics: MonthMetrics | null) => {
+    setMonthMetrics(metrics ? { month, metrics } : null);
+  }, [month]);
 
   const settleCurrentPage = async (
     session: EditorSession | null,
@@ -342,12 +359,12 @@ export function AssetTrackEditorApp({
       ]
     );
     if (action === "save") {
-      if (await session.save() && !session.hasUnsavedChanges()) return true;
+      if (await session.saveAll() && !session.hasUnsavedChanges()) return true;
       new Notice(t(`当前${pageLabel}仍有未保存修改，未切换。`, `The current ${pageLabel} still has unsaved changes. The view was not switched.`));
       return false;
     }
     if (action !== "discard") return false;
-    await session.discard();
+    await session.discardAll();
     if (session.hasUnsavedChanges()) {
       new Notice(t(`当前${pageLabel}未能重载，未切换。`, `The current ${pageLabel} could not be reloaded. The view was not switched.`));
       return false;
@@ -364,6 +381,7 @@ export function AssetTrackEditorApp({
   };
 
   const switchMode = async (next: EditorMode): Promise<void> => {
+    const sequence = ++navigationSequence.current;
     if (next === mode) return;
     const pageSettled = mode === "transactions"
       ? await settleTransactionPage()
@@ -371,27 +389,34 @@ export function AssetTrackEditorApp({
         ? await settleRulesPage()
         : true;
     if (!pageSettled) return;
+    if (sequence !== navigationSequence.current) return;
     if (next === "analysis") {
       if (analysisMode === "annual") {
         void analysisApi.annual(analysisYear).catch(() => undefined);
-      } else if (month) {
-        void analysisApi.monthOverview(month).catch(() => undefined);
+      } else {
+        const analysisMonth = savedMonths.includes(month) ? month : savedMonths.at(-1) ?? "";
+        if (analysisMonth && analysisMonth !== month) setMonth(analysisMonth);
+        if (analysisMonth) void analysisApi.monthOverview(analysisMonth).catch(() => undefined);
       }
     }
     setMode(next);
   };
   const selectMonth = async (next: string): Promise<void> => {
+    const sequence = ++navigationSequence.current;
     if (next === month) return;
     if (mode === "transactions" && !await settleTransactionPage()) return;
     if (mode === "rules" && !await settleRulesPage()) return;
+    if (sequence !== navigationSequence.current) return;
     if (mode === "analysis" && analysisMode === "monthly") {
       void analysisApi.monthOverview(next).catch(() => undefined);
     }
     setMonth(next);
   };
   const createNext = async () => {
+    const sequence = ++navigationSequence.current;
     if (mode === "transactions" && !await settleTransactionPage()) return;
     if (mode === "rules" && !await settleRulesPage()) return;
+    if (sequence !== navigationSequence.current) return;
     if (!monthPolicy?.can_create) {
       const reason = monthPolicy?.reason;
       throw new AssetTrackError({
@@ -402,19 +427,25 @@ export function AssetTrackEditorApp({
     }
     const target = monthPolicy.next_target;
     await api.createMonth(target);
+    if (sequence !== navigationSequence.current) return;
     await refreshMonths();
+    if (sequence !== navigationSequence.current) return;
     setMonth(target);
-    setDataVersion((value) => value + 1);
+    notifyDataChanged();
     new Notice(t(`${target} 已创建`, `${target} created`));
   };
   const switchMonthSection = async (next: MonthSection): Promise<void> => {
+    const sequence = ++navigationSequence.current;
     if (next === monthSection) return;
     if (!await settleTransactionPage()) return;
+    if (sequence !== navigationSequence.current) return;
     setMonthSection(next);
   };
   const switchRulesMode = async (next: RulesMode): Promise<void> => {
+    const sequence = ++navigationSequence.current;
     if (next === rulesMode) return;
     if (!await settleRulesPage()) return;
+    if (sequence !== navigationSequence.current) return;
     setRulesMode(next);
   };
 
@@ -446,7 +477,7 @@ export function AssetTrackEditorApp({
         {mode === "analysis" && (
           <div className="asset-track-context-toolbar asset-track-context-toolbar-inline">
             <nav className="asset-track-context-nav" aria-label={t("分析子导航", "Analysis sub-navigation")}>
-              {(["annual", ...(months.length ? ["monthly"] : [])] as AnalysisMode[]).map((item) => (
+              {(["annual", ...(savedMonths.length ? ["monthly"] : [])] as AnalysisMode[]).map((item) => (
                 <button
                   key={item}
                   type="button"
@@ -454,8 +485,10 @@ export function AssetTrackEditorApp({
                   onClick={() => {
                     if (item === "annual") {
                       void analysisApi.annual(analysisYear).catch(() => undefined);
-                    } else if (month) {
-                      void analysisApi.monthOverview(month).catch(() => undefined);
+                    } else {
+                      const analysisMonth = savedMonths.includes(month) ? month : savedMonths.at(-1) ?? "";
+                      if (analysisMonth) void analysisApi.monthOverview(analysisMonth).catch(() => undefined);
+                      if (analysisMonth && analysisMonth !== month) setMonth(analysisMonth);
                     }
                     setAnalysisMode(item);
                   }}
@@ -474,9 +507,9 @@ export function AssetTrackEditorApp({
                   {analysisYears.map((item) => <option key={item}>{item}</option>)}
                 </select>
               )}
-              {analysisMode === "monthly" && months.length > 0 && (
+              {analysisMode === "monthly" && savedMonths.length > 0 && (
                 <select value={month} onChange={(event) => void selectMonth(event.target.value)} aria-label={t("分析月份", "Analysis month")}>
-                  {[...months].sort().reverse().map((item) => <option key={item}>{item}</option>)}
+                  {[...savedMonths].sort().reverse().map((item) => <option key={item}>{item}</option>)}
                 </select>
               )}
             </div>
@@ -529,9 +562,9 @@ export function AssetTrackEditorApp({
                 )}
               </div>
             </div>
-            {month && monthMetrics && (
+            {month && monthMetrics?.month === month && (
               <MonthMetricsSummary
-                metrics={monthMetrics}
+                metrics={monthMetrics.metrics}
                 reconciliationTolerance={settings.reconciliationTolerance}
               />
             )}
@@ -572,16 +605,31 @@ export function AssetTrackEditorApp({
           dataVersion={dataVersion}
           reconciliationTolerance={settings.reconciliationTolerance}
           activeSection={monthSection}
-          onMetricsChange={setMonthMetrics}
+          onMetricsChange={handleMonthMetricsChange}
           onDeleted={async (next) => {
-            await refreshMonths();
+            try {
+              await refreshMonths();
+            } catch (error) {
+              new Notice(t(
+                `月份已删除，但刷新月份列表失败：${messageFor(error)}`,
+                `The month was deleted, but the month list could not refresh: ${messageFor(error)}`
+              ));
+            }
             setMonth(next);
-            setDataVersion((value) => value + 1);
+            notifyDataChanged();
           }}
           onSaved={async () => {
-            await refreshMonths();
-            setDataVersion((value) => value + 1);
+            try {
+              await refreshMonths();
+            } catch (error) {
+              new Notice(t(
+                `数据已保存，但月份列表刷新失败：${messageFor(error)}`,
+                `The data was saved, but the month list could not refresh: ${messageFor(error)}`
+              ));
+            }
+            notifyDataChanged();
           }}
+          onDataChanged={notifyDataChanged}
           initialDraft={recoveryDraft.current?.kind === "transactions"
             ? recoveryDraft.current
             : undefined}

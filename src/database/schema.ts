@@ -7,7 +7,7 @@ import { AssetTrackError } from "../application/errors";
 export const SCHEMA9_VERSION = 9;
 export const PREVIOUS_SCHEMA_VERSION = SCHEMA9_VERSION;
 export const CURRENT_SCHEMA_VERSION = 10;
-export const BACKUP_FORMAT_VERSION = 5;
+export const BACKUP_FORMAT_VERSION = 7;
 
 const NORMALIZE_MATCH_KEY_FUNCTION = "asset_track_normalize_match_key";
 
@@ -15,7 +15,8 @@ export type SchemaMigrationIssueCode =
   | "legacy_schema_invalid"
   | "ambiguous_rule_scope"
   | "duplicate_rule"
-  | "invalid_category_reference";
+  | "invalid_category_reference"
+  | "ambiguous_investment_account";
 
 export interface SchemaMigrationIssue {
   code: SchemaMigrationIssueCode;
@@ -65,7 +66,8 @@ export class SchemaMigrationError extends AssetTrackError {
       params: {
         fromVersion: report.from_version,
         toVersion: report.to_version,
-        issueCodes: report.issues.map((issue) => issue.code)
+        issueCodes: report.issues.map((issue) => issue.code),
+        details
       }
     });
     this.name = "SchemaMigrationError";
@@ -336,6 +338,77 @@ export const REQUIRED_FOREIGN_KEYS: readonly RequiredForeignKey[] = [
   }
 ];
 
+export interface RequiredUniqueConstraint {
+  table: typeof REQUIRED_TABLES[number];
+  columns: readonly string[];
+}
+
+/**
+ * These are table constraints, rather than merely equivalent application
+ * checks.  They keep a damaged or hand-edited SQLite file from being treated
+ * as a canonical database just because the expected columns and indexes are
+ * still present.
+ */
+export const REQUIRED_PRIMARY_KEYS: readonly RequiredUniqueConstraint[] = [
+  { table: "category_definitions", columns: ["category_key"] },
+  { table: "account_definitions", columns: ["account_key"] },
+  { table: "transactions", columns: ["id"] },
+  { table: "cash_account_balances", columns: ["month", "account_key"] },
+  { table: "investment_account_balances", columns: ["month", "account_key"] },
+  { table: "fixed_assets", columns: ["id"] },
+  { table: "debt_manager", columns: ["id"] },
+  { table: "auto_rules", columns: ["id"] },
+  { table: "month_status", columns: ["month"] },
+  { table: "operation_logs", columns: ["id"] }
+] as const;
+
+export const REQUIRED_UNIQUE_CONSTRAINTS: readonly RequiredUniqueConstraint[] = [
+  { table: "category_definitions", columns: ["name"] },
+  { table: "account_definitions", columns: ["account_type", "name"] },
+  { table: "fixed_assets", columns: ["month", "asset_key"] },
+  { table: "operation_logs", columns: ["operation_id"] }
+] as const;
+
+export interface RequiredCheckConstraint {
+  table: typeof REQUIRED_TABLES[number];
+  expression: string;
+}
+
+export const REQUIRED_CHECK_CONSTRAINTS: readonly RequiredCheckConstraint[] = [
+  {
+    table: "category_definitions",
+    expression: "CHECK(transaction_type IN ('支出','收入'))"
+  },
+  {
+    table: "category_definitions",
+    expression: "CHECK(necessity IN ('必要','可控','不适用'))"
+  },
+  {
+    table: "category_definitions",
+    expression: "CHECK(pattern IN ('周期','日常','偶尔','不适用'))"
+  },
+  {
+    table: "account_definitions",
+    expression: "CHECK(account_type IN ('cash','investment'))"
+  },
+  {
+    table: "transactions",
+    expression: "CHECK(type IN ('支出','收入','代付','加仓','提现'))"
+  },
+  {
+    table: "auto_rules",
+    expression: "CHECK(transaction_type IN ('支出','收入'))"
+  },
+  {
+    table: "auto_rules",
+    expression: "CHECK(match_scope IN ('product','merchant','merchant_product'))"
+  },
+  {
+    table: "auto_rules",
+    expression: "CHECK((match_scope='product' AND match_counterparty_key='' AND match_product_key<>'') OR (match_scope='merchant' AND match_counterparty_key<>'' AND match_product_key='') OR (match_scope='merchant_product' AND match_counterparty_key<>'' AND match_product_key<>''))"
+  }
+] as const;
+
 export function categoryKey(name: string): string {
   return `cat-${createHash("sha256").update(name, "utf8").digest("hex").slice(0, 16)}`;
 }
@@ -557,6 +630,24 @@ function migrateSchema9To10InTransaction(db: DatabaseSync): SchemaMigrationRepor
   report.rule_count = rows.length;
   report.issues = migrationRuleIssues(db, rows);
   if (report.issues.length) throw new SchemaMigrationError(report);
+
+  const investmentAccounts = db.prepare(`
+    SELECT account_key FROM account_definitions
+    WHERE account_type='investment'
+    ORDER BY is_active DESC, sort_order, account_key
+  `).all() as Array<{ account_key?: string }>;
+  const unassignedInvestmentTransactions = Number((db.prepare(`
+    SELECT COUNT(*) AS count FROM transactions
+    WHERE type IN ('加仓','提现')
+  `).get() as { count: number }).count);
+  if (investmentAccounts.length > 1 && unassignedInvestmentTransactions > 0) {
+    report.issues.push({
+      code: "ambiguous_investment_account",
+      message: `schema 9 中有 ${unassignedInvestmentTransactions} 条理财流水，但存在 ${investmentAccounts.length} 个理财账户，无法安全推断归属账户`,
+      rule_ids: []
+    });
+    throw new SchemaMigrationError(report);
+  }
 
   db.exec(`
     ALTER TABLE category_definitions

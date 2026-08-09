@@ -79,7 +79,7 @@ function ProductGroupTable({
           <td className="asset-track-history-actions">
             {onOpenProductRename && <button type="button" onClick={() => onOpenProductRename(group)}>{t("编辑商品", "Edit item")}</button>}
             {onOpenCounterpartyRename && <button type="button" onClick={() => onOpenCounterpartyRename(group)}>{t("编辑交易对手", "Edit counterparty")}</button>}
-            {onCreateRule && group.rule_status === "未创建" && <button type="button" onClick={() => onCreateRule(group)}>{t("创建规则", "Create rule")}</button>}
+            {onCreateRule && group.rule_suggestion && group.unmatched_occurrences > 0 && <button type="button" onClick={() => onCreateRule(group)}>{group.rule_coverage === "partial" ? t("补充规则", "Complete rule coverage") : t("创建规则", "Create rule")}</button>}
             <button type="button" onClick={() => onOpenDetail(group)}>{t("编辑分类", "Edit category")}</button>
           </td>
         </tr>;

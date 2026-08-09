@@ -3,6 +3,78 @@ import * as XLSX from "xlsx";
 import { inspectCsv, previewCsv } from "../../src/domain/csv";
 
 describe("TypeScript CSV mapping", () => {
+  it("rejects duplicate headers instead of silently overwriting a source column", () => {
+    const content = Buffer.from(
+      "日期,商品,商品,金额,收支\n2026-01-01,午餐,午餐备注,20,付款\n",
+      "utf8"
+    );
+    expect(() => inspectCsv("2026-01", "duplicate-header.csv", content))
+      .toThrowError("csv.duplicate_header");
+  });
+
+  it("does not accept the month-start sentinel for non-date fields", () => {
+    const content = Buffer.from("商品,金额,收支\n午餐,20,付款\n", "utf8");
+    expect(() => previewCsv("2026-01", "invalid-sentinel.csv", content, {
+      date_column: "__month_start__",
+      product_column: "__month_start__",
+      amount_column: "金额",
+      type_column: "收支",
+      type_values: { 付款: "支出" },
+      included_statuses: []
+    })).toThrowError("csv.mapping_required");
+  });
+
+  it("does not silently drop every row when a status column has no selected values", () => {
+    const content = Buffer.from("日期,商品,金额,收支,状态\n2026-01-01,午餐,20,付款,成功\n", "utf8");
+    expect(() => previewCsv("2026-01", "empty-status-selection.csv", content, {
+      date_column: "日期",
+      product_column: "商品",
+      amount_column: "金额",
+      type_column: "收支",
+      status_column: "状态",
+      type_values: { 付款: "支出" },
+      included_statuses: []
+    })).toThrowError("csv.status_selection_required");
+  });
+
+  it.each(["csv", "xlsx", "xls"] as const)(
+    "keeps source indexes when %s contains an unnamed leading column",
+    (extension) => {
+      const content = extension === "csv"
+        ? Buffer.from("Unnamed: 0,日期,商品,金额,收支\n1,2026-01-02,午餐,20,付款\n", "utf8")
+        : XLSX.write(
+          (() => {
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(
+              workbook,
+              XLSX.utils.aoa_to_sheet([
+                ["Unnamed: 0", "日期", "商品", "金额", "收支"],
+                [1, "2026-01-02", "午餐", 20, "付款"]
+              ]),
+              "账单"
+            );
+            return workbook;
+          })(),
+          { type: "buffer", bookType: extension }
+        ) as Buffer;
+      const filename = `unnamed-leading.${extension}`;
+      const preview = previewCsv("2026-01", filename, content, {
+        date_column: "日期",
+        product_column: "商品",
+        amount_column: "金额",
+        type_column: "收支",
+        type_values: { "付款": "支出" },
+        included_statuses: []
+      });
+      expect(preview.rows[0]).toMatchObject({
+        transaction_date: "2026-01-02",
+        product: "午餐",
+        amount: 20,
+        type: "支出"
+      });
+    }
+  );
+
   it("keeps duplicate rows and reports filtered rows", () => {
     const content = Buffer.from(
       "交易时间,交易对方,商品,交易金额,资金流向,交易状态\n"
@@ -32,6 +104,17 @@ describe("TypeScript CSV mapping", () => {
       outside_month: 1,
       status_filtered: 1
     });
+    expect(preview.import_stats.filtered_rows).toHaveLength(2);
+    expect(preview.import_stats.filtered_rows[0]).toMatchObject({
+      row: 4,
+      reason: "outside_month"
+    });
+    expect(preview.import_stats.filtered_rows[0].values["商品"]).toBe("跨月记录");
+    expect(preview.import_stats.filtered_rows[1]).toMatchObject({
+      row: 5,
+      reason: "status_filtered"
+    });
+    expect(preview.import_stats.filtered_rows[1].values["商品"]).toBe("失败记录");
     const repeatedPreview = previewCsv("2026-01", "generic.csv", content, {
       date_column: "交易时间",
       product_column: "商品",
@@ -46,6 +129,25 @@ describe("TypeScript CSV mapping", () => {
       ...preview.rows.map((row) => row.client_id),
       ...repeatedPreview.rows.map((row) => row.client_id)
     ]).size).toBe(preview.rows.length + repeatedPreview.rows.length);
+  });
+
+  it("does not hide direction values after the first thirty distinct entries", () => {
+    const values = Array.from({ length: 31 }, (_, index) => `方向${index + 1}`);
+    const content = Buffer.from([
+      "日期,商品,金额,收支",
+      ...values.map((value, index) => `2026-01-${String(index + 1).padStart(2, "0")},商品${index + 1},1,${value}`)
+    ].join("\n"), "utf8");
+    const inspection = inspectCsv("2026-01", "many-directions.csv", content);
+    expect(inspection.distinct_values["收支"]).toHaveLength(31);
+    const preview = previewCsv("2026-01", "many-directions.csv", content, {
+      date_column: "日期",
+      product_column: "商品",
+      amount_column: "金额",
+      type_column: "收支",
+      type_values: Object.fromEntries(values.map((value) => [value, "支出"])),
+      included_statuses: []
+    });
+    expect(preview.rows).toHaveLength(31);
   });
 
   it("decodes GBK and supports ignored directions", () => {
@@ -64,6 +166,8 @@ describe("TypeScript CSV mapping", () => {
     });
     expect(preview.rows).toHaveLength(1);
     expect(preview.import_stats.filtered.ignored_type).toBe(1);
+    expect(preview.import_stats.filtered_rows[0]).toMatchObject({ reason: "ignored_type" });
+    expect(preview.import_stats.filtered_rows[0].values["方向"]).toBe("其他");
   });
 
   it("defaults missing dates, accepts blank statuses and reports invalid reasons", () => {
@@ -115,6 +219,28 @@ describe("TypeScript CSV mapping", () => {
     expect(invalidReasons.some((reason) => reason.includes("日期无法识别"))).toBe(true);
     expect(invalidReasons).toContain("金额为空或无法识别");
     expect(invalidReasons.some((reason) => reason.includes("收支值"))).toBe(true);
+  });
+
+  it("rejects ambiguous internal amount spacing instead of changing the value", () => {
+    const content = Buffer.from(
+      "日期,商品,金额,收支\n"
+      + "2026-01-01,合法千分位,1 234.50,付款\n"
+      + "2026-01-02,歧义金额,1 2,付款\n",
+      "utf8"
+    );
+    const preview = previewCsv("2026-01", "amount-spacing.csv", content, {
+      date_column: "日期",
+      product_column: "商品",
+      amount_column: "金额",
+      type_column: "收支",
+      type_values: { 付款: "支出" },
+      included_statuses: []
+    });
+    expect(preview.rows).toMatchObject([{ product: "合法千分位", amount: 1234.5 }]);
+    expect(preview.import_stats.filtered.invalid).toBe(1);
+    expect(preview.import_stats.examples.invalid).toEqual(expect.arrayContaining([
+      expect.objectContaining({ reason: "金额为空或无法识别" })
+    ]));
   });
 
   it.each(["csv", "xlsx", "xls"] as const)(

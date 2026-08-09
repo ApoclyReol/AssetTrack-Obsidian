@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type {
@@ -116,5 +116,42 @@ describe("CSV import dialog accessibility", () => {
     );
     expect(screen.getByRole("checkbox", { name: "（空状态）" }))
       .toHaveProperty("checked", true);
+  });
+
+  it("shows every filtered source row in the preview", async () => {
+    const preview = {
+      month: "2026-07",
+      rows: [],
+      issues: [],
+      type_summary: {},
+      modes: ["append", "replace"] as const,
+      import_stats: {
+        source_rows: 3,
+        accepted_rows: 1,
+        defaulted: { date: 0 },
+        defaulted_examples: { date: [] },
+        filtered: { outside_month: 0, status_filtered: 0, ignored_type: 2, invalid: 0 },
+        examples: { ignored_type: [{ row: 3, value: "其他" }] },
+        filtered_rows: [
+          { row: 2, reason: "ignored_type" as const, values: { 日期: "2026-07-01", 商品: "不导入", 金额: "10", 类型: "其他" } },
+          { row: 3, reason: "ignored_type" as const, values: { 日期: "2026-07-02", 商品: "另一条", 金额: "20", 类型: "其他" } }
+        ]
+      }
+    };
+    render(
+      <CsvImportDialog
+        hostWindow={window}
+        inspection={inspection}
+        onCancel={vi.fn()}
+        onPreview={vi.fn().mockResolvedValue(preview)}
+        onApply={vi.fn()}
+      />
+    );
+
+    const dialog = screen.getAllByRole("dialog").at(-1)!;
+    await userEvent.click(within(dialog).getByRole("button", { name: "生成预览" }));
+    await waitFor(() => expect(within(dialog).getByText("查看全部被过滤条目（2 行）")).toBeTruthy());
+    expect(within(dialog).getByText("不导入")).toBeTruthy();
+    expect(within(dialog).getByText("另一条")).toBeTruthy();
   });
 });

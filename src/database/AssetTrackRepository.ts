@@ -103,6 +103,7 @@ export class AssetTrackRepository {
       largeExpenseThreshold: this.options.largeExpenseThreshold,
       reconciliationTolerance: this.options.reconciliationTolerance,
       getMonths: (db) => this.getMonths(db),
+      savedMonths: (db) => this.savedMonths(db),
       categoryDefinitions: (db) => this.categoryDefinitions(db),
       cashAccounts: (db, month) => this.cashAccounts(db, month),
       investmentAccounts: (db, month) => this.investmentAccounts(db, month)
@@ -130,7 +131,8 @@ export class AssetTrackRepository {
       categoryDefinitions: (db) => this.categoryDefinitions(db),
       categories: (db) => this.categories(db),
       accounts: (db) => this.accounts(db),
-      rules: (db) => this.rules(db)
+      rules: (db) => this.rules(db),
+      bumpMonthRevision: (db, month) => this.bumpMonthRevision(db, month)
     };
     const historyDependencies: HistoryWriteDependencies = {
       categoryDefinitions: (db) => this.categoryDefinitions(db),
@@ -149,6 +151,10 @@ export class AssetTrackRepository {
 
   initialize(): void {
     this.manager.open();
+  }
+
+  invalidateCaches(): void {
+    this.monthsCache = null;
   }
 
   private db(): DatabaseSync {
@@ -181,7 +187,7 @@ export class AssetTrackRepository {
         status: changed ? "change" as const : "skip" as const,
         reason: changed ? undefined : "保存前后没有字段变化"
       };
-    }).filter((change) => change.status === "change");
+    });
     const effectiveOperationType = audit.operation_type ?? operationType;
     return {
       operation_id: audit.operation_id ?? randomUUID(),
@@ -252,8 +258,15 @@ export class AssetTrackRepository {
   }
 
   private monthStatus(db: DatabaseSync, month: string): Row | null {
-    return (db.prepare("SELECT * FROM month_status WHERE month=?").get(month) as Row | undefined)
+    const row = (db.prepare("SELECT * FROM month_status WHERE month=?").get(month) as Row | undefined)
       ?? null;
+    if (row && !["draft", "saved", "locked"].includes(text(row.status))) {
+      throw new RepositoryValidationError({
+        code: "month.status_invalid",
+        params: { month, status: text(row.status) }
+      });
+    }
+    return row;
   }
 
   private checkMonthRevision(
@@ -274,6 +287,12 @@ export class AssetTrackRepository {
     fixedInitialized?: number
   ): number {
     const current = this.monthStatus(db, month);
+    if (current?.status === "locked") {
+      throw new RepositoryValidationError({
+        code: "month.locked",
+        params: { month }
+      });
+    }
     const initialized = fixedInitialized ?? Number(current?.fixed_assets_initialized ?? 0);
     const nextRevision = revision + 1;
     db.prepare(`
@@ -287,6 +306,22 @@ export class AssetTrackRepository {
         revision=excluded.revision
     `).run(month, localTimestamp(), initialized, nextRevision);
     return nextRevision;
+  }
+
+  private bumpMonthRevision(db: DatabaseSync, month: string): number {
+    const current = this.monthStatus(db, month);
+    if (!current) return 0;
+    if (current.status === "locked") {
+      throw new RepositoryValidationError({
+        code: "month.locked",
+        params: { month }
+      });
+    }
+    const revision = Number(current.revision ?? 0) + 1;
+    db.prepare(
+      "UPDATE month_status SET revision=?,updated_at=? WHERE month=?"
+    ).run(revision, localTimestamp(), month);
+    return revision;
   }
 
   getMonths(db = this.db()): string[] {
@@ -310,13 +345,25 @@ export class AssetTrackRepository {
 
   savedMonths(db = this.db()): string[] {
     return rows(db.prepare(
-      "SELECT month FROM month_status WHERE status='saved' ORDER BY month"
-    ).all()).map((row) => text(row.month)).filter(isMonth);
+      "SELECT month,status FROM month_status ORDER BY month"
+    ).all()).map((row) => {
+      const status = text(row.status);
+      if (!["draft", "saved", "locked"].includes(status)) {
+        throw new RepositoryValidationError({
+          code: "month.status_invalid",
+          params: { month: text(row.month), status }
+        });
+      }
+      return { month: text(row.month), status };
+    }).filter((row) => row.status === "saved" || row.status === "locked")
+      .map((row) => row.month)
+      .filter(isMonth);
   }
 
   monthCreationPolicy(): MonthCreationPolicy {
     const db = this.db();
     const months = this.getMonths(db);
+    const savedMonths = this.savedMonths(db);
     const drafts = rows(db.prepare(
       "SELECT month FROM month_status WHERE status='draft' ORDER BY month"
     ).all()).map((row) => text(row.month)).filter(isMonth);
@@ -331,6 +378,7 @@ export class AssetTrackRepository {
     }
     return {
       months,
+      saved_months: savedMonths,
       draft_month: drafts[0] ?? null,
       next_target: target,
       max_creatable_month: max,
@@ -340,13 +388,14 @@ export class AssetTrackRepository {
   }
 
   async createMonth(month: string): Promise<MonthWorkspace> {
-    const inherited = await this.manager.write((db) => {
+    const result = await this.manager.write((db) => {
       this.monthWrites.createMonth(db, month);
-      return this.monthWrites.ensureFixedAssetsInherited(db, month);
+      const inherited = this.monthWrites.ensureFixedAssetsInherited(db, month);
+      const workspace = this.getMonthFromDb(month, db);
+      (workspace as MonthWorkspace & { inherited_fixed_assets?: number }).inherited_fixed_assets = inherited;
+      return workspace;
     });
     this.monthsCache = null;
-    const result = await this.getMonth(month);
-    (result as MonthWorkspace & { inherited_fixed_assets?: number }).inherited_fixed_assets = inherited;
     return result;
   }
 
@@ -393,8 +442,12 @@ export class AssetTrackRepository {
     expectedRevision: number,
     input: CategoryDefinition[],
     audit: OperationAuditContext = { source_page: "配置/分类定义" }
-  ): Promise<{ revision: number; rows: CategoryDefinition[] }> {
-    await this.manager.write((db) => {
+  ): Promise<{
+    revision: number;
+    rows: CategoryDefinition[];
+    rules_revision: number;
+  }> {
+    return this.manager.write((db) => {
       const before = rows(db.prepare("SELECT * FROM category_definitions ORDER BY category_key").all());
       this.configurationWrites.saveCategories(db, expectedRevision, input);
       const after = rows(db.prepare("SELECT * FROM category_definitions ORDER BY category_key").all());
@@ -404,22 +457,36 @@ export class AssetTrackRepository {
         operation,
         audit.selection ?? operation.changes.map((change) => change.transaction_key ?? "")
       );
+      const categories = this.categories(db);
+      return {
+        ...categories,
+        rules_revision: this.rules(db).revision
+      };
     });
-    return this.categories();
   }
 
   private accountRows(db = this.db()): AccountDefinition[] {
     return rows(db.prepare(`
       SELECT d.*,
         CASE WHEN d.account_type='cash'
-          THEN (SELECT COUNT(*) FROM cash_account_balances b WHERE b.account_key=d.account_key)
-          ELSE (SELECT COUNT(*) FROM investment_account_balances b WHERE b.account_key=d.account_key)
+          THEN (SELECT COUNT(DISTINCT month) FROM (
+            SELECT month FROM cash_account_balances b WHERE b.account_key=d.account_key
+            UNION ALL SELECT month FROM transactions t WHERE t.account_key=d.account_key
+          ))
+          ELSE (SELECT COUNT(DISTINCT month) FROM (
+            SELECT month FROM investment_account_balances b WHERE b.account_key=d.account_key
+            UNION ALL SELECT month FROM transactions t WHERE t.account_key=d.account_key
+          ))
         END AS usage_count,
         CASE WHEN d.account_type='cash'
-          THEN (SELECT GROUP_CONCAT(DISTINCT month) FROM cash_account_balances b
-                WHERE b.account_key=d.account_key)
-          ELSE (SELECT GROUP_CONCAT(DISTINCT month) FROM investment_account_balances b
-                WHERE b.account_key=d.account_key)
+          THEN (SELECT GROUP_CONCAT(DISTINCT month) FROM (
+            SELECT month FROM cash_account_balances b WHERE b.account_key=d.account_key
+            UNION ALL SELECT month FROM transactions t WHERE t.account_key=d.account_key
+          ))
+          ELSE (SELECT GROUP_CONCAT(DISTINCT month) FROM (
+            SELECT month FROM investment_account_balances b WHERE b.account_key=d.account_key
+            UNION ALL SELECT month FROM transactions t WHERE t.account_key=d.account_key
+          ))
         END AS impact_months
       FROM account_definitions d
       ORDER BY d.account_type,d.sort_order,d.name
@@ -443,10 +510,10 @@ export class AssetTrackRepository {
     expectedRevision: number,
     input: AccountDefinition[]
   ): Promise<{ revision: number; rows: AccountDefinition[] }> {
-    await this.manager.write((db) =>
-      this.configurationWrites.saveAccounts(db, expectedRevision, input)
-    );
-    return this.accounts();
+    return this.manager.write((db) => {
+      this.configurationWrites.saveAccounts(db, expectedRevision, input);
+      return this.accounts(db);
+    });
   }
 
   private cashAccounts(db: DatabaseSync, month: string): CashAccountBalance[] {
@@ -500,9 +567,7 @@ export class AssetTrackRepository {
   }
 
   getMonthStatus(month: string, db = this.db()): "draft" | "saved" {
-    const status = text((db.prepare(
-      "SELECT status FROM month_status WHERE month=?"
-    ).get(month) as Row | undefined)?.status);
+    const status = text(this.monthStatus(db, month)?.status);
     if (status === "draft") return "draft";
     if (status === "saved" || status === "locked") return "saved";
     for (const table of [
@@ -528,6 +593,9 @@ export class AssetTrackRepository {
   }
 
   validateTransactionRows(month: string, input: Transaction[]): ValidationIssue[] {
+    if (!isMonth(month)) {
+      throw new RepositoryValidationError({ code: "month.invalid", params: { month } });
+    }
     return this.monthWrites.validateTransactionRows(this.db(), month, input);
   }
 
@@ -547,7 +615,7 @@ export class AssetTrackRepository {
       selection: string[];
     }> = []
   ): Promise<MonthWorkspace> {
-    const revision = await this.manager.write((db) => {
+    const result = await this.manager.write((db) => {
       const canonicalOperationLogs = this.monthWrites.validateOperationLogs(
         db,
         month,
@@ -567,11 +635,11 @@ export class AssetTrackRepository {
       canonicalOperationLogs.forEach((entry) =>
         this.operations.write(db, entry.preview, entry.selection)
       );
-      return nextRevision;
+      const workspace = this.getMonthFromDb(month, db);
+      workspace.revision = nextRevision;
+      return workspace;
     });
     this.monthsCache = null;
-    const result = await this.getMonth(month);
-    result.revision = revision;
     return result;
   }
 
@@ -579,7 +647,7 @@ export class AssetTrackRepository {
     month: string,
     payload: MonthSectionSaveRequest
   ): Promise<MonthWorkspace> {
-    const revision = await this.manager.write((db) => {
+    const result = await this.manager.write((db) => {
       const pendingOperationLogs = [
         ...(payload.operation_logs ?? [])
       ];
@@ -593,11 +661,11 @@ export class AssetTrackRepository {
       canonicalOperationLogs.forEach((entry) =>
         this.operations.write(db, entry.preview, entry.selection)
       );
-      return nextRevision;
+      const workspace = this.getMonthFromDb(month, db);
+      workspace.revision = nextRevision;
+      return workspace;
     });
     this.monthsCache = null;
-    const result = await this.getMonth(month);
-    result.revision = revision;
     return result;
   }
 
@@ -675,8 +743,18 @@ export class AssetTrackRepository {
   }
 
   async getMonth(month: string): Promise<MonthWorkspace> {
+    if (!isMonth(month)) {
+      throw new RepositoryValidationError({ code: "month.invalid", params: { month } });
+    }
+    // Keep the legacy invariant for drafts that predate the explicit create
+    // flow: fixed assets are inherited before the workspace is exposed. Save
+    // methods use getMonthFromDb inside their write transaction and therefore
+    // never perform this side effect while rebuilding a canonical response.
     await this.ensureFixedAssetsInherited(month);
-    const db = this.db();
+    return this.getMonthFromDb(month, this.db());
+  }
+
+  private getMonthFromDb(month: string, db: DatabaseSync): MonthWorkspace {
     const transactions = rows(db.prepare(`
       SELECT id,transaction_date,type,category_key,category,counterparty,product,source,account_key,amount
       FROM transactions WHERE month=? ORDER BY id
@@ -700,11 +778,14 @@ export class AssetTrackRepository {
         categories,
         this.options.largeExpenseThreshold
       ) as unknown as Record<string, unknown>,
-      overview: this.analysis.monthOverview(db, month, transactions, categories)
+      overview: this.analysis.draftMonthOverview(db, month, transactions, categories)
     };
   }
 
   monthOverview(month: string): MonthOverview {
+    if (!isMonth(month)) {
+      throw new RepositoryValidationError({ code: "month.invalid", params: { month } });
+    }
     const db = this.db();
     const transactions = rows(db.prepare(`
       SELECT id,transaction_date,type,category_key,category,counterparty,product,
@@ -724,7 +805,7 @@ export class AssetTrackRepository {
     input: Row[],
     audit: OperationAuditContext = { source_page: "配置/匹配规则" }
   ): Promise<{ revision: number; rows: Row[] }> {
-    await this.manager.write((db) => {
+    return this.manager.write((db) => {
       const before = rows(db.prepare("SELECT * FROM auto_rules ORDER BY id").all());
       this.configurationWrites.saveRules(db, expectedRevision, input);
       const after = rows(db.prepare("SELECT * FROM auto_rules ORDER BY id").all());
@@ -734,8 +815,8 @@ export class AssetTrackRepository {
         operation,
         audit.selection ?? operation.changes.map((change) => change.transaction_key ?? "")
       );
+      return this.rules(db);
     });
-    return this.rules();
   }
 
   operationLogs(limit = 50): OperationLogSummary[] {
@@ -752,6 +833,9 @@ export class AssetTrackRepository {
     proposed_rows: Transaction[];
     issues: Array<Record<string, unknown>>;
   } {
+    if (!isMonth(month)) {
+      throw new RepositoryValidationError({ code: "month.invalid", params: { month } });
+    }
     return this.ruleHistory.rulesPreview(this.db(), month, input);
   }
 
@@ -860,6 +944,9 @@ export class AssetTrackRepository {
     min_occurrences: number;
     rows: RuleCandidate[];
   } {
+    if (!isMonth(month)) {
+      throw new RepositoryValidationError({ code: "month.invalid", params: { month } });
+    }
     return this.ruleHistory.ruleCandidates(this.db(), month, draftRows, minOccurrences);
   }
 
@@ -872,8 +959,10 @@ export class AssetTrackRepository {
     revision: number;
     rows: DebtRecord[];
   }> {
-    await this.manager.write((db) => this.monthWrites.saveDebts(db, expectedRevision, input));
-    return this.debts();
+    return this.manager.write((db) => {
+      this.monthWrites.saveDebts(db, expectedRevision, input);
+      return this.debts(db);
+    });
   }
 
   annual(year: string): AnnualOverview {

@@ -85,7 +85,7 @@ are initiated by you, and disabling or uninstalling the plugin does not delete y
 ## Compatibility
 
 - Desktop Obsidian only: macOS, Windows, and Linux.
-- Version 1.7.0 requires Obsidian 1.13.0 or later. Update to the latest available 1.13.x desktop release before installing or updating.
+- Version 1.7.1 requires Obsidian 1.13.0 or later. Update to the latest available 1.13.x desktop release before installing or updating.
 - The plugin does not require Python, a separate Node.js installation, or a sidecar.
 
 ## Read more

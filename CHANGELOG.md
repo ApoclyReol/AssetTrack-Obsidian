@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.7.1
+
+### 中文更新
+
+- 修复账单导入后错误弹出流水操作预览、导入草稿保存时报“流水预览已失效”，以及月份、子页面或草稿切换后异步结果写入旧草稿的问题。
+- 生成导入预览时增加被忽略/被过滤条目的明细，帮助确认是否漏掉流水；导入确认只进入当前草稿，不自动触发流水操作预览。
+- 规则匹配继续按组合 > 商品 > 交易对手的固定优先级执行；重写字段后再次命中时，同级别没有分类冲突即可继续命中，不再把同分类重写链误判为阻塞错误。
+- 修复首次应用规则把“仅显示分类名称”的流水误判为已有分类的问题；规则保存、流水操作预览和月份保存之间的 revision 关系重新校验，避免旧预览阻止后续保存。
+- 流水警告按阻塞性和字段优先级排序，最多显示 10 条并提示省略数量；警告只显示在流水子页面，真正阻塞保存的错误优先可见。
+- 修复保存后的 canonical 草稿、多个编辑窗口缓存、备份恢复竞争、schema 迁移中的多理财账户歧义、AI 分类结果映射和历史分析归一化问题。
+- 优化商品总览日期控件布局，修复日期文字与日历图标重叠；商品名称大小写和空格差异不再造成重复或误报。
+
+### English updates
+
+- Fixed the post-import operation-preview popup, the “transaction preview expired” error when saving an imported draft, and stale async results writing into an older month, subpage, or draft.
+- Import previews now show ignored and filtered rows so users can check for missing transactions. Import confirmation only enters the current draft and does not start a transaction-operation preview.
+- Rule matching keeps the fixed combination > item > counterparty priority. A rewritten field may match again when the same-level result has no category conflict; same-category rewrite chains are no longer treated as blocking errors.
+- Fixed the first rule application reporting existing categories when rows only had display labels; revision checks between rule saves, operation previews, and month saves now prevent stale previews from blocking valid saves.
+- Transaction issues are sorted by blocking severity and field priority, capped at 10 visible entries with an omitted-count hint, and shown only on the Transactions subpage so blocking save errors remain prominent.
+- Fixed canonical draft rebuilding, multi-editor cache invalidation, restore/write races, ambiguous multi-investment-account migration, AI result mapping, and normalized historical analysis.
+- Improved the Item overview date-control layout so the date text no longer overlaps the calendar icon; case and whitespace differences no longer create duplicate or false product findings.
+
+### Compatibility and validation
+
+- No schema, backup-format, database-path, or settings migration is introduced. Minimum Obsidian version remains 1.13.0.
+- Validated with typecheck, lint, 39 Vitest files / 218 tests, the SQLite performance test, production build, release check, and the standard plugin smoke test.
+
 ## 1.7.0
 
 ### 中文更新

@@ -1,5 +1,5 @@
 import { Modal, Notice, type App } from "obsidian";
-import { createElement, useEffect, useState } from "react";
+import { createElement, useEffect, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type {
   CounterpartyRenamePreview,
@@ -45,6 +45,12 @@ export function CounterpartyRenameContent({
   const [preview, setPreview] = useState<CounterpartyRenamePreview | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const mounted = useRef(true);
+  const previewRequestSequence = useRef(0);
+
+  useEffect(() => () => {
+    mounted.current = false;
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -72,6 +78,7 @@ export function CounterpartyRenameContent({
     }, 0);
     return () => {
       active = false;
+      previewRequestSequence.current += 1;
       hostWindow.clearTimeout(timer);
     };
   }, [api, group.product_key, group.transaction_type, hostWindow]);
@@ -80,38 +87,46 @@ export function CounterpartyRenameContent({
   const selectedRows = visibleRows.filter((row) => selectedIds.has(row.id));
   const allSelected = visibleRows.length > 0 && visibleRows.every((row) => selectedIds.has(row.id));
   const toggleAll = () => {
+    previewRequestSequence.current += 1;
     setSelectedIds(allSelected ? new Set() : new Set(visibleRows.map((row) => row.id)));
     setPreview(null);
+    setLoading(false);
   };
   const toggleRow = (id: number) => {
+    previewRequestSequence.current += 1;
     setSelectedIds((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
     setPreview(null);
+    setLoading(false);
   };
   const previewRename = async () => {
     if (!selectedRows.length || !targetCounterparty.trim()) {
       setMessage(t("请选择流水并填写目标交易对手名称。", "Select transactions and enter a target counterparty name."));
       return;
     }
+    const sequence = ++previewRequestSequence.current;
     setLoading(true);
     setMessage(t("正在准备修改预览…", "Preparing the counterparty edit preview…"));
     try {
-      setPreview(await api.previewCounterpartyRename({
+      const result = await api.previewCounterpartyRename({
         transaction_ids: selectedRows.map((row) => row.id),
         target_counterparty: targetCounterparty
-      }));
+      });
+      if (sequence !== previewRequestSequence.current) return;
+      setPreview(result);
       setMessage("");
     } catch (error) {
-      setMessage(errorMessage(error));
+      if (sequence === previewRequestSequence.current) setMessage(errorMessage(error));
     } finally {
-      setLoading(false);
+      if (sequence === previewRequestSequence.current) setLoading(false);
     }
   };
   const applyRename = async () => {
     if (!preview) return;
+    const sequence = ++previewRequestSequence.current;
     setLoading(true);
     setMessage(t("正在修改交易对手名称…", "Updating counterparty names…"));
     try {
@@ -123,14 +138,17 @@ export function CounterpartyRenameContent({
         ),
         source_page: "configuration/product-overview"
       });
+      if (!mounted.current || sequence !== previewRequestSequence.current) return;
       onSaved();
+      if (!mounted.current) return;
       onDataChanged();
+      if (!mounted.current) return;
       new Notice(t(`已修改 ${result.updated_count} 条流水中的交易对手名称。`, `Updated counterparty names in ${result.updated_count} transactions.`));
       onClose();
     } catch (error) {
-      setMessage(errorMessage(error));
+      if (mounted.current && sequence === previewRequestSequence.current) setMessage(errorMessage(error));
     } finally {
-      setLoading(false);
+      if (mounted.current && sequence === previewRequestSequence.current) setLoading(false);
     }
   };
 
@@ -154,7 +172,7 @@ export function CounterpartyRenameContent({
           <StaticTableHeader label={t("分类", "Category")} />
           <StaticTableHeader label={t("金额", "Amount")} className="asset-track-amount-column" />
         </tr></thead><tbody>{visibleRows.map((row) => <tr key={row.id}>
-          <td><input className="asset-track-selection-checkbox" type="checkbox" checked={selectedIds.has(row.id)} onChange={() => toggleRow(row.id)} aria-label={t(`选择 ${row.transaction_date} 的流水`, `Select transaction on ${row.transaction_date}`)} /></td>
+          <td><input className="asset-track-selection-checkbox" type="checkbox" disabled={loading} checked={selectedIds.has(row.id)} onChange={() => toggleRow(row.id)} aria-label={t(`选择 ${row.transaction_date} 的流水`, `Select transaction on ${row.transaction_date}`)} /></td>
           <td className="asset-track-date-cell">{row.transaction_date}</td>
           <td>{row.counterparty || t("（空）", "(empty)")}</td>
           <td>{row.product || t("（空商品）", "(empty item)")}</td>
@@ -164,7 +182,7 @@ export function CounterpartyRenameContent({
     </div>
     <div className="asset-track-product-rename-form">
       <label>{t("修改为交易对手名称", "Change to counterparty name")}
-        <input value={targetCounterparty} onChange={(event) => { setTargetCounterparty(event.target.value); setPreview(null); }} />
+        <input value={targetCounterparty} disabled={loading} onChange={(event) => { previewRequestSequence.current += 1; setTargetCounterparty(event.target.value); setPreview(null); setLoading(false); }} />
       </label>
       <button type="button" className="mod-cta" disabled={loading || !selectedRows.length} onClick={() => void previewRename()}>{t("修改交易对手", "Edit counterparty")}</button>
       {preview && <button type="button" className="mod-warning" disabled={loading} onClick={() => void applyRename()}>{t(`确认修改 ${preview.transaction_count} 条`, `Confirm ${preview.transaction_count} edits`)}</button>}

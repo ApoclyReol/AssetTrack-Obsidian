@@ -159,6 +159,26 @@ function structuredErrorText(
         chinese: "固定资产标识不能重复。",
         english: "Fixed-asset keys cannot be duplicated."
       };
+    case "fixed_asset.id_invalid":
+      return {
+        chinese: "固定资产编号无效，可能已被删除或不属于当前月份。",
+        english: "The fixed-asset ID is invalid or does not belong to the current month."
+      };
+    case "fixed_asset.identity_conflict":
+      return {
+        chinese: "固定资产编号与标识不一致，请重新加载后再保存。",
+        english: "The fixed-asset ID and key do not match. Reload before saving."
+      };
+    case "fixed_asset.status_invalid":
+      return {
+        chinese: `第 ${paramText(params, "row")} 行的固定资产状态无效。`,
+        english: `The fixed-asset status in row ${paramText(params, "row")} is invalid.`
+      };
+    case "fixed_asset.date_invalid":
+      return {
+        chinese: `第 ${paramText(params, "row")} 行的购置日期无效。`,
+        english: `The purchase date in row ${paramText(params, "row")} is invalid.`
+      };
     case "history.filter_required":
       return {
         chinese: "商品回溯至少选择一个筛选条件后再加载。",
@@ -249,6 +269,11 @@ function structuredErrorText(
         chinese: "当前月份尚未加载。",
         english: "The current month has not loaded yet."
       };
+    case "rules.not_loaded":
+      return {
+        chinese: "匹配规则尚未加载完成，请稍后再试。",
+        english: "Matching rules have not finished loading. Try again shortly."
+      };
     case "month.creation_order":
       return {
         chinese: `只能按自然顺序创建下一个月份：${paramText(params, "target")}`,
@@ -274,6 +299,16 @@ function structuredErrorText(
         chinese: `${paramText(params, "month")} 不存在，无需删除。`,
         english: `Month ${paramText(params, "month")} does not exist, so there is nothing to delete.`
       };
+    case "month.locked":
+      return {
+        chinese: `月份 ${paramText(params, "month")} 已锁定，不能修改或删除。`,
+        english: `Month ${paramText(params, "month")} is locked and cannot be changed or deleted.`
+      };
+    case "month.status_invalid":
+      return {
+        chinese: `月份 ${paramText(params, "month")} 的状态无效（${paramText(params, "status")}），请先修复数据库。`,
+        english: `Month ${paramText(params, "month")} has an invalid status (${paramText(params, "status")}); repair the database first.`
+      };
     case "account.definition_invalid":
       return {
         chinese: "账户 key、名称或类型无效或重复。",
@@ -289,10 +324,20 @@ function structuredErrorText(
         chinese: "现金账户无效或重复。",
         english: "A cash account is invalid or duplicated."
       };
+    case "account.cash_missing":
+      return {
+        chinese: `保存账户余额时缺少现金账户：${paramText(params, "account_keys")}。请重新加载月份后再保存。`,
+        english: `Cash account balances are missing: ${paramText(params, "account_keys")}. Reload the month and save again.`
+      };
     case "account.investment_invalid":
       return {
         chinese: "理财账户无效或重复。",
         english: "An investment account is invalid or duplicated."
+      };
+    case "account.investment_missing":
+      return {
+        chinese: `保存账户余额时缺少理财账户：${paramText(params, "account_keys")}。请重新加载月份后再保存。`,
+        english: `Investment account balances are missing: ${paramText(params, "account_keys")}. Reload the month and save again.`
       };
     case "category.definition_invalid":
       return {
@@ -416,6 +461,11 @@ function structuredErrorText(
         chinese: "已还借款必须填写还清日期。",
         english: "A paid debt requires a paid date."
       };
+    case "debt.paid_date_unexpected":
+      return {
+        chinese: "未还借款不能填写还清日期。",
+        english: "An unpaid debt cannot have a paid date."
+      };
     case "debt.paid_date_before_start":
       return {
         chinese: "借款还清日期不能早于发生日期。",
@@ -518,6 +568,11 @@ function structuredErrorText(
       return {
         chinese: "manifest 的表摘要不完整。",
         english: "The manifest table summary is incomplete."
+      };
+    case "backup.manifest_files_invalid":
+      return {
+        chinese: "manifest 的文件清单不完整或包含未声明文件。",
+        english: "The backup manifest file list is incomplete or contains undeclared files."
       };
     case "backup.file_digest_mismatch":
       return {
@@ -628,8 +683,8 @@ function structuredErrorText(
       };
     case "database.migration_blocked":
       return {
-        chinese: "数据库迁移已阻止，请先处理迁移报告中的问题。",
-        english: "Database migration was blocked. Resolve the issues in the migration report first."
+        chinese: `数据库迁移已阻止：${paramText(params, "details", "请先处理迁移报告中的问题。")}`,
+        english: `Database migration was blocked: ${paramText(params, "details", "resolve the issues in the migration report first.")}`
       };
     case "database.protection_backup_invalid":
       return {
@@ -694,6 +749,12 @@ function structuredErrorText(
         chinese: "CSV 没有可识别的表头",
         english: "The CSV file has no recognizable header row."
       };
+    case "csv.duplicate_header":
+      return {
+        chinese: `账单包含重复表头“${paramText(params, "header")}”，请先整理文件后重新导入。`,
+        english: `The statement contains the duplicate header “${paramText(params, "header")}`
+          + `”. Rename or remove it before importing again.`
+      };
     case "csv.worksheet_missing":
       return {
         chinese: "工作簿中没有可读取的工作表",
@@ -723,6 +784,11 @@ function structuredErrorText(
         english: `The selected ${field.english} column does not exist.`
       };
     }
+    case "csv.status_selection_required":
+      return {
+        chinese: "已选择交易状态列，请至少选择一个要导入的状态。",
+        english: "A transaction status column is selected; choose at least one status to import."
+      };
     case "csv.file_not_selected":
       return {
         chinese: "尚未选择账单文件。",
@@ -752,6 +818,11 @@ function structuredErrorText(
       return {
         chinese: "请先在设置中配置 AI API Key。",
         english: "Configure the AI API key in Settings first."
+      };
+    case "ai.request_in_flight":
+      return {
+        chinese: "相同的 AI 请求仍在处理中，请稍后再试。",
+        english: "The same AI request is still in flight. Try again shortly."
       };
     case "validation_error": {
       const message = paramText(params, "message", "校验失败");

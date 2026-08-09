@@ -77,8 +77,10 @@ export class ConfigurationWriteRepository {
       const table = text(definition.account_type) === "cash"
         ? "cash_account_balances" : "investment_account_balances";
       const used = db.prepare(
-        `SELECT 1 FROM ${table} WHERE account_key=? LIMIT 1`
-      ).get(key);
+        `SELECT 1 FROM ${table} WHERE account_key=?
+         UNION ALL SELECT 1 FROM transactions WHERE account_key=?
+         LIMIT 1`
+      ).get(key, key);
       if (used) {
         db.prepare("UPDATE account_definitions SET is_active=0 WHERE account_key=?").run(key);
       } else {
@@ -105,6 +107,7 @@ export class ConfigurationWriteRepository {
     ).all()).map((row) => [text(row.category_key), row]));
     const submitted = new Set<string>();
     const names = new Set<string>();
+    const renamedMonths = new Set<string>();
     input.forEach((row, index) => {
       const key = text(row.category_key);
       const name = text(row.name);
@@ -124,7 +127,8 @@ export class ConfigurationWriteRepository {
       if (old && text(old.transaction_type) !== row.transaction_type) {
         const conflictingTransaction = db.prepare(`
           SELECT 1 FROM transactions
-          WHERE category_key=? AND type IN ('支出','收入') AND type<>?
+          WHERE category_key=?
+            AND (CASE WHEN type='代付' THEN '支出' ELSE type END)<>?
           LIMIT 1
         `).get(key, row.transaction_type);
         const conflictingRule = !allowRuleTypeChanges && db.prepare(`
@@ -173,6 +177,12 @@ export class ConfigurationWriteRepository {
         row.is_active ? 1 : 0, Number(row.sort_order ?? index), text(row.description)
       );
       if (old && text(old.name) !== name) {
+        rows(db.prepare(
+          "SELECT DISTINCT month FROM transactions WHERE category_key=?"
+        ).all(key)).forEach((transaction) => {
+          const month = text(transaction.month);
+          if (month) renamedMonths.add(month);
+        });
         db.prepare("UPDATE transactions SET category=? WHERE category_key=?").run(name, key);
         db.prepare("UPDATE auto_rules SET category=? WHERE category_key=?").run(name, key);
       }
@@ -198,6 +208,7 @@ export class ConfigurationWriteRepository {
       }
       db.prepare("DELETE FROM category_definitions WHERE category_key=?").run(key);
     }
+    for (const month of renamedMonths) this.context.bumpMonthRevision(db, month);
   }
 
   private writeRules(db: DatabaseSync, input: Row[]): void {
@@ -260,7 +271,7 @@ export class ConfigurationWriteRepository {
         params: { description: conflict.description, rule_ids: conflict.rule_ids }
       });
     }
-    const chains = detectRewriteChains(normalized);
+    const chains = detectRewriteChains(normalized).filter((chain) => chain.category_conflict);
     if (chains.length) {
       const chain = chains[0];
       throw new RepositoryValidationError({

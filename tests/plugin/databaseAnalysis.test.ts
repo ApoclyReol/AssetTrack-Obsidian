@@ -61,6 +61,10 @@ it("matches the synthetic cross-month financial baseline", async () => {
     );
     expect((await repository.getMonth("2025-12")).overview.category_summary)
       .toEqual(expect.arrayContaining([{ category: "餐饮基础", amount: 900 }]));
+    expect(repository.annual("2025").cost_audit).toMatchObject({
+      total_expense: 900,
+      categories: [expect.objectContaining({ category: "餐饮基础", total: 900 })]
+    });
     await repository.saveMonth(
       "2026-01",
       0,
@@ -206,6 +210,28 @@ it("tracks investment flows and month-over-month returns per investment account"
         }
       }
     ]);
+  });
+
+it("retains negative net category totals instead of dropping them", async () => {
+    const { repository } = fixture();
+    const food = categoryKey("餐饮基础");
+    await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 100 }],
+      [{ account_key: "investment-default", principal: 0, market_value: 0, cash_balance: 0 }],
+      [{
+        transaction_date: "2026-01-01",
+        type: "代付",
+        category_key: food,
+        category: "餐饮基础",
+        product: "代买",
+        amount: 20
+      }],
+      []
+    );
+    expect((await repository.getMonth("2026-01")).overview.category_summary)
+      .toEqual([{ category: "餐饮基础", amount: -20 }]);
   });
 
 it("summarizes recurring expenses by product without changing schema", async () => {
@@ -359,7 +385,12 @@ it("matches the frozen Python obsidian-v1 golden fixture", async () => {
     await repository.saveMonth(
       "2026-03",
       0,
-      [{ account_key: "cash-boc", balance: 1200 }],
+      [
+        { account_key: "cash-boc", balance: 1200 },
+        { account_key: "cash-ccb", balance: 0 },
+        { account_key: "cash-alipay", balance: 0 },
+        { account_key: "cash-wechat", balance: 0 }
+      ],
       [{
         account_key: "investment-default",
         principal: 300,
@@ -398,6 +429,58 @@ it("matches the frozen Python obsidian-v1 golden fixture", async () => {
       theoretical_expense: null,
       savings_rate: null
     });
+  });
+
+it("excludes draft months from analysis and current assets", async () => {
+    const { repository } = fixture();
+    await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 1000 }],
+      [{ account_key: "investment-default", principal: 0, market_value: 0, cash_balance: 0 }],
+      [],
+      []
+    );
+    await repository.createMonth("2026-02");
+
+    expect(repository.annual("2026").months).toEqual(["2026-01"]);
+    expect(repository.currentAsset()).toMatchObject({ month: "2026-01", cash: 1000 });
+    expect(repository.monthOverview("2026-02")).toEqual({ available: false });
+    const draft = await repository.getMonth("2026-02");
+    expect(draft.overview).toMatchObject({
+      available: true,
+      reconciliation: {
+        available: true,
+        theoretical: { previous_cash: 1000 }
+      }
+    });
+  });
+
+it("uses category keys when annual cost audit display names are stale", async () => {
+    const { manager, repository } = fixture();
+    const food = categoryKey("餐饮基础");
+    await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 100 }],
+      [{ account_key: "investment-default", principal: 0, market_value: 0, cash_balance: 0 }],
+      [{
+        transaction_date: "2026-01-01",
+        type: "支出",
+        category_key: food,
+        category: "餐饮基础",
+        product: "午餐",
+        amount: 20
+      }],
+      []
+    );
+    await manager.write((db) => {
+      db.prepare("UPDATE transactions SET category=? WHERE month=?").run("旧分类名称", "2026-01");
+    });
+
+    expect(repository.annual("2026").cost_audit.categories).toEqual(
+      expect.arrayContaining([expect.objectContaining({ category: "餐饮基础", total: 20 })])
+    );
   });
 
 it("filters big-ticket comparisons and applies the anomaly threshold", async () => {
@@ -462,5 +545,48 @@ it("filters big-ticket comparisons and applies the anomaly threshold", async () 
         (row) => row["分类"] === "大件大额"
       )
     ).toBe(false);
+  });
+
+  it("normalizes product keys when detecting new big-ticket items", async () => {
+    const { repository } = fixture();
+    const food = categoryKey("餐饮基础");
+    const investment = [{
+      account_key: "investment-default",
+      principal: 0,
+      market_value: 0,
+      cash_balance: 0
+    }];
+    await repository.saveMonth(
+      "2025-12",
+      0,
+      [{ account_key: "cash-default", balance: 1000 }],
+      investment,
+      [{
+        transaction_date: "2025-12-01",
+        type: "支出",
+        category_key: food,
+        category: "餐饮基础",
+        product: "Apple",
+        amount: 2000
+      }],
+      []
+    );
+    await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 900 }],
+      investment,
+      [{
+        transaction_date: "2026-01-01",
+        type: "支出",
+        category_key: food,
+        category: "餐饮基础",
+        product: " apple ",
+        amount: 2000
+      }],
+      []
+    );
+
+    expect((await repository.getMonth("2026-01")).overview.anomalies?.new_big_items).toEqual([]);
   });
 });

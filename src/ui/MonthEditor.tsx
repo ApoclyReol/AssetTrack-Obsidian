@@ -23,6 +23,7 @@ import type {
   MonthEditorPort,
   RuleWritePort
 } from "../services/ports";
+import type { SavedRule } from "../types/rules";
 import { createTransactionDraft } from "./analysisModel";
 import { CsvImportDialog } from "./CsvImportDialog";
 import { t } from "../i18n";
@@ -79,6 +80,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
   onMetricsChange?: (metrics: MonthMetrics | null) => void;
   onDeleted: (next: string) => Promise<void>;
   onSaved: () => Promise<void>;
+  onDataChanged?: () => void;
   initialDraft?: MonthEditorDraftSnapshot;
   onSessionChange: (snapshot: EditorDraftSnapshot | null) => void;
   getCsvMapping: (signature: string) => CsvColumnMapping | undefined;
@@ -99,6 +101,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
   onMetricsChange,
   onDeleted,
   onSaved,
+  onDataChanged,
   initialDraft,
   onSessionChange,
   getCsvMapping,
@@ -128,7 +131,6 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
     rulesRevision,
     setRulesRevision,
     issues,
-    setIssues,
     state,
     setState,
     dirtySections,
@@ -139,6 +141,9 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
     mark,
     reloadCurrentSection,
     save,
+    saveAll,
+    discardAll,
+    acknowledgeDataChange,
     hasUnsavedChanges,
     getDraftSnapshot
   } = session;
@@ -160,11 +165,11 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
   const csv = useCsvImportSession({
     api,
     month,
+    activeSection,
     draft,
-    rulesRevision,
-    setIssues,
     setState,
-    operations,
+    mark,
+    invalidatePendingOperationLogs: operations.invalidatePendingOperationLogs,
     getCsvMapping,
     saveCsvMapping
   });
@@ -179,7 +184,9 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
     openImport: () => undefined,
     applyRules: async () => undefined,
     save: async () => false,
+    saveAll: async () => false,
     discard: async () => undefined,
+    discardAll: async () => undefined,
     getDraftSnapshot: () => null,
     hasUnsavedChanges: () => false
   });
@@ -188,7 +195,9 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
     openImport: () => actionRef.current.openImport(),
     applyRules: () => actionRef.current.applyRules(),
     save: () => actionRef.current.save(),
+    saveAll: () => actionRef.current.saveAll(),
     discard: () => actionRef.current.discard(),
+    discardAll: () => actionRef.current.discardAll(),
     getDraftSnapshot: () => actionRef.current.getDraftSnapshot(),
     hasUnsavedChanges: () => actionRef.current.hasUnsavedChanges()
   }), [ref]);
@@ -234,6 +243,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
       return next;
     });
     operations.protectTransaction(index);
+    operations.invalidatePendingOperationLogs();
     mark({ ...draft, transactions: rows }, "transactions");
   };
 
@@ -272,6 +282,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
   };
 
   const deleteTransaction = (index: number) => {
+    operations.invalidatePendingOperationLogs();
     mark({
       ...draft,
       transactions: draft.transactions.filter((_, item) => item !== index)
@@ -279,6 +290,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
   };
 
   const addTransaction = (title: string) => {
+    operations.invalidatePendingOperationLogs();
     const transaction = createTransactionDraft(title, month, categories);
     if (title === "加仓" || title === "提现") {
       transaction.account_key = draft.investment_accounts.find((account) => account.is_active)?.account_key
@@ -353,16 +365,31 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
           row,
           draft.transactions.indexOf(row)
         );
-        await (api as MonthEditorPort & RuleWritePort).saveRules(shell.rules_revision, nextRules, {
+        const saved = await (api as MonthEditorPort & RuleWritePort).saveRules(shell.rules_revision, nextRules, {
           source_page: "记录/流水",
           operation_type: "create-rule",
           selection: [selectedKey],
           metadata: { rule_id: rule.id ?? null }
         });
-        const updatedShell = await api.ruleWorkspaceShell();
-        setRules(updatedShell.rules);
-        setRulesRevision(updatedShell.rules_revision);
-        new Notice(t("规则已保存；历史流水未自动改写。", "Rule saved; historical transactions were not rewritten."));
+        // The rule revision is part of any pending transaction-operation
+        // preview. A directly created rule invalidates those previews even
+        // though the current draft rows themselves remain usable.
+        operations.invalidatePendingOperationLogs();
+        acknowledgeDataChange();
+        onDataChanged?.();
+        setRules(saved.rows as unknown as SavedRule[]);
+        setRulesRevision(saved.revision);
+        try {
+          const updatedShell = await api.ruleWorkspaceShell();
+          setRules(updatedShell.rules);
+          setRulesRevision(updatedShell.rules_revision);
+          new Notice(t("规则已保存；历史流水未自动改写。", "Rule saved; historical transactions were not rewritten."));
+        } catch (error) {
+          new Notice(t(
+            `规则已保存，但规则列表刷新失败：${messageFor(error)}`,
+            `Rule saved, but the rule list could not refresh: ${messageFor(error)}`
+          ));
+        }
       }
     }).open();
   };
@@ -436,7 +463,9 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
     openImport: csv.openImport,
     applyRules: operations.applyRules,
     save,
+    saveAll,
     discard: reloadCurrentSection,
+    discardAll,
     getDraftSnapshot,
     hasUnsavedChanges
   };
@@ -492,7 +521,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
       <span className="asset-track-sr-only" role="status" aria-live="polite">
         {state.kind === "error" ? state.message : ""}
       </span>
-      {issues.length > 0 && (
+      {activeSection === "transactions" && issues.length > 0 && (
         <IssueList issues={issues} rows={draft.transactions} />
       )}
       {(showAllSections || activeSection === "assets") && <MonthEditorAssetsSection

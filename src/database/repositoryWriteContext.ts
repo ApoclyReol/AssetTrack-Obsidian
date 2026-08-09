@@ -37,6 +37,7 @@ export interface ConfigurationWriteDependencies {
   categories(db: DatabaseSync): { revision: number; rows: CategoryDefinition[] };
   accounts(db: DatabaseSync): { revision: number; rows: AccountDefinition[] };
   rules(db: DatabaseSync): { revision: number; rows: Row[] };
+  bumpMonthRevision(db: DatabaseSync, month: string): number;
 }
 
 export interface HistoryWriteDependencies {

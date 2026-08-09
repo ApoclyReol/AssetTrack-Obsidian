@@ -43,7 +43,12 @@ export function buildRuleReport(
   raw: Row[],
   transactions: Row[]
 ): { revision: number; rows: Row[] } {
-  const revision = contentRevision(raw);
+  // `category_active` comes from the category join and belongs to the
+  // category revision, not the rule definition revision. Keep it out of the
+  // hash so the revision matches ruleWorkspaceShell(), which is sent to the
+  // editor and later returned with operation previews.
+  const revisionRows = raw.map(({ category_active: _categoryActive, ...row }) => row);
+  const revision = contentRevision(revisionRows);
   const definitions = raw.map(toRuleRow);
   const duplicateIds = new Map<number, number[]>();
   const conflictIds = new Map<number, number[]>();

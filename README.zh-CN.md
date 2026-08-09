@@ -79,7 +79,7 @@ Asset Track 是一款面向月度结算的本地私有个人财务工具。它�
 ## 兼容性
 
 - 仅支持桌面版 Obsidian：macOS、Windows 和 Linux。
-- 1.7.0 要求 Obsidian 1.13.0 或更高版本。安装或更新前，请先升级到最新可用的
+- 1.7.1 要求 Obsidian 1.13.0 或更高版本。安装或更新前，请先升级到最新可用的
   1.13.x 桌面版。
 - 不需要 Python、单独安装的 Node.js 或 sidecar。
 

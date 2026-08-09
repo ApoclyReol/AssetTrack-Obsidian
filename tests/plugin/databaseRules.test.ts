@@ -5,7 +5,7 @@ import { fixture } from "./databaseTestFixtures";
 describe("rules repository", () => {
 
 it("uses product-only rule candidates, persistence and application", async () => {
-    const { repository } = fixture();
+    const { manager, repository } = fixture();
     const food = categoryKey("餐饮基础");
     await repository.saveMonth(
       "2026-01",
@@ -28,6 +28,9 @@ it("uses product-only rule candidates, persistence and application", async () =>
       })),
       []
     );
+    await manager.write((db) => {
+      db.prepare("UPDATE transactions SET category=? WHERE month=?").run("旧分类名称", "2026-01");
+    });
     const candidates = repository.ruleCandidates(
       "2026-02",
       [],
@@ -35,6 +38,7 @@ it("uses product-only rule candidates, persistence and application", async () =>
     );
     expect(candidates.rows[0]).toMatchObject({
       product: "午餐",
+      category: "餐饮基础",
       occurrences: 2
     });
     const current = repository.rules();
@@ -59,6 +63,46 @@ it("uses product-only rule candidates, persistence and application", async () =>
       product: "午餐",
       amount: 20
     }]).proposed_rows[0].category).toBe("餐饮基础");
+  });
+
+  it("keeps a product candidate when only a higher-priority merchant-product rule exists", async () => {
+    const { repository } = fixture();
+    const food = categoryKey("餐饮基础");
+    await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 100 }],
+      [{ account_key: "investment-default", principal: 0, market_value: 0, cash_balance: 0 }],
+      [{
+        transaction_date: "2026-01-01",
+        type: "支出",
+        category_key: food,
+        category: "餐饮基础",
+        counterparty: "商户甲",
+        product: "咖啡",
+        amount: 20
+      }, {
+        transaction_date: "2026-01-02",
+        type: "支出",
+        category_key: food,
+        category: "餐饮基础",
+        counterparty: "商户乙",
+        product: "咖啡",
+        amount: 22
+      }],
+      []
+    );
+    await repository.saveRules(repository.rules().revision, [{
+      transaction_type: "支出",
+      match_scope: "merchant_product",
+      counterparty: "商户甲",
+      product: "咖啡",
+      category_key: food,
+      category: "餐饮基础"
+    }]);
+    expect(repository.ruleCandidates("2026-02", [], 2).rows).toEqual([
+      expect.objectContaining({ product: "咖啡", occurrences: 2 })
+    ]);
   });
 
 it("aggregates saved history, detects conflicts and exposes recommendations", async () => {
@@ -379,6 +423,55 @@ it("derives partial-coverage suggestions only from unmatched transactions", asyn
       rule_suggestion: undefined
     });
     expect(insights.recommendations.some((row) => row.product === "咖啡")).toBe(false);
+  });
+
+  it("offers a follow-up rule for an explicitly partial merchant-product match", async () => {
+    const { repository } = fixture();
+    const food = categoryKey("餐饮基础");
+    await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 100 }],
+      [{ account_key: "investment-default", principal: 0, market_value: 0, cash_balance: 0 }],
+      [{
+        transaction_date: "2026-01-01",
+        type: "支出",
+        category_key: food,
+        category: "餐饮基础",
+        counterparty: "商户甲",
+        product: "咖啡",
+        amount: 20
+      }, {
+        transaction_date: "2026-01-02",
+        type: "支出",
+        category_key: food,
+        category: "餐饮基础",
+        counterparty: "商户乙",
+        product: "咖啡",
+        amount: 22
+      }],
+      []
+    );
+    await repository.saveRules(repository.rules().revision, [{
+      transaction_type: "支出",
+      match_scope: "merchant_product",
+      counterparty: "商户甲",
+      product: "咖啡",
+      category_key: food,
+      category: "餐饮基础"
+    }]);
+    const insights = repository.ruleWorkspaceAnalytics(1);
+    const coffee = insights.historical_products.find((row) => row.product === "咖啡");
+    expect(coffee).toMatchObject({
+      rule_coverage: "partial",
+      matched_occurrences: 1,
+      unmatched_occurrences: 1,
+      rule_suggestion: { product: "咖啡", category_key: food }
+    });
+    expect(insights.recommendations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ product: "咖啡", category_key: food })
+    ]));
+    expect(insights.summary.stable_products_without_rule).toBe(0);
   });
 
 it("enforces one rule per normalized condition at the database boundary", async () => {

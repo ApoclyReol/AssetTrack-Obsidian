@@ -159,6 +159,33 @@ describe("schema validation", () => {
     );
   });
 
+  it("rejects a schema with a required primary key removed", () => {
+    const path = databasePath();
+    const db = createDatabase(path);
+    db.exec(`
+      ALTER TABLE month_status RENAME TO month_status_old;
+      CREATE TABLE month_status (
+        month TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'draft',
+        locked_at TEXT,
+        updated_at TEXT,
+        fixed_assets_initialized INTEGER NOT NULL DEFAULT 0,
+        revision INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO month_status
+        (month,status,locked_at,updated_at,fixed_assets_initialized,revision)
+      SELECT month,status,locked_at,updated_at,fixed_assets_initialized,revision
+      FROM month_status_old;
+      DROP TABLE month_status_old;
+    `);
+    db.close();
+    const inspection = DatabaseManager.inspect(path);
+    expect(inspection.valid).toBe(false);
+    expect(inspection.validation?.invalid_primary_keys).toContain(
+      "month_status(month)"
+    );
+  });
+
   it("creates normalized generated match keys and enforces scoped uniqueness", () => {
     const path = databasePath();
     const db = createDatabase(path);
@@ -366,6 +393,36 @@ describe("schema validation", () => {
     const manager = new DatabaseManager(path);
     expect(() => manager.open()).toThrow(SchemaMigrationError);
     manager.close();
+    const unchanged = new DatabaseSync(path, { readOnly: true });
+    expect((unchanged.prepare("PRAGMA user_version").get() as { user_version: number }).user_version)
+      .toBe(9);
+    unchanged.close();
+  });
+
+  it("blocks schema 9 migration when multiple investment accounts make legacy flows ambiguous", () => {
+    const path = databasePath();
+    const db = createSchema9Database(path);
+    db.exec(`
+      INSERT INTO account_definitions
+        (account_key,name,account_type,is_active,sort_order)
+      VALUES ('investment-b','第二理财账户','investment',1,2);
+      INSERT INTO transactions
+        (month,transaction_date,type,category_key,category,counterparty,product,amount)
+      VALUES ('2026-01','2026-01-01','加仓','${categoryKey("餐饮基础")}','餐饮基础','理财','转入',100);
+    `);
+    db.close();
+
+    const manager = new DatabaseManager(path);
+    let caught: unknown;
+    try {
+      manager.open();
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(SchemaMigrationError);
+    expect((caught as SchemaMigrationError).report.issues).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "ambiguous_investment_account" })])
+    );
     const unchanged = new DatabaseSync(path, { readOnly: true });
     expect((unchanged.prepare("PRAGMA user_version").get() as { user_version: number }).user_version)
       .toBe(9);

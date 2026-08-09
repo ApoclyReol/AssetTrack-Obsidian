@@ -60,7 +60,7 @@ export class RuleReportReadModel {
     const windowPredicate = window ? transactionWindowPredicate(window) : null;
     const transactions = knownTransactions ?? (window && windowPredicate ? rows(db.prepare(`
       SELECT t.month,t.transaction_date,t.type,t.counterparty,t.product FROM transactions t
-      JOIN month_status m ON m.month=t.month AND m.status='saved'
+      JOIN month_status m ON m.month=t.month AND m.status IN ('saved','locked')
       WHERE t.type IN ('支出','收入')
         AND ${windowPredicate.sql}
     `).all(...windowPredicate.parameters)) : []);
@@ -169,7 +169,7 @@ export class RuleReportReadModel {
         params: { description: conflict.description, rule_ids: conflict.rule_ids }
       });
     }
-    const chains = detectRewriteChains(candidateSet);
+    const chains = detectRewriteChains(candidateSet).filter((chain) => chain.category_conflict);
     if (chains.length) {
       const chain = chains[0];
       throw new RepositoryValidationError({
@@ -191,10 +191,20 @@ export class RuleReportReadModel {
     const historyRows = window && historyWindow ? rows(db.prepare(`
       SELECT t.month,t.type,t.counterparty,t.product,t.category_key,t.category
       FROM transactions t
-      JOIN month_status m ON m.month=t.month AND m.status='saved'
+      JOIN month_status m ON m.month=t.month AND m.status IN ('saved','locked')
       WHERE t.type IN ('支出','收入') AND ${historyWindow.sql}
       ORDER BY t.month,t.id
     `).all(...historyWindow.parameters)) : [];
+    const categoryDefinitions = this.context.categoryDefinitions(db);
+    const categoryByKey = new Map(categoryDefinitions.map((item) => [item.category_key, item]));
+    const categoryByName = new Map(categoryDefinitions.map((item) => [item.name, item]));
+    const categoryName = (row: Row): string => {
+      const rawCategory = text(row.category);
+      const definition = text(row.category_key)
+        ? categoryByKey.get(text(row.category_key))
+        : categoryByName.get(rawCategory);
+      return definition?.name ?? rawCategory;
+    };
     const affected = historyRows.filter((row) => ruleConditionKey({
       transaction_type: text(row.type),
       match_scope: candidate.match_scope,
@@ -206,7 +216,7 @@ export class RuleReportReadModel {
       const key = text(row.category_key) || "__uncategorized__";
       const current = counts.get(key) ?? {
         category_key: text(row.category_key) || null,
-        category: text(row.category) || "未分类",
+        category: categoryName(row) || "未分类",
         occurrences: 0
       };
       current.occurrences += 1;
@@ -265,7 +275,7 @@ export class RuleReportReadModel {
         description: conflict.description
       });
     }
-    for (const chain of detectRewriteChains(ruleData.rows)) {
+    for (const chain of detectRewriteChains(ruleData.rows).filter((item) => item.category_conflict)) {
       if (chain.rule_id === null) continue;
       const component = [chain.rule_id, ...chain.target_rule_ids]
         .filter((id, index, values) => values.indexOf(id) === index)
@@ -337,8 +347,8 @@ export class RuleReportReadModel {
     const ruleData = this.rules(db, null);
     const historicalWindow = scope ? transactionWindowPredicate(scope) : null;
     const historicalRows = scope && historicalWindow ? rows(db.prepare(`
-        SELECT t.month,t.type,t.category,t.product FROM transactions t
-        JOIN month_status m ON m.month=t.month AND m.status='saved'
+        SELECT t.month,t.type,t.category_key,t.category,t.product FROM transactions t
+      JOIN month_status m ON m.month=t.month AND m.status IN ('saved','locked')
         WHERE t.month<>? AND ${historicalWindow.sql}
           AND t.type IN ('支出','收入')
           AND TRIM(COALESCE(t.product,''))<>''
@@ -361,7 +371,16 @@ export class RuleReportReadModel {
       group.push(row);
       grouped.set(key, group);
     });
-    const metadata = new Map(this.context.categoryDefinitions(db).map((row) => [row.name, row]));
+    const metadata = this.context.categoryDefinitions(db);
+    const metadataByKey = new Map(metadata.map((row) => [row.category_key, row]));
+    const metadataByName = new Map(metadata.map((row) => [row.name, row]));
+    const categoryName = (row: Row): string => {
+      const rawCategory = text(row.category);
+      const definition = text(row.category_key)
+        ? metadataByKey.get(text(row.category_key))
+        : metadataByName.get(rawCategory);
+      return definition?.name ?? rawCategory;
+    };
     const result: Array<{
       transaction_type: "支出" | "收入";
       product: string;
@@ -379,14 +398,15 @@ export class RuleReportReadModel {
       const representative = group[0];
       if (ruleData.rows.some((rule) =>
         text(rule.transaction_type) === type
+        && ruleMatchLevel(rule) === "product"
         && normalizeProductKey(rule.product)
           === normalizeProductKey(representative.product)
       )) {
         continue;
       }
       const variants = this.frequency(group.map((row) => text(row.product)));
-      const categoryValues = group.map((row) => text(row.category)).filter(
-        (category) => metadata.get(category)?.transaction_type === type
+      const categoryValues = group.map(categoryName).filter(
+        (category) => metadataByName.get(category)?.transaction_type === type
       );
       const categories = this.frequency(categoryValues);
       const category = categories[0]?.[0] ?? "";

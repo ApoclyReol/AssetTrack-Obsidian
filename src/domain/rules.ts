@@ -363,11 +363,27 @@ export function detectRewriteChains(rules: readonly RuleRow[]): RuleChainIssue[]
         amount: 0
       } satisfies Transaction)
     };
-    const targets = matcher.matchingRules(rewritten)
-      .filter((target) => Number(target.id) !== sourceId)
+    const targetRules = matcher.matchingRules(rewritten)
+      .filter((target) => target !== source && (!sourceHasId || Number(target.id) !== sourceId));
+    const targetResolution = matcher.resolveWithMatches(rewritten, targetRules);
+    if (targetResolution.status === "none" || !targetResolution.level) continue;
+    // Only the highest-priority target level is relevant. Lower levels are
+    // covered by the normal one-pass resolver and must not turn a harmless
+    // normalization chain into a false conflict.
+    const highestPriorityTargets = targetRules.filter((target) =>
+      ruleMatchLevel(target) === targetResolution.level
+    );
+    const targets = highestPriorityTargets
       .map((target) => Number(target.id))
       .filter((id) => Number.isFinite(id) && id > 0);
-    if (!targets.length) continue;
+    const sourceCategory = comparable(source.category_key) || comparable(source.category);
+    const categoryConflict = highestPriorityTargets.some((target) =>
+      (comparable(target.category_key) || comparable(target.category)) !== sourceCategory
+    );
+    if (!highestPriorityTargets.length) continue;
+    const targetLabel = targets.length
+      ? [...new Set(targets)].join("、")
+      : "新建规则";
     issues.push({
       rule_id: sourceHasId ? sourceId : null,
       target_rule_ids: [...new Set(targets)],
@@ -375,7 +391,8 @@ export function detectRewriteChains(rules: readonly RuleRow[]): RuleChainIssue[]
         ...(rewriteMerchant ? ["counterparty" as const] : []),
         ...(rewriteProduct ? ["product" as const] : [])
       ],
-      reason: `重写结果会再次命中规则 ${[...new Set(targets)].join("、")}`
+      category_conflict: categoryConflict,
+      reason: `重写结果会再次命中最高优先级规则 ${targetLabel}${categoryConflict ? "，且目标分类不同" : "，但分类相同"}`
     });
   }
   return issues;

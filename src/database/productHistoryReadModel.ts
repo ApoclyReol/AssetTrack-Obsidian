@@ -73,19 +73,19 @@ export class ProductHistoryReadModel {
     }
     const productSearch = scalarText(query.product_search).trim();
     if (productSearch) {
-      conditions.push("LOWER(COALESCE(t.product,'')) LIKE LOWER(?)");
-      parameters.push(`%${productSearch}%`);
+      conditions.push("asset_track_normalize_match_key(COALESCE(t.product,'')) LIKE '%' || asset_track_normalize_match_key(?) || '%'");
+      parameters.push(productSearch);
     }
     const counterpartySearch = scalarText(query.counterparty_search).trim();
     if (counterpartySearch) {
-      conditions.push("LOWER(COALESCE(t.counterparty,'')) LIKE LOWER(?)");
-      parameters.push(`%${counterpartySearch}%`);
+      conditions.push("asset_track_normalize_match_key(COALESCE(t.counterparty,'')) LIKE '%' || asset_track_normalize_match_key(?) || '%'");
+      parameters.push(counterpartySearch);
     }
     const history = rows(db.prepare(`
       SELECT t.id,t.month,t.transaction_date,t.type,t.category_key,t.category,
              t.counterparty,t.product,t.amount,d.is_active AS category_active
       FROM transactions t
-      JOIN month_status m ON m.month=t.month AND m.status='saved'
+      JOIN month_status m ON m.month=t.month AND m.status IN ('saved','locked')
       LEFT JOIN category_definitions d ON d.category_key=t.category_key
       WHERE ${conditions.join(" AND ")}
       ORDER BY t.type,t.product,t.month,t.transaction_date,t.id

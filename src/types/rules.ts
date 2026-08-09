@@ -38,6 +38,7 @@ export interface RuleChainIssue {
   rule_id: number | null;
   target_rule_ids: number[];
   fields: Array<"counterparty" | "product">;
+  category_conflict: boolean;
   reason: string;
 }
 

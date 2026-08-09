@@ -92,4 +92,25 @@ describe("transaction validation severity", () => {
       expect.objectContaining({ field: "分类", severity: "警告" })
     ]));
   });
+
+  it("blocks a category whose transaction type does not match the row", () => {
+    const incomeCategory: CategoryDefinition = {
+      ...categories[0],
+      category_key: "cat-income",
+      name: "工资收入",
+      transaction_type: "收入"
+    };
+    const issues = validateTransactions([{
+      transaction_date: "2026-01-01",
+      type: "支出",
+      category_key: incomeCategory.category_key,
+      category: incomeCategory.name,
+      product: "午餐",
+      amount: 10
+    }], "2026-01", [categories[0], incomeCategory]);
+
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "分类", severity: "错误", blocking: true })
+    ]));
+  });
 });

@@ -8,6 +8,7 @@ import type {
   OperationKind
 } from "../types/operations";
 import { businessLabel, t } from "../i18n";
+import { messageFor } from "./editorPrimitives";
 
 const UNCATEGORIZED_CATEGORY_KEY = "__asset-track-uncategorized__";
 
@@ -75,7 +76,7 @@ function BatchEditContent({
       });
       onClose();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      setMessage(messageFor(error));
     } finally {
       setBusy(false);
     }
