@@ -67,7 +67,9 @@ Asset Track 是一款面向月度结算的本地私有个人财务工具。它�
 1. 打开“设置 → 第三方插件 → 浏览”，搜索并安装 **Asset Track**。
 2. 打开“设置 → Asset Track”，在当前 Vault 内选择一个专用数据目录。
 3. 空目录选择“创建新数据库”，已有数据库则选择“载入数据库”。
-4. 从命令面板或功能区打开编辑器。
+4. 安装后，可以通过以下任一方式打开编辑器：
+   - 点击功能区中的 <img src="docs/assets/landmark.svg" width="18" height="18" alt="Asset Track 功能区图标"> Asset Track 图标。
+   - 按 `Cmd/Ctrl + P` 打开命令面板，搜索并运行 `Asset Track: 打开编辑器`。
 5. 导入本月账单，处理异常，补充月末资产，然后保存本月。
 
 如果社区目录不可用，只从同一个 GitHub Release 下载 `main.js`、`manifest.json` 和

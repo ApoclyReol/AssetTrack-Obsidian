@@ -77,7 +77,9 @@ If the community directory is unavailable, download only `main.js`, `manifest.js
 
 1. Open **Settings → Asset Track** and choose a dedicated folder inside the current vault.
 2. Create a new database in an empty folder, or load an existing one.
-3. Open the editor from the command palette or ribbon.
+3. After installation, open the editor in either of these ways:
+   - Click the <img src="docs/assets/landmark.svg" width="18" height="18" alt="Asset Track ribbon icon"> Asset Track icon in the ribbon.
+   - Press `Cmd/Ctrl + P` to open the command palette, then run `Asset Track: Open editor`.
 4. Import this month’s bills, review the exceptions, update month-end assets, and save the month.
 
 ## Data and privacy
