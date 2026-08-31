@@ -70,7 +70,7 @@ export function validateTransactions(
           index,
           "日期",
           `无法识别日期：${rawDate}`,
-          "使用 YYYY-MM-DD、YYYY/MM/DD 或中文年月日",
+          "使用 YYYY-MM-DD、YYYY/MM/DD、MM/DD/YYYY、DD/MM/YYYY 或中文年月日",
           "错误"
         ));
       }

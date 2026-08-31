@@ -24,7 +24,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - name: Run unit and integration tests
-        run: npm test -- --exclude tests/plugin/sqliteSpike.test.ts
+        run: npm test -- --exclude tests/performance/sqlite.test.ts
       - name: Run bounded read-window performance guard
         run: npm run test:perf
       - run: npm run build

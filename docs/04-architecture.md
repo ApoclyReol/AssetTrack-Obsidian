@@ -199,7 +199,8 @@ facade 的每个公开写入方法只调用一次 `manager.write()`：
 - `saveAccounts()` 的账户定义和月度账户余额属于不同 revision 边界，不能为了文件拆分而合并；
 - 月度账户余额、流水、借款和固定资产共享月份 revision，但分别由月份写模块中的方法执行；
 - 数据库回归测试已经按生命周期、月份、配置、规则、历史、分析、操作和舍入拆分；共享 fixture
-  位于 `databaseTestFixtures.ts`，测试文件名与业务边界保持一致。
+  位于 `tests/database/databaseTestFixtures.ts`，数据库测试按生命周期、月份、配置、规则、历史、分析、操作和
+  schema 边界组织；其他测试按 domain、import、ui、services 和 performance 分层。
 
 后续只在业务边界继续增长时拆分，不为降低单文件行数而重新组织 facade 或只读模型。
 

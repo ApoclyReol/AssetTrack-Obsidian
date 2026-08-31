@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.8.1
+
+### 中文更新
+
+- 修复部分账单使用 `8/31/26 9:23` 这类两位年份日期时，交易成功但因日期无法识别而被过滤的问题。
+- 日期解析支持多种格式，并允许同一份账单混用不同格式，包括：`YYYY-MM-DD`、`M/D/YYYY`、`M/D/YY`、中文年月日、`YYYYMMDD`、Excel 日期序列和带时间的日期值。
+
+### 规则管理面板加强
+
+- 规则列表新增搜索、收支、状态、作用域和分类筛选，常用筛选直接显示。
+- 支持按状态、最近使用、流水数、分类、匹配范围和编号排序，也支持按状态、收支、作用域和分类分组。
+
+### English updates
+
+- Fixed valid transactions being filtered when a bill used a short-year date such as `8/31/26 9:23`.
+- Date parsing supports multiple formats and allows mixed formats within the same bill, including `YYYY-MM-DD`, `M/D/YYYY`, `M/D/YY`, Chinese date notation, `YYYYMMDD`, Excel serial dates, and date-time values.
+
+### Rule management panel improvements
+
+- The rule list now adds search, transaction type, status, scope, and category filters, with common filters shown directly.
+- Rules can be sorted by status, latest use, transaction count, category, match scope, and ID, and grouped by status, transaction type, scope, and category.
+
+### Compatibility and validation
+
+- No schema, backup-format, database-path, or settings migration is introduced. Minimum Obsidian version remains 1.13.0.
+- The release remains desktop-only and uses the standard `main.js`, `manifest.json`, and `styles.css` assets.
+
 ## 1.7.1
 
 ### 中文更新

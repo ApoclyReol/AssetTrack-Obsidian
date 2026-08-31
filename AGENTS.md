@@ -45,7 +45,7 @@ src/database/                           schema 10、连接管理和 Repository
 src/services/                           本地 Service、备份恢复
 src/ui/、src/views/                     React 界面与 ItemView
 scripts/                                插件构建、安装和冒烟
-tests/plugin/                           TypeScript/schema/备份/计算测试
+tests/                                  按 domain/database/import/ui/services/performance 分层的测试
 docs/                                   当前架构、用户、开发与发行文档
 ```
 

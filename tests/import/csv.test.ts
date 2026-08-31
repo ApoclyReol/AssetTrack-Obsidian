@@ -314,4 +314,35 @@ describe("TypeScript CSV mapping", () => {
       });
     }
   );
+
+  it("imports an xlsx date formatted as month/day/year with time", () => {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.aoa_to_sheet([
+        ["交易时间", "交易对方", "商品", "金额(元)", "收/支", "当前状态"],
+        ["8/31/2026 9:23", "南农大南苑教育超市", "日用百货", 7.4, "支出", "交易成功"]
+      ]),
+      "账单"
+    );
+    const content = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
+    const preview = previewCsv("2026-08", "流水.xlsx", content, {
+      date_column: "交易时间",
+      counterparty_column: "交易对方",
+      product_column: "商品",
+      amount_column: "金额(元)",
+      type_column: "收/支",
+      status_column: "当前状态",
+      type_values: { 支出: "支出" },
+      included_statuses: ["交易成功"]
+    });
+
+    expect(preview.rows[0]).toMatchObject({
+      transaction_date: "2026-08-31",
+      product: "日用百货",
+      amount: 7.4,
+      type: "支出"
+    });
+    expect(preview.import_stats.filtered.invalid).toBe(0);
+  });
 });

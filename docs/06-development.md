@@ -2,13 +2,15 @@
 
 > 文档角色：开发与维护。本文服务源码修改、测试、构建和代码评审，不承担用户使用说明。
 
-## v1.8.0 维护边界
+## v1.8.1 维护边界
 
 - 金额展示统一调用 `src/domain/moneyFormat.ts`。
 - 分析阈值来自 `AssetTrackSettings`，Repository 不复制界面常量。
 - `cost_assets` 是对账稳定口径，`market_net_assets` 是财富趋势口径，
   `total_assets` 仅作为兼容别名。
 - 导入契约使用 `ArrayBuffer`，不得重新引入 Data URL/Base64 中间副本。
+- 日期规范化按行支持多种账单格式；解析成功后仍由导入层执行所选月份边界检查，不能用目标月份反向修正歧义日期。
+- 规则列表的搜索、筛选、分组和排序只属于 React 浏览状态，不得修改规则草稿、匹配优先级或数据库事实。
 - 领域错误在 UI 边界统一经过 `displayError()`；新增用户可见错误时必须同时补充中英文
   文案或稳定错误码，不要让纯领域模块直接依赖 Obsidian。
 - 设置页使用 Obsidian 1.13 `getSettingDefinitions()`；设置值变更后调用 `update()`
@@ -54,7 +56,12 @@ src/database/            schema 11、DatabaseManager 和 Repository
 src/services/            UI Service、备份恢复和原生对话框
 src/types/               按领域拆分的持久化、分析和操作协议
 src/ui/、src/views/      React、能力端口适配与 ItemView
-tests/plugin/            TypeScript、SQLite、golden 和备份测试
+tests/domain/             财务计算、金额、规则、读取窗口和质检
+tests/database/           SQLite、schema、月份、配置、规则、历史、分析和操作
+tests/import/             CSV/XLS/XLSX 解析、映射交互、导入 session 和草稿提交
+tests/ui/                 ItemView、草稿恢复、异步生命周期、表格和分析模型
+tests/services/           备份、AI、i18n、设置和数据目录边界
+tests/performance/        SQLite 性能门禁
 scripts/                 构建、安装和冒烟
 docs/                    长期文档与 release 日志
 ```
@@ -114,7 +121,7 @@ build/
 
 - `typecheck` 无错误退出；
 - `lint` 零 error、零 warning；
-- `test` 中的 `tests/plugin/` 测试全部通过；
+- `test` 中的 `tests/` 分层测试全部通过；
 - 项目不使用 `dist/` 或 `out/`，`build/` 根目录只保留标准三文件；
 - `release:check` 验证版本、许可证、标准三文件和生产 bundle。
 
@@ -139,19 +146,19 @@ Vault 与合成数据库。
 
 | 修改目标 | 主要入口 | 重点测试 |
 | --- | --- | --- |
-| 财务公式与对账 | `src/domain/calculator.ts`、`src/database/analysisReadModel.ts`、`src/database/AssetTrackRepository.ts` | `databaseAnalysis.test.ts`、`analysisModel.test.ts` |
-| schema 与结构校验 | `src/database/schema.ts`、`DatabaseManager.ts` | `schemaValidation.test.ts`、`databaseLifecycle.test.ts` |
-| 月份校验和保存 | `AssetTrackRepository.saveMonth()`、`saveMonthSection()`、`src/ui/MonthEditor.tsx`、`src/ui/month/` | `databaseMonth.test.ts`、`monthDebtAndSpecialRows.test.tsx`、`editorDraftRecovery.test.tsx` |
-| 账单解析与字段映射 | `src/domain/csv.ts` | `csvService.test.ts` |
-| 导入交互与草稿提交 | `CsvImportDialog.tsx`、`csvImportCommit.ts` | `csvImportDialog.test.tsx`、`csvImportCommit.test.ts` |
-| 规则工作台、商品统一与历史迁移 | `src/ui/RulesEditor.tsx`、`src/ui/rules/`、`src/ui/configuration/`、`RuleHistoryModal.tsx`、`RuleCreationModal.tsx`、`src/database/ruleReportReadModel.ts`、`productHistoryReadModel.ts`、`ruleHistoryReadModel.ts`、`AssetTrackRepository.ts`、`configurationWriteRepository.ts`、`historyWriteRepository.ts` | `databaseRules.test.ts`、`databaseHistory.test.ts`、`ruleHistoryModal.test.tsx`、`tablePrimitives.test.tsx` |
-| 流水 Tab、汇总、多选与批量操作 | `src/domain/transactionOperations.ts`、`src/ui/MonthEditor.tsx`、`src/ui/month/MonthEditorTransactionsSection.tsx`、`TransactionTables.tsx`、`TransactionOperationModal.tsx`、`TransactionBatchEditModal.tsx` | `transactionOperations.test.ts`、`transactionGrouping.test.ts`、`databaseOperations.test.ts` |
-| AI 分类建议 | `src/services/aiClassification.ts`、`src/settings.ts`、`src/ui/TransactionOperationModal.tsx` | `aiClassification.test.ts`、SecretStorage 与真实 API 人工 smoke |
-| ItemView 草稿恢复 | `src/ui/editorDraft.ts`、`src/views/AssetTrackEditorView.ts`、`src/main.ts` | `editorDraft.test.ts`、`editorDraftRecovery.test.tsx`、`assetTrackEditorView.test.ts` |
-| 备份与恢复 | `src/services/BackupService.ts` | `backupService.test.ts` |
-| 数据目录生命周期 | `src/main.ts`、`src/services/workspacePath.ts` | `workspacePath.test.ts`、`settingsValidation.test.ts` |
-| 分析界面 | `src/ui/AnalysisView.tsx`、`analysisModel.ts` | `analysisModel.test.ts` |
-| 读取窗口与 SQLite 性能 | `src/domain/readWindows.ts`、`analysisReadModel.ts`、`productHistoryReadModel.ts`、`ruleReportReadModel.ts` | `readWindows.test.ts`、`databaseReadWindows.test.ts`、`sqliteSpike.test.ts` |
+| 财务公式与对账 | `src/domain/calculator.ts`、`src/database/analysisReadModel.ts`、`src/database/AssetTrackRepository.ts` | `tests/database/analysis.test.ts`、`tests/ui/models.test.ts` |
+| schema 与结构校验 | `src/database/schema.ts`、`DatabaseManager.ts` | `tests/database/schemaValidation.test.ts`、`tests/database/lifecycle.test.ts` |
+| 月份校验和保存 | `AssetTrackRepository.saveMonth()`、`saveMonthSection()`、`src/ui/MonthEditor.tsx`、`src/ui/month/` | `tests/database/month.test.ts`、`tests/database/monthDebtsAssets.test.ts`、`tests/ui/monthSpecialRows.test.tsx`、`tests/ui/draftRecovery.test.tsx` |
+| 账单解析与字段映射 | `src/domain/csv.ts` | `tests/import/csv.test.ts` |
+| 导入交互与草稿提交 | `CsvImportDialog.tsx`、`csvImportCommit.ts` | `tests/import/csvDialog.test.tsx`、`tests/import/csvCommit.test.ts` |
+| 规则工作台、商品统一与历史迁移 | `src/ui/RulesEditor.tsx`、`src/ui/rules/`、`src/ui/configuration/`、`RuleHistoryModal.tsx`、`RuleCreationModal.tsx`、`src/database/ruleReportReadModel.ts`、`productHistoryReadModel.ts`、`ruleHistoryReadModel.ts`、`AssetTrackRepository.ts`、`configurationWriteRepository.ts`、`historyWriteRepository.ts` | `tests/database/rules.test.ts`、`tests/database/history.test.ts`、`tests/ui/ruleHistory.test.tsx`、`tests/ui/primitives.test.tsx` |
+| 流水 Tab、汇总、多选与批量操作 | `src/domain/transactionOperations.ts`、`src/ui/MonthEditor.tsx`、`src/ui/month/MonthEditorTransactionsSection.tsx`、`TransactionTables.tsx`、`TransactionOperationModal.tsx`、`TransactionBatchEditModal.tsx` | `tests/domain/transactionOperations.test.ts`、`tests/ui/primitives.test.tsx`、`tests/database/operations.test.ts` |
+| AI 分类建议 | `src/services/aiClassification.ts`、`src/settings.ts`、`src/ui/TransactionOperationModal.tsx` | `tests/services/aiClassification.test.ts`、SecretStorage 与真实 API 人工 smoke |
+| ItemView 草稿恢复 | `src/ui/editorDraft.ts`、`src/views/AssetTrackEditorView.ts`、`src/main.ts` | `tests/ui/draftStore.test.ts`、`tests/ui/draftRecovery.test.tsx`、`tests/ui/editorView.test.ts` |
+| 备份与恢复 | `src/services/BackupService.ts` | `tests/services/backup.test.ts` |
+| 数据目录生命周期 | `src/main.ts`、`src/services/workspacePath.ts` | `tests/services/settings.test.ts` |
+| 分析界面 | `src/ui/AnalysisView.tsx`、`analysisModel.ts` | `tests/ui/models.test.ts` |
+| 读取窗口与 SQLite 性能 | `src/domain/readWindows.ts`、`analysisReadModel.ts`、`productHistoryReadModel.ts`、`ruleReportReadModel.ts` | `tests/domain/financial.test.ts`、`tests/database/analysis.test.ts`、`tests/performance/sqlite.test.ts` |
 
 表格 UI 维护应复用 `src/ui/TablePrimitives.tsx` 的统一表头原语，并遵守
 `docs/05-design-system.md` 的表格响应式规范。新增表格时，必须明确语义列宽、正文小字号、

@@ -12,7 +12,7 @@
 `src/domain/csv.ts` 负责 CSV/XLSX/XLS 的源文件解析和预览，不写数据库。
 `CsvInspection.empty_values` 标记每个表头是否出现空单元格；状态列的空字符串以
 `included_statuses: string[]` 中的 `""` 表示。缺少日期列使用 `__month_start__`，
-空日期单元格也规范化为当前月份 1 日，并在 `CsvImportStats.defaulted` 中计数。
+空日期单元格也规范化为当前月份 1 日，并在 `CsvImportStats.defaulted` 中计数。非空日期按行独立解析，允许同一文件混用四位/两位年份、中文年月日、紧凑日期、Excel 序列日期和带时间值。
 
 预览过滤独立统计跨月、状态过滤、忽略类型和无效行。无法解析的非空日期、空/非数字
 金额和未映射的收支值进入无效统计；空商品和零金额仍作为流水保留，分类匹配由

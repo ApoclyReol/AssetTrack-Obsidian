@@ -1,6 +1,6 @@
 {
   "name": "asset-track-obsidian",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -11,7 +11,7 @@
     "notices:update": "node scripts/third-party-notices.mjs",
     "release:check": "node scripts/validate-release.mjs",
     "test": "vitest run",
-    "test:perf": "vitest run tests/plugin/sqliteSpike.test.ts",
+    "test:perf": "vitest run tests/performance/sqlite.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

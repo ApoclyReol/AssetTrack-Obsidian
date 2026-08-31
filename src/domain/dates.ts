@@ -33,31 +33,147 @@ export function shiftMonth(month: string, delta: number): string {
   return `${String(year).padStart(4, "0")}-${String(value).padStart(2, "0")}`;
 }
 
-export function normalizeDate(value: unknown, defaultMonth?: string): string {
-  let raw = scalarText(value).trim();
-  if (!raw && defaultMonth) raw = `${defaultMonth}-01`;
-  raw = raw.split(/[T ]/, 1)[0]
+interface DateParts {
+  year: number;
+  month: number;
+  day: number;
+}
+
+function invalidDate(): never {
+  throw new AssetTrackError({ code: "date.invalid_format", status: 422 });
+}
+
+function formatDateParts({ year, month, day }: DateParts): string {
+  if (!Number.isInteger(year) || year < 1 || year > 9999
+    || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return invalidDate();
+  }
+  const date = new Date(0);
+  date.setUTCHours(0, 0, 0, 0);
+  date.setUTCFullYear(year, month - 1, day);
+  if (
+    date.getUTCFullYear() !== year
+    || date.getUTCMonth() !== month - 1
+    || date.getUTCDate() !== day
+  ) {
+    return invalidDate();
+  }
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function datePartsFromYearLast(
+  first: number,
+  second: number,
+  year: number
+): DateParts {
+  let month = first;
+  let day = second;
+  // If both components are at most 12, the two orders are indistinguishable.
+  // Keep the Excel-style month/day/year convention instead of using the target
+  // month, which could turn a genuinely cross-month row into an in-month row.
+  if (first > 12 && second <= 12) {
+    month = second;
+    day = first;
+  } else if (second > 12 && first <= 12) {
+    month = first;
+    day = second;
+  }
+  return { year, month, day };
+}
+
+function expandTwoDigitYear(year: number): number {
+  return year >= 70 ? 1900 + year : 2000 + year;
+}
+
+function parseDateParts(value: string): DateParts | null {
+  const normalized = value
+    .replace(/[／]/g, "/")
+    .replace(/[．。]/g, ".")
+    .replace(/[－–—]/g, "-")
     .replace(/年/g, "-")
     .replace(/月/g, "-")
     .replace(/日/g, "")
     .replace(/[/.]/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
-  if (/^\d{4}-\d{1,2}$/.test(raw)) raw += "-01";
-  const match = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(raw);
-  if (!match) throw new AssetTrackError({ code: "date.invalid_format", status: 422 });
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const date = new Date(Date.UTC(year, month - 1, day));
-  if (
-    date.getUTCFullYear() !== year
-    || date.getUTCMonth() !== month - 1
-    || date.getUTCDate() !== day
-  ) {
-    throw new AssetTrackError({ code: "date.invalid_format", status: 422 });
+
+  const compact = /^(\d{4})(\d{2})(\d{2})$/.exec(normalized);
+  if (compact) {
+    return {
+      year: Number(compact[1]),
+      month: Number(compact[2]),
+      day: Number(compact[3])
+    };
   }
-  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const yearFirst = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(normalized);
+  if (yearFirst) {
+    return {
+      year: Number(yearFirst[1]),
+      month: Number(yearFirst[2]),
+      day: Number(yearFirst[3])
+    };
+  }
+  const yearMonth = /^(\d{4})-(\d{1,2})$/.exec(normalized);
+  if (yearMonth) {
+    return {
+      year: Number(yearMonth[1]),
+      month: Number(yearMonth[2]),
+      day: 1
+    };
+  }
+  const yearLast = /^(\d{1,2})-(\d{1,2})-(\d{4})$/.exec(normalized);
+  if (yearLast) {
+    return datePartsFromYearLast(
+      Number(yearLast[1]),
+      Number(yearLast[2]),
+      Number(yearLast[3])
+    );
+  }
+  const shortYearLast = /^(\d{1,2})-(\d{1,2})-(\d{2})$/.exec(normalized);
+  if (shortYearLast) {
+    return datePartsFromYearLast(
+      Number(shortYearLast[1]),
+      Number(shortYearLast[2]),
+      expandTwoDigitYear(Number(shortYearLast[3]))
+    );
+  }
+  return null;
+}
+
+function parseExcelSerialDate(value: string): string | null {
+  if (!/^\d{5,7}(?:\.\d+)?$/.test(value)) return null;
+  const serial = Number(value);
+  if (!Number.isFinite(serial) || serial < 1 || serial > 2_958_465) return null;
+  const wholeDays = Math.floor(serial);
+  if (wholeDays === 60) return null;
+  const epoch = wholeDays < 60
+    ? Date.UTC(1899, 11, 31)
+    : Date.UTC(1899, 11, 30);
+  const date = new Date(epoch + wholeDays * 86_400_000);
+  return formatDateParts({
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate()
+  });
+}
+
+export function normalizeDate(value: unknown, defaultMonth?: string): string {
+  if (value instanceof Date) {
+    if (!Number.isFinite(value.getTime())) return invalidDate();
+    return formatDateParts({
+      year: value.getFullYear(),
+      month: value.getMonth() + 1,
+      day: value.getDate()
+    });
+  }
+  let raw = scalarText(value).trim();
+  if (!raw && defaultMonth) raw = `${defaultMonth}-01`;
+  const dateText = raw.split(/[Tt\s]/u, 1)[0];
+  const excelDate = parseExcelSerialDate(dateText);
+  if (excelDate) return excelDate;
+  const parts = parseDateParts(dateText);
+  if (!parts) return invalidDate();
+  return formatDateParts(parts);
 }
 
 export function monthEnd(month: string): string {

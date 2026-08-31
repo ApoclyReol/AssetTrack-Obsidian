@@ -257,8 +257,8 @@ function structuredErrorText(
       };
     case "date.invalid_format":
       return {
-        chinese: "日期必须是 YYYY-MM-DD 或 YYYY/MM/DD",
-        english: "Date must use YYYY-MM-DD or YYYY/MM/DD."
+        chinese: "无法识别日期格式；支持 YYYY-MM-DD、YYYY/MM/DD、MM/DD/YYYY、DD/MM/YYYY 或中文年月日",
+        english: "The date format is not recognized. Use YYYY-MM-DD, YYYY/MM/DD, MM/DD/YYYY, DD/MM/YYYY, or Chinese date notation."
       };
     case "month.invalid":
       return {
@@ -940,6 +940,8 @@ function englishError(raw: string): string {
     "日期为空": "Date is empty.",
     "日期必须是 YYYY-MM-DD 或 YYYY/MM/DD":
       "Date must use YYYY-MM-DD or YYYY/MM/DD.",
+    "使用 YYYY-MM-DD、YYYY/MM/DD、MM/DD/YYYY、DD/MM/YYYY 或中文年月日":
+      "Use YYYY-MM-DD, YYYY/MM/DD, MM/DD/YYYY, DD/MM/YYYY, or Chinese date notation.",
     "金额无法识别": "Amount is not recognizable.",
     "金额必须是有限数字": "Amount must be a finite number.",
     "金额不能为负数": "Amount cannot be negative.",
