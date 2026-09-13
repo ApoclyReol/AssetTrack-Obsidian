@@ -766,6 +766,11 @@ function structuredErrorText(
         chinese: "工作表没有可识别的表头",
         english: "The worksheet has no recognizable header row."
       };
+    case "csv.header_row_invalid":
+      return {
+        chinese: `第 ${paramText(params, "row")} 行不能作为表头，请选择包含账单列名的行。`,
+        english: `Row ${paramText(params, "row")} cannot be used as the header. Choose a row containing statement column names.`
+      };
     case "csv.extension_unsupported":
       return {
         chinese: "请选择 CSV、XLSX 或 XLS 格式的账单文件。",

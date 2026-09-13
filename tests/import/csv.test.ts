@@ -3,6 +3,52 @@ import * as XLSX from "xlsx";
 import { inspectCsv, previewCsv } from "../../src/domain/csv";
 
 describe("TypeScript CSV mapping", () => {
+  it("detects a statement header after descriptive preamble rows", () => {
+    const content = Buffer.from([
+      "微信支付账单明细",
+      "微信昵称：[花好月圆 明镜止水]",
+      "起始时间：[2026-08-13 00:00:00]",
+      "",
+      "共54笔记录",
+      "注：",
+      "--------微信支付账单明细列表--------",
+      "交易时间,交易类型,交易对方,商品,收/支,金额(元)",
+      "2026-08-13 09:00:00,消费,咖啡店,拿铁,支出,12.50"
+    ].join("\n"), "utf8");
+    const inspection = inspectCsv("2026-08", "wechat.csv", content);
+    expect(inspection.header_status).toBe("needs_confirmation");
+    expect(inspection.header_row).toBe(8);
+    expect(inspection.data_start_row).toBe(9);
+    expect(inspection.headers).toEqual([
+      "交易时间",
+      "交易类型",
+      "交易对方",
+      "商品",
+      "收/支",
+      "金额(元)"
+    ]);
+    expect(inspection.header_candidates?.[0]).toMatchObject({
+      row: 8,
+      confidence: "high"
+    });
+    const preview = previewCsv("2026-08", "wechat.csv", content, {
+      date_column: "交易时间",
+      product_column: "商品",
+      counterparty_column: "交易对方",
+      amount_column: "金额(元)",
+      type_column: "收/支",
+      type_values: { 支出: "支出" },
+      included_statuses: []
+    }, { header_row: 8 });
+    expect(preview.rows[0]).toMatchObject({
+      transaction_date: "2026-08-13",
+      product: "拿铁",
+      counterparty: "咖啡店",
+      amount: 12.5,
+      type: "支出"
+    });
+  });
+
   it("rejects duplicate headers instead of silently overwriting a source column", () => {
     const content = Buffer.from(
       "日期,商品,商品,金额,收支\n2026-01-01,午餐,午餐备注,20,付款\n",

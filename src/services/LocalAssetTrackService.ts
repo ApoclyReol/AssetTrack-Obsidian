@@ -34,7 +34,8 @@ import type {
 import type {
   CsvColumnMapping,
   CsvImportPreview,
-  CsvInspection
+  CsvInspection,
+  CsvStructureSelection
 } from "../types/csv";
 import type {
   CurrentAsset,
@@ -272,23 +273,26 @@ export class LocalAssetTrackService implements AssetTrackService {
   async inspectCsv(
     month: string,
     filename: string,
-    content: ArrayBuffer
+    content: ArrayBuffer,
+    selection?: CsvStructureSelection
   ): Promise<CsvInspection> {
-    return inspectCsv(month, filename, Buffer.from(content));
+    return inspectCsv(month, filename, Buffer.from(content), selection);
   }
 
   async previewMappedCsv(
     month: string,
     filename: string,
     content: ArrayBuffer,
-    mapping: CsvColumnMapping
+    mapping: CsvColumnMapping,
+    selection?: CsvStructureSelection
   ): Promise<CsvImportPreview> {
     this.ready();
     const preview = previewCsv(
       month,
       filename,
       Buffer.from(content),
-      mapping
+      mapping,
+      selection
     );
     const categories = this.repository.categories().rows;
     const byName = new Map(categories.map((category) => [category.name, category]));

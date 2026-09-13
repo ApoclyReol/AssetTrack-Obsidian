@@ -154,4 +154,70 @@ describe("CSV import dialog accessibility", () => {
     expect(within(dialog).getByText("不导入")).toBeTruthy();
     expect(within(dialog).getByText("另一条")).toBeTruthy();
   });
+
+  it("offers header row selection when the first row is not a reasonable header", async () => {
+    const onHeaderRowChange = vi.fn().mockResolvedValue({
+      ...inspection,
+      header_status: "normal",
+      header_confirmed: true,
+      header_row: 4,
+      data_start_row: 5,
+      raw_row_count: 5,
+      raw_rows: [
+        { row: 1, values: ["账单导出"] },
+        { row: 2, values: ["说明"] },
+        { row: 3, values: ["标题"] },
+        { row: 4, values: ["日期", "商品", "金额", "类型"] },
+        { row: 5, values: ["2026-07-01", "午餐", "20", "支出"] }
+      ],
+      header_candidates: [{
+        row: 4,
+        headers: ["日期", "商品", "金额", "类型"],
+        matched_fields: ["日期", "商品", "金额", "收支"],
+        score: 450,
+        confidence: "high"
+      }],
+      suggested_mapping: {
+        date_column: "日期",
+        product_column: "商品",
+        amount_column: "金额",
+        type_column: "类型"
+      }
+    });
+    const uncertainInspection: CsvInspection = {
+      ...inspection,
+      header_status: "needs_confirmation",
+      header_row: 4,
+      raw_row_count: 5,
+      raw_rows: [
+        { row: 1, values: ["账单导出"] },
+        { row: 2, values: ["说明"] },
+        { row: 3, values: ["标题"] },
+        { row: 4, values: ["日期", "商品", "金额", "类型"] },
+        { row: 5, values: ["2026-07-01", "午餐", "20", "支出"] }
+      ],
+      header_candidates: [{
+        row: 4,
+        headers: ["日期", "商品", "金额", "类型"],
+        matched_fields: ["日期", "商品", "金额", "收支"],
+        score: 450,
+        confidence: "high"
+      }]
+    };
+    render(
+      <CsvImportDialog
+        hostWindow={window}
+        inspection={uncertainInspection}
+        onCancel={vi.fn()}
+        onHeaderRowChange={onHeaderRowChange}
+        onPreview={vi.fn()}
+        onApply={vi.fn()}
+      />
+    );
+    expect(screen.getByText("需要确认表头位置")).toBeTruthy();
+    expect(screen.getByText("账单导出")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "确认此行" }));
+    await waitFor(() => expect(onHeaderRowChange).toHaveBeenCalledWith(4));
+    expect(screen.getByText("表头已确认")).toBeTruthy();
+  });
 });

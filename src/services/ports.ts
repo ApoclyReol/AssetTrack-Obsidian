@@ -23,7 +23,8 @@ import type {
 import type {
   CsvColumnMapping,
   CsvImportPreview,
-  CsvInspection
+  CsvInspection,
+  CsvStructureSelection
 } from "../types/csv";
 import type {
   CurrentAsset,
@@ -83,12 +84,18 @@ export interface MonthEditorPort extends RuleLookupPort, RuleWritePort {
   previewTransactionOperation(
     request: TransactionOperationPreviewRequest
   ): Promise<{ preview: OperationPreview; rows: Transaction[] }>;
-  inspectCsv(month: string, filename: string, content: ArrayBuffer): Promise<CsvInspection>;
+  inspectCsv(
+    month: string,
+    filename: string,
+    content: ArrayBuffer,
+    selection?: CsvStructureSelection
+  ): Promise<CsvInspection>;
   previewMappedCsv(
     month: string,
     filename: string,
     content: ArrayBuffer,
-    mapping: CsvColumnMapping
+    mapping: CsvColumnMapping,
+    selection?: CsvStructureSelection
   ): Promise<CsvImportPreview>;
   categories(): Promise<{ revision: number; rows: CategoryDefinition[] }>;
 }

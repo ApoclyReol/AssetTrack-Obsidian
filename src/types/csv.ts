@@ -20,6 +20,26 @@ export interface CsvMappingProfile {
   updated_at: string;
 }
 
+export type CsvHeaderStatus = "normal" | "needs_confirmation";
+
+export interface CsvHeaderCandidate {
+  row: number;
+  headers: string[];
+  matched_fields: string[];
+  score: number;
+  confidence: "high" | "medium" | "low";
+}
+
+export interface CsvRawRow {
+  row: number;
+  values: string[];
+}
+
+export interface CsvStructureSelection {
+  /** One-based source row number, matching the row number shown to users. */
+  header_row: number;
+}
+
 export type CsvImportFilterReason =
   | "outside_month"
   | "status_filtered"
@@ -41,6 +61,15 @@ export interface CsvInspection {
   sample_rows: Array<Record<string, string>>;
   distinct_values: Record<string, string[]>;
   empty_values: Record<string, boolean>;
+  empty_counts?: Record<string, number>;
+  value_counts?: Record<string, Record<string, number>>;
+  header_status?: CsvHeaderStatus;
+  header_confirmed?: boolean;
+  header_row?: number;
+  data_start_row?: number;
+  raw_row_count?: number;
+  raw_rows?: CsvRawRow[];
+  header_candidates?: CsvHeaderCandidate[];
   suggested_mapping: Partial<CsvColumnMapping>;
 }
 

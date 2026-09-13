@@ -504,6 +504,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
             csv.csvSource.inspection.header_signature
           )}
           onCancel={csv.cancelImport}
+          onHeaderRowChange={csv.selectCsvHeader}
           onPreview={csv.previewMappedCsv}
           onApply={csv.applyCsvPreview}
         />

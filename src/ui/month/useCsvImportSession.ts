@@ -14,7 +14,8 @@ import type {
   CsvColumnMapping,
   CsvImportPreview,
   CsvInspection,
-  ImportMode
+  ImportMode,
+  CsvStructureSelection
 } from "../../types/csv";
 import type {
   MonthSection,
@@ -61,7 +62,11 @@ export interface CsvImportSession {
   openImport: () => void;
   cancelImport: () => void;
   importCsv: (event: ChangeEvent<HTMLInputElement>) => Promise<void>;
-  previewMappedCsv: (mapping: CsvColumnMapping) => Promise<CsvImportPreview>;
+  selectCsvHeader: (headerRow: number) => Promise<CsvInspection>;
+  previewMappedCsv: (
+    mapping: CsvColumnMapping,
+    selection?: CsvStructureSelection
+  ) => Promise<CsvImportPreview>;
   applyCsvPreview: (
     response: CsvImportPreview,
     mode: ImportMode,
@@ -186,8 +191,35 @@ export function useCsvImportSession({
     }
   }, [activeSection, api, draft, isCurrentRequest, month, nextRequestSequence, setState]);
 
+  const selectCsvHeader = useCallback(async (
+    headerRow: number
+  ): Promise<CsvInspection> => {
+    if (!csvSource) {
+      throw new AssetTrackError({ code: "csv.file_not_selected", status: 422 });
+    }
+    const source = csvSource;
+    const sourceDraft = draft;
+    const sourceMonth = month;
+    const sourceSection = activeSection;
+    const sequence = nextRequestSequence();
+    throwIfContextChanged(sourceDraft, sourceMonth, sourceSection, source);
+    const inspection = await api.inspectCsv(
+      sourceMonth,
+      source.filename,
+      source.content,
+      { header_row: headerRow } satisfies CsvStructureSelection
+    );
+    if (!isCurrentRequest(sequence, sourceDraft, sourceMonth, sourceSection, source)) {
+      throwIfContextChanged(sourceDraft, sourceMonth, sourceSection, source);
+      throw new AssetTrackError({ code: "operation.preview_draft_mismatch", status: 409 });
+    }
+    setCsvSource({ ...source, inspection });
+    return inspection;
+  }, [activeSection, api, csvSource, draft, isCurrentRequest, month, nextRequestSequence, throwIfContextChanged]);
+
   const previewMappedCsv = useCallback(async (
-    mapping: CsvColumnMapping
+    mapping: CsvColumnMapping,
+    selection?: CsvStructureSelection
   ): Promise<CsvImportPreview> => {
     if (!csvSource) {
       throw new AssetTrackError({ code: "csv.file_not_selected", status: 422 });
@@ -205,7 +237,8 @@ export function useCsvImportSession({
       sourceMonth,
       source.filename,
       source.content,
-      mapping
+      mapping,
+      selection
     );
     if (!isCurrentRequest(sequence, sourceDraft, sourceMonth, sourceSection, source)) {
       throwIfContextChanged(sourceDraft, sourceMonth, sourceSection, source);
@@ -301,6 +334,7 @@ export function useCsvImportSession({
     openImport,
     cancelImport,
     importCsv,
+    selectCsvHeader,
     previewMappedCsv,
     applyCsvPreview
   };

@@ -5,7 +5,10 @@ import type {
   CsvImportFilterReason,
   CsvImportFilteredRow,
   CsvImportPreview,
-  CsvInspection
+  CsvInspection,
+  CsvHeaderCandidate,
+  CsvRawRow,
+  CsvStructureSelection
 } from "../types/csv";
 import type {
   Transaction
@@ -15,6 +18,26 @@ import { isMonth, normalizeDate } from "./dates";
 import { AssetTrackError } from "../application/errors";
 
 const ALLOWED_TYPES = new Set(["支出", "收入", "代付", "加仓", "提现"]);
+const HEADER_SCAN_LIMIT = 200;
+const RAW_PREVIEW_LIMIT = 120;
+const CSV_FIELD_ALIASES: Record<string, string[]> = {
+  date_column: ["日期", "交易时间", "时间", "创建时间", "付款时间"],
+  product_column: ["商品", "商品说明", "商品/说明", "商品名称", "备注"],
+  counterparty_column: ["交易对方", "对方", "商户", "商家名称", "收款方"],
+  amount_column: ["金额", "金额(元)", "交易金额", "交易金额(元)"],
+  type_column: ["收支", "收/支", "类型", "交易类型", "收支类型", "资金流向"],
+  category_column: ["分类", "交易分类"],
+  status_column: ["交易状态", "当前状态", "状态"]
+};
+const CSV_FIELD_LABELS: Record<string, string> = {
+  date_column: "日期",
+  product_column: "商品",
+  counterparty_column: "对方",
+  amount_column: "金额",
+  type_column: "收支",
+  category_column: "分类",
+  status_column: "状态"
+};
 
 function parseAmount(value: string): number | null {
   const source = value.trim()
@@ -49,7 +72,7 @@ function delimiterFor(content: string): string {
   )[0];
 }
 
-function parseRows(content: string): string[][] {
+function parseRows(content: string, preserveBlankRows = false): string[][] {
   const delimiter = delimiterFor(content);
   const rows: string[][] = [];
   let row: string[] = [];
@@ -70,15 +93,18 @@ function parseRows(content: string): string[][] {
     } else if ((character === "\n" || character === "\r") && !quoted) {
       if (character === "\r" && content[index + 1] === "\n") index += 1;
       row.push(value);
-      if (row.some((cell) => cell.trim())) rows.push(row);
+      if (preserveBlankRows || row.some((cell) => cell.trim())) rows.push(row);
       row = [];
       value = "";
     } else {
       value += character;
     }
   }
+  const trailingBreak = /(?:\r\n|\r|\n)$/.test(content);
   row.push(value);
-  if (row.some((cell) => cell.trim())) rows.push(row);
+  if (row.some((cell) => cell.trim()) || (preserveBlankRows && !trailingBreak && content.length > 0)) {
+    rows.push(row);
+  }
   return rows;
 }
 
@@ -100,30 +126,29 @@ function validateHeaders(headers: string[]): void {
   }
 }
 
-function csvObjects(content: Buffer): {
-  headers: string[];
-  rows: Array<Record<string, string>>;
-} {
-  const parsed = parseRows(decodeCsv(content));
-  if (!parsed.length) throw new AssetTrackError({ code: "csv.header_missing", status: 422 });
-  const columns = parsed[0]
-    .map((header, index) => ({
-      header: header.trim().replace(/^\ufeff/, ""),
-      index
-    }))
-    .filter(({ header }) => header && !header.startsWith("Unnamed:"));
-  const headers = columns.map(({ header }) => header);
-  validateHeaders(headers);
-  const rows = parsed.slice(1).map((values) =>
-    Object.fromEntries(columns.map(({ header, index }) => [header, values[index]?.trim() ?? ""]))
-  );
-  return { headers, rows };
+interface SourceMatrix {
+  rows: string[][];
+  sheet_name?: string;
 }
 
-function workbookObjects(content: Buffer): {
+interface SourceObjectRow {
+  row_number: number;
+  values: Record<string, string>;
+}
+
+interface SourceObjects {
   headers: string[];
-  rows: Array<Record<string, string>>;
-} {
+  rows: SourceObjectRow[];
+  raw_rows: string[][];
+  header_row: number;
+  sheet_name?: string;
+}
+
+function csvMatrix(content: Buffer): SourceMatrix {
+  return { rows: parseRows(decodeCsv(content), true) };
+}
+
+function workbookMatrix(content: Buffer): SourceMatrix {
   const workbook = XLSX.read(content, {
     type: "buffer",
     cellDates: false,
@@ -133,62 +158,248 @@ function workbookObjects(content: Buffer): {
   if (!sheetName) throw new AssetTrackError({ code: "csv.worksheet_missing", status: 422 });
   const values = XLSX.utils.sheet_to_json<Array<string | number | boolean>>(
     workbook.Sheets[sheetName],
-    { header: 1, raw: false, defval: "", blankrows: false }
+    { header: 1, raw: false, defval: "", blankrows: true }
   );
   if (!values.length) throw new AssetTrackError({ code: "csv.worksheet_header_missing", status: 422 });
-  const columns = values[0]
+  return {
+    sheet_name: sheetName,
+    rows: values.map((row) => row.map((value) => String(value ?? "").trim()))
+  };
+}
+
+function sourceMatrix(filename: string, content: Buffer): SourceMatrix {
+  const extension = filename.toLocaleLowerCase("en-US").split(".").at(-1);
+  if (extension === "csv") return csvMatrix(content);
+  if (extension === "xlsx" || extension === "xls") {
+    return workbookMatrix(content);
+  }
+  throw new AssetTrackError({ code: "csv.extension_unsupported", status: 422 });
+}
+
+function rowHasValue(row: string[]): boolean {
+  return row.some((value) => value.trim());
+}
+
+function normalizeHeader(value: string): string {
+  return value
+    .trim()
+    .replace(/^\ufeff/, "")
+    .replace(/\s+/g, "")
+    .replace(/（/g, "(")
+    .replace(/）/g, ")")
+    .toLocaleLowerCase("zh-CN");
+}
+
+function columnsFor(values: string[]): Array<{ header: string; index: number }> {
+  return values
     .map((value, index) => ({
-      header: String(value).trim(),
+      header: value.trim().replace(/^\ufeff/, ""),
       index
     }))
     .filter(({ header }) => header && !header.startsWith("Unnamed:"));
-  const headers = columns.map(({ header }) => header);
-  validateHeaders(headers);
-  const rows = values.slice(1).map((row) =>
-    Object.fromEntries(
-      columns.map(({ header, index }) => [header, String(row[index] ?? "").trim()])
-    )
-  );
-  return { headers, rows };
 }
 
-function sourceObjects(filename: string, content: Buffer): {
-  headers: string[];
-  rows: Array<Record<string, string>>;
-} {
-  const extension = filename.toLocaleLowerCase("en-US").split(".").at(-1);
-  if (extension === "csv") return csvObjects(content);
-  if (extension === "xlsx" || extension === "xls") {
-    return workbookObjects(content);
+function matchedHeaderFields(headers: string[]): string[] {
+  const normalizedHeaders = headers.map(normalizeHeader);
+  return Object.entries(CSV_FIELD_ALIASES)
+    .filter(([, aliases]) => aliases.some((alias) =>
+      normalizedHeaders.includes(normalizeHeader(alias))
+    ))
+    .map(([field]) => CSV_FIELD_LABELS[field] ?? field);
+}
+
+function headerFieldIndex(
+  columns: Array<{ header: string; index: number }>,
+  field: string
+): number | undefined {
+  const aliases = CSV_FIELD_ALIASES[field] ?? [];
+  const column = columns.find(({ header }) => aliases.some((alias) =>
+    normalizeHeader(alias) === normalizeHeader(header)
+  ));
+  return column?.index;
+}
+
+function rowLooksLikeData(
+  values: string[],
+  columns: Array<{ header: string; index: number }>
+): boolean {
+  const dateIndex = headerFieldIndex(columns, "date_column");
+  const amountIndex = headerFieldIndex(columns, "amount_column");
+  const dateValue = dateIndex === undefined ? "" : values[dateIndex]?.trim() ?? "";
+  const amountValue = amountIndex === undefined ? "" : values[amountIndex]?.trim() ?? "";
+  const dateLike = /\d{2,4}[年/-]\d{1,2}[月/-]\d{1,2}/.test(dateValue)
+    || /\d{1,2}[月/]\d{1,2}/.test(dateValue);
+  const amountLike = amountValue ? parseAmount(amountValue) !== null : false;
+  return dateLike || amountLike || values.filter((value) => value.trim()).length >= 3;
+}
+
+function headerCandidateFor(
+  rows: string[][],
+  index: number
+): CsvHeaderCandidate | null {
+  const columns = columnsFor(rows[index] ?? []);
+  const headers = columns.map(({ header }) => header);
+  if (headers.length < 2) return null;
+  try {
+    validateHeaders(headers);
+  } catch {
+    return null;
   }
-  throw new AssetTrackError({ code: "csv.extension_unsupported", status: 422 });
+  const matchedFields = matchedHeaderFields(headers);
+  if (!matchedFields.length) return null;
+  const dataLikeRows = rows
+    .slice(index + 1, index + 4)
+    .filter((row) => rowLooksLikeData(row, columns)).length;
+  const score = matchedFields.length * 100
+    + Math.min(headers.length, 10)
+    + dataLikeRows * 10;
+  const confidence = matchedFields.length >= 4 && dataLikeRows > 0
+    ? "high"
+    : matchedFields.length >= 3
+      ? "medium"
+      : "low";
+  return {
+    row: index + 1,
+    headers,
+    matched_fields: matchedFields,
+    score,
+    confidence
+  };
+}
+
+function headerCandidatesFor(rows: string[][]): CsvHeaderCandidate[] {
+  return rows
+    .slice(0, HEADER_SCAN_LIMIT)
+    .flatMap((_, index) => {
+      const candidate = headerCandidateFor(rows, index);
+      return candidate ? [candidate] : [];
+    })
+    .sort((left, right) => right.score - left.score || left.row - right.row)
+    .slice(0, 8);
+}
+
+function firstNonEmptyRow(rows: string[][]): number {
+  const index = rows.findIndex(rowHasValue);
+  return index < 0 ? 1 : index + 1;
+}
+
+function resolvedHeaderRow(
+  rows: string[][],
+  candidates: CsvHeaderCandidate[],
+  selection?: CsvStructureSelection
+): number {
+  const row = selection?.header_row ?? candidates[0]?.row ?? firstNonEmptyRow(rows);
+  if (!Number.isInteger(row) || row < 1 || row > rows.length) {
+    throw new AssetTrackError({
+      code: "csv.header_row_invalid",
+      status: 422,
+      params: { row }
+    });
+  }
+  return row;
+}
+
+function objectsFromMatrix(rows: string[][], headerRow: number): SourceObjects {
+  const headerValues = rows[headerRow - 1];
+  if (!headerValues) {
+    throw new AssetTrackError({
+      code: "csv.header_row_invalid",
+      status: 422,
+      params: { row: headerRow }
+    });
+  }
+  const columns = columnsFor(headerValues);
+  const headers = columns.map(({ header }) => header);
+  validateHeaders(headers);
+  const sourceRows = rows.slice(headerRow).flatMap((values, index) => {
+    if (!rowHasValue(values)) return [];
+    return [{
+      row_number: headerRow + index + 1,
+      values: Object.fromEntries(
+        columns.map(({ header, index: columnIndex }) => [
+          header,
+          values[columnIndex]?.trim() ?? ""
+        ])
+      )
+    }];
+  });
+  return {
+    headers,
+    rows: sourceRows,
+    raw_rows: rows,
+    header_row: headerRow
+  };
+}
+
+function sourceObjects(
+  filename: string,
+  content: Buffer,
+  selection?: CsvStructureSelection
+): SourceObjects {
+  const source = sourceMatrix(filename, content);
+  if (!source.rows.length) {
+    throw new AssetTrackError({ code: "csv.header_missing", status: 422 });
+  }
+  const candidates = headerCandidatesFor(source.rows);
+  const headerRow = resolvedHeaderRow(source.rows, candidates, selection);
+  const parsed = objectsFromMatrix(source.rows, headerRow);
+  return { ...parsed, sheet_name: source.sheet_name };
+}
+
+function rawRowsForDisplay(
+  rows: string[][],
+  headerRow: number,
+  candidates: CsvHeaderCandidate[]
+): CsvRawRow[] {
+  const indexes = new Set<number>();
+  for (let index = 0; index < Math.min(rows.length, RAW_PREVIEW_LIMIT); index += 1) {
+    indexes.add(index);
+  }
+  for (const candidate of candidates) {
+    for (let index = Math.max(0, candidate.row - 3); index <= Math.min(rows.length - 1, candidate.row + 1); index += 1) {
+      indexes.add(index);
+    }
+  }
+  for (let index = Math.max(0, headerRow - 3); index <= Math.min(rows.length - 1, headerRow + 1); index += 1) {
+    indexes.add(index);
+  }
+  return [...indexes]
+    .sort((left, right) => left - right)
+    .map((index) => ({ row: index + 1, values: rows[index] ?? [] }));
 }
 
 export function inspectCsv(
   month: string,
   filename: string,
-  content: Buffer
+  content: Buffer,
+  selection?: CsvStructureSelection
 ): CsvInspection {
   if (!isMonth(month)) {
     throw new AssetTrackError({ code: "month.invalid", status: 422, params: { month } });
   }
-  const { headers, rows } = sourceObjects(filename, content);
+  const source = sourceMatrix(filename, content);
+  if (!source.rows.length) {
+    throw new AssetTrackError({ code: "csv.header_missing", status: 422 });
+  }
+  const candidates = headerCandidatesFor(source.rows);
+  const headerRow = resolvedHeaderRow(source.rows, candidates, selection);
+  const parsed = objectsFromMatrix(source.rows, headerRow);
+  const { headers } = parsed;
+  const rows = parsed.rows.map(({ values }) => values);
   const signature = createHash("sha256")
     .update(JSON.stringify(headers), "utf8")
     .digest("hex");
-  const aliases: Record<string, string[]> = {
-    date_column: ["日期", "交易时间", "时间", "创建时间", "付款时间"],
-    product_column: ["商品", "商品说明", "商品/说明", "商品名称", "备注"],
-    counterparty_column: ["交易对方", "对方", "商户", "商家名称", "收款方"],
-    amount_column: ["金额", "金额(元)", "交易金额", "交易金额(元)"],
-    type_column: ["收支", "收/支", "类型", "资金流向"],
-    category_column: ["分类", "交易分类"],
-    status_column: ["交易状态", "状态"]
-  };
   const suggested: Partial<CsvColumnMapping> = {};
-  for (const [field, candidates] of Object.entries(aliases)) {
-    const match = candidates.find((candidate) => headers.includes(candidate));
-    if (match) (suggested as Record<string, unknown>)[field] = match;
+  for (const [field, aliases] of Object.entries(CSV_FIELD_ALIASES)) {
+    const match = aliases.find((alias) => headers.some((header) =>
+      normalizeHeader(header) === normalizeHeader(alias)
+    ));
+    if (match) {
+      const matchedHeader = headers.find((header) =>
+        normalizeHeader(header) === normalizeHeader(match)
+      );
+      if (matchedHeader) (suggested as Record<string, unknown>)[field] = matchedHeader;
+    }
   }
   if (
     ["商品", "收支", "金额"].every((header) => headers.includes(header))
@@ -204,17 +415,35 @@ export function inspectCsv(
   ) {
     suggested.date_column = "__month_start__";
   }
+  const bestCandidate = candidates[0];
+  const firstRowIsReasonable = bestCandidate?.row === 1
+    && bestCandidate.confidence !== "low";
   return {
     month,
     filename,
     headers,
     header_signature: signature,
-    row_count: rows.length,
+    row_count: parsed.rows.length,
     sample_rows: rows.slice(0, 8),
     empty_values: Object.fromEntries(headers.map((header) => [
       header,
       rows.some((row) => !(row[header] ?? "").trim())
     ])),
+    empty_counts: Object.fromEntries(headers.map((header) => [
+      header,
+      rows.reduce(
+        (count, row) => count + (!(row[header] ?? "").trim() ? 1 : 0),
+        0
+      )
+    ])),
+    value_counts: Object.fromEntries(headers.map((header) => {
+      const counts: Record<string, number> = {};
+      for (const row of rows) {
+        const value = row[header]?.trim() ?? "";
+        if (value) counts[value] = (counts[value] ?? 0) + 1;
+      }
+      return [header, counts];
+    })),
     distinct_values: Object.fromEntries(headers.map((header) => {
       const values: string[] = [];
       const seen = new Set<string>();
@@ -227,6 +456,13 @@ export function inspectCsv(
       }
       return [header, values];
     })),
+    header_status: selection || firstRowIsReasonable ? "normal" : "needs_confirmation",
+    header_confirmed: Boolean(selection),
+    header_row: headerRow,
+    data_start_row: headerRow + 1,
+    raw_row_count: source.rows.length,
+    raw_rows: rawRowsForDisplay(source.rows, headerRow, candidates),
+    header_candidates: candidates,
     suggested_mapping: suggested
   };
 }
@@ -235,12 +471,13 @@ export function previewCsv(
   month: string,
   filename: string,
   content: Buffer,
-  mapping: CsvColumnMapping
+  mapping: CsvColumnMapping,
+  selection?: CsvStructureSelection
 ): CsvImportPreview {
   if (!isMonth(month)) {
     throw new AssetTrackError({ code: "month.invalid", status: 422, params: { month } });
   }
-  const { headers, rows: sourceRows } = sourceObjects(filename, content);
+  const { headers, rows: sourceRows } = sourceObjects(filename, content, selection);
   const required: Array<[keyof CsvColumnMapping, string]> = [
     ["date_column", "日期"],
     ["product_column", "商品"],
@@ -308,26 +545,27 @@ export function previewCsv(
   };
   const rows: Transaction[] = [];
   const includedStatuses = new Set(mapping.included_statuses ?? []);
-  sourceRows.forEach((source, sourceIndex) => {
-    const rowNumber = sourceIndex + 2;
-    const status = mapping.status_column ? source[mapping.status_column]?.trim() ?? "" : "";
+  sourceRows.forEach((source) => {
+    const rowNumber = source.row_number;
+    const sourceValues = source.values;
+    const status = mapping.status_column ? sourceValues[mapping.status_column]?.trim() ?? "" : "";
     if (mapping.status_column && !includedStatuses.has(status)) {
-      recordFiltered("status_filtered", rowNumber, source, { row: rowNumber, status });
+      recordFiltered("status_filtered", rowNumber, sourceValues, { row: rowNumber, status });
       return;
     }
-    const rawType = source[mapping.type_column]?.trim() ?? "";
+    const rawType = sourceValues[mapping.type_column]?.trim() ?? "";
     const type = String(mapping.type_values?.[rawType] ?? "").trim();
     if (type === "忽略") {
-      recordFiltered("ignored_type", rowNumber, source, { row: rowNumber, value: rawType });
+      recordFiltered("ignored_type", rowNumber, sourceValues, { row: rowNumber, value: rawType });
       return;
     }
     if (!ALLOWED_TYPES.has(type)) {
-      recordFiltered("invalid", rowNumber, source, { row: rowNumber, reason: `收支值“${rawType}”尚未映射` });
+      recordFiltered("invalid", rowNumber, sourceValues, { row: rowNumber, reason: `收支值“${rawType}”尚未映射` });
       return;
     }
     const sourceDate = mapping.date_column === "__month_start__"
       ? `${month}-01`
-      : source[mapping.date_column] ?? "";
+      : sourceValues[mapping.date_column] ?? "";
     const rawDate = String(sourceDate);
     const dateWasDefaulted = mapping.date_column === "__month_start__"
       || !rawDate.trim();
@@ -335,7 +573,7 @@ export function previewCsv(
     try {
       date = normalizeDate(rawDate, month);
     } catch {
-      recordFiltered("invalid", rowNumber, source, { row: rowNumber, reason: `日期无法识别：${rawDate}` });
+      recordFiltered("invalid", rowNumber, sourceValues, { row: rowNumber, reason: `日期无法识别：${rawDate}` });
       return;
     }
     if (dateWasDefaulted) {
@@ -345,23 +583,23 @@ export function previewCsv(
       }
     }
     if (date.slice(0, 7) !== month) {
-      recordFiltered("outside_month", rowNumber, source, { row: rowNumber, date });
+      recordFiltered("outside_month", rowNumber, sourceValues, { row: rowNumber, date });
       return;
     }
-    const product = source[mapping.product_column]?.trim() ?? "";
-    const rawAmount = source[mapping.amount_column] ?? "";
+    const product = sourceValues[mapping.product_column]?.trim() ?? "";
+    const rawAmount = sourceValues[mapping.amount_column] ?? "";
     const amount = parseAmount(rawAmount);
     if (amount === null) {
-      recordFiltered("invalid", rowNumber, source, { row: rowNumber, reason: "金额为空或无法识别" });
+      recordFiltered("invalid", rowNumber, sourceValues, { row: rowNumber, reason: "金额为空或无法识别" });
       return;
     }
     const category = ["加仓", "提现"].includes(type)
       ? ""
       : mapping.category_column
-        ? source[mapping.category_column]?.trim() ?? ""
+        ? sourceValues[mapping.category_column]?.trim() ?? ""
         : "";
     rows.push({
-      client_id: `import:${randomUUID()}:${sourceIndex}`,
+      client_id: `import:${randomUUID()}:${rowNumber}`,
       source: filename,
       transaction_date: date,
       product,
@@ -370,7 +608,7 @@ export function previewCsv(
       category_key: null,
       category,
       counterparty: mapping.counterparty_column
-        ? source[mapping.counterparty_column]?.trim() ?? ""
+        ? sourceValues[mapping.counterparty_column]?.trim() ?? ""
         : ""
     });
   });
