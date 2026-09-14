@@ -50,20 +50,63 @@ export const BUSINESS_VALUE_EN: Readonly<Record<string, string>> = {
   "平账": "Reconciled",
   "警告": "Warning",
   "错误": "Error",
-  "规则": "Rule",
   "空": "(empty)",
   "日期": "Date",
   "金额": "Amount",
+  "收支": "Type",
+  "类型": "Type",
+  "状态": "Status",
+  "账户": "Account",
+  "对方": "Counterparty",
   "分类": "Category",
   "商品": "Item",
   "交易对方": "Counterparty",
   "交易对手": "Counterparty",
+  "来源": "Source",
+  "规则": "Rule",
+  "流水": "Transaction",
+  "组合规则": "Combined rule",
+  "商品规则": "Item rule",
+  "交易对手规则": "Counterparty rule",
   "字段": "Field",
+  "备注": "Notes",
   "无效": "Invalid"
 };
 
 export function businessLabel(value: string): string {
   return localizedValue(value, BUSINESS_VALUE_EN);
+}
+
+const FIELD_LABELS: Readonly<Record<string, { chinese: string; english: string }>> = {
+  transaction_date: { chinese: "日期", english: "Date" },
+  date_column: { chinese: "日期/时间", english: "date/time" },
+  type: { chinese: "收支", english: "Type" },
+  type_column: { chinese: "收支方向", english: "transaction type" },
+  counterparty: { chinese: "交易对手", english: "Counterparty" },
+  counterparty_column: { chinese: "交易对手", english: "counterparty" },
+  product: { chinese: "商品", english: "Item" },
+  product_column: { chinese: "商品或说明", english: "item or description" },
+  category: { chinese: "分类", english: "Category" },
+  category_key: { chinese: "分类", english: "Category" },
+  category_column: { chinese: "分类", english: "category" },
+  amount: { chinese: "金额", english: "Amount" },
+  amount_column: { chinese: "金额", english: "amount" },
+  account: { chinese: "账户", english: "Account" },
+  account_key: { chinese: "账户", english: "Account" },
+  status: { chinese: "状态", english: "Status" },
+  status_column: { chinese: "交易状态", english: "transaction status" },
+  source: { chinese: "来源", english: "Source" },
+  rule: { chinese: "规则", english: "Rule" },
+  规则: { chinese: "规则", english: "Rule" },
+  value: { chinese: "值", english: "value" },
+  reason: { chinese: "原因", english: "reason" }
+};
+
+/** Translate persisted/domain field identifiers without translating user values. */
+export function fieldLabel(value: string): string {
+  const normalized = value.trim();
+  const label = FIELD_LABELS[normalized];
+  return label ? t(label.chinese, label.english) : businessLabel(normalized);
 }
 
 function paramText(params: AssetTrackErrorParams, key: string, fallback = "—"): string {
@@ -766,6 +809,11 @@ function structuredErrorText(
         chinese: "工作表没有可识别的表头",
         english: "The worksheet has no recognizable header row."
       };
+    case "csv.worksheet_invalid":
+      return {
+        chinese: `没有找到工作表“${paramText(params, "worksheet")}”，请重新选择工作表。`,
+        english: `The worksheet “${paramText(params, "worksheet")}” was not found. Choose another worksheet.`
+      };
     case "csv.header_row_invalid":
       return {
         chinese: `第 ${paramText(params, "row")} 行不能作为表头，请选择包含账单列名的行。`,
@@ -964,8 +1012,36 @@ function englishError(raw: string): string {
       "Choose Expense, Income, Paid on behalf, Investment contribution, or Investment withdrawal.",
     "特殊类型流水不能设置分类":
       "Special transaction types cannot have a category.",
+    "理财流水不能设置分类":
+      "Investment transactions cannot have a category.",
     "加仓、提现的分类必须为空":
       "Investment contribution and investment withdrawal transactions must have an empty category.",
+    "加仓或提现必须选择有效的理财账户":
+      "Choose a valid investment account for investment contribution or withdrawal transactions.",
+    "选择一个理财账户后再保存":
+      "Select an investment account before saving.",
+    "分类为空": "Category is empty.",
+    "规则结果与当前值相同": "The rule result is the same as the current value.",
+    "位于本次保护范围": "This row is protected from this operation.",
+    "该流水类型不适用分类": "This transaction type does not support categories.",
+    "该操作没有可执行的流水变更": "This operation has no transaction changes to apply.",
+    "规则存在冲突，未自动覆盖": "Rules conflict; no automatic override was applied.",
+    "没有匹配规则": "No matching rule.",
+    "AI 结果需要人工确认": "The AI result needs human review.",
+    "AI 无法分类": "AI could not classify this transaction.",
+    "AI 结果与当前值相同": "The AI result is the same as the current value.",
+    "AI 未返回对应流水结果": "AI did not return a result for the corresponding transaction.",
+    "AI 返回字段类型或取值无效": "AI returned an invalid field type or value.",
+    "AI 返回了无效或停用分类": "AI returned an invalid or inactive category.",
+    "AI confidence 无效": "AI returned an invalid confidence value.",
+    "AI 返回结果缺少流水标识": "The AI result is missing a transaction identifier.",
+    "AI 返回了无效的流水 id": "AI returned an invalid transaction ID.",
+    "AI 返回了无效的流水 key": "AI returned an invalid transaction key.",
+    "AI 返回的流水 id 不属于本次选择或对应多条流水": "The AI transaction ID was not selected or matches multiple transactions.",
+    "AI 返回的流水 key 不属于本次选择或对应多条流水": "The AI transaction key was not selected or matches multiple transactions.",
+    "AI 返回的流水 id 与 key 指向不同流水": "The AI transaction ID and key point to different transactions.",
+    "AI 为同一流水返回了重复结果": "AI returned duplicate results for the same transaction.",
+    "保存前后没有字段变化": "No fields changed between the saved and current values.",
     "API 不完整": "The node:sqlite API is incomplete.",
     "Asset-track 数据目录必须是 Vault 内的相对路径":
       "The Asset Track data directory must be a relative path inside the vault.",
@@ -1037,6 +1113,25 @@ function englishError(raw: string): string {
   if (invalidType) {
     const value = invalidType[1] === "空" ? "(empty)" : businessLabel(invalidType[1]);
     return `Invalid transaction type: ${value}`;
+  }
+  const conversionSource = /^只有(收入|代付)流水可以执行此转换$/.exec(raw);
+  if (conversionSource) {
+    return `Only ${businessLabel(conversionSource[1])} transactions can be converted this way.`;
+  }
+  const ruleConflict = /^(组合规则|商品规则|交易对手规则)(命中了不同分类|存在重复规则)$/.exec(raw);
+  if (ruleConflict) {
+    const reason = ruleConflict[2] === "命中了不同分类"
+      ? "matched different categories"
+      : "contains duplicate rules";
+    return `${businessLabel(ruleConflict[1])} ${reason}.`;
+  }
+  const ruleMatched = /^(组合规则|商品规则|交易对手规则)确定命中(?:，覆盖 (.+) )?$/.exec(raw);
+  if (ruleMatched) {
+    return `${businessLabel(ruleMatched[1])} matched${ruleMatched[2] ? `; lower-priority rules ${ruleMatched[2]} are covered` : ""}.`;
+  }
+  const rewriteConflict = /^重写结果会再次命中最高优先级规则 (.+)，(且目标分类不同|但分类相同)$/.exec(raw);
+  if (rewriteConflict) {
+    return `The rewrite result would match the highest-priority rule ${rewriteConflict[1]}; the target category ${rewriteConflict[2] === "且目标分类不同" ? "differs" : "is the same"}.`;
   }
   const missingCategory = /^(支出|收入)未选择有效分类$/.exec(raw);
   if (missingCategory) return `${businessLabel(missingCategory[1])} has no valid category selected.`;

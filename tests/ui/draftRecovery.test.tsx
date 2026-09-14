@@ -20,9 +20,11 @@ import type {
   SavedRule
 } from "../../src/types/rules";
 import {
+  AssetTrackEditorApp,
   MonthEditor,
   RulesEditor
 } from "../../src/ui/AssetTrackEditorApp";
+import type { EditorShellPort } from "../../src/services/ports";
 import type { RulesEditorHandle } from "../../src/ui/RulesEditor";
 import type {
   MonthEditorDraftSnapshot,
@@ -207,6 +209,165 @@ function configurationApi(overrides: Partial<ConfigurationEditorPort> = {}): Con
 }
 
 describe("editor draft restoration", () => {
+  it("keeps a draft month selectable in records after opening from monthly analysis", async () => {
+    const month = vi.fn((targetMonth: string) => Promise.resolve({
+      ...monthWorkspace(1),
+      month: targetMonth
+    }));
+    const api = {
+      months: vi.fn().mockResolvedValue({
+        months: ["2026-08", "2026-09"],
+        saved_months: ["2026-08"],
+        draft_month: "2026-09",
+        next_target: "2026-10",
+        max_creatable_month: "2026-10",
+        can_create: false,
+        reason: { code: "month.draft_exists", params: { month: "2026-09" } }
+      }),
+      month,
+      ruleWorkspaceShell: vi.fn().mockResolvedValue({
+        categories_revision: 1,
+        rules_revision: 1,
+        categories: [],
+        rules: []
+      }),
+      validateTransactions: vi.fn().mockResolvedValue({ issues: [] })
+    } as unknown as EditorShellPort;
+
+    render(
+      <AssetTrackEditorApp
+        app={{} as App}
+        api={api}
+        settings={{
+          dataDirectory: "Asset-track",
+          csvMappings: [],
+          baseCurrency: "CNY",
+          currencyFormat: "standard",
+          reconciliationTolerance: 100,
+          largeExpenseThreshold: 1000
+        }}
+        hostWindow={window}
+        confirmAction={vi.fn().mockResolvedValue(true)}
+        chooseAction={vi.fn().mockResolvedValue("cancel")}
+        initialMode="transactions"
+        initialAnalysisMode="monthly"
+        initialMonth="2026-08"
+        onSessionChange={vi.fn()}
+        onStateChange={vi.fn()}
+        notifyDataChanged={vi.fn()}
+        subscribeDataChanges={vi.fn(() => () => undefined)}
+        getCsvMapping={vi.fn()}
+        saveCsvMapping={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    const monthSelect = await screen.findByRole("combobox", { name: "编辑月份" });
+    await waitFor(() => expect((monthSelect as HTMLSelectElement).value).toBe("2026-08"));
+
+    fireEvent.change(monthSelect, { target: { value: "2026-09" } });
+
+    await waitFor(() => expect((monthSelect as HTMLSelectElement).value).toBe("2026-09"));
+    expect(month).toHaveBeenCalledWith("2026-09");
+  });
+
+  it("jumps to a created month and reloads the previous month after deletion", async () => {
+    const emptyDraft: MonthWorkspace = {
+      ...monthWorkspace(0),
+      month: "2026-09",
+      status: "draft",
+      transactions: [],
+      cash_accounts: [],
+      investment_accounts: []
+    };
+    const month = vi.fn((targetMonth: string) => Promise.resolve(
+      targetMonth === "2026-09" ? emptyDraft : { ...monthWorkspace(1), month: targetMonth }
+    ));
+    const policies = [
+      {
+        months: ["2026-08"],
+        saved_months: ["2026-08"],
+        draft_month: null,
+        next_target: "2026-09",
+        max_creatable_month: "2026-10",
+        can_create: true,
+        reason: null
+      },
+      {
+        months: ["2026-08", "2026-09"],
+        saved_months: ["2026-08"],
+        draft_month: "2026-09",
+        next_target: "2026-10",
+        max_creatable_month: "2026-10",
+        can_create: false,
+        reason: { code: "month.draft_exists", params: { month: "2026-09" } }
+      },
+      {
+        months: ["2026-08"],
+        saved_months: ["2026-08"],
+        draft_month: null,
+        next_target: "2026-09",
+        max_creatable_month: "2026-10",
+        can_create: true,
+        reason: null
+      }
+    ];
+    let policyIndex = 0;
+    const createMonth = vi.fn().mockResolvedValue(emptyDraft);
+    const deleteMonth = vi.fn().mockResolvedValue({});
+    const api = {
+      months: vi.fn(() => Promise.resolve(policies[Math.min(policyIndex++, policies.length - 1)])),
+      month,
+      createMonth,
+      deleteMonth,
+      ruleWorkspaceShell: vi.fn().mockResolvedValue({
+        categories_revision: 1,
+        rules_revision: 1,
+        categories: [],
+        rules: []
+      }),
+      validateTransactions: vi.fn().mockResolvedValue({ issues: [] })
+    } as unknown as EditorShellPort;
+
+    render(
+      <AssetTrackEditorApp
+        app={{} as App}
+        api={api}
+        settings={{
+          dataDirectory: "Asset-track",
+          csvMappings: [],
+          baseCurrency: "CNY",
+          currencyFormat: "standard",
+          reconciliationTolerance: 100,
+          largeExpenseThreshold: 1000
+        }}
+        hostWindow={window}
+        confirmAction={vi.fn().mockResolvedValue(true)}
+        chooseAction={vi.fn().mockResolvedValue("cancel")}
+        initialMode="transactions"
+        initialAnalysisMode="annual"
+        initialMonth="2026-08"
+        onSessionChange={vi.fn()}
+        onStateChange={vi.fn()}
+        notifyDataChanged={vi.fn()}
+        subscribeDataChanges={vi.fn(() => () => undefined)}
+        getCsvMapping={vi.fn()}
+        saveCsvMapping={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    const monthSelect = await screen.findByRole("combobox", { name: "编辑月份" });
+    const createButton = await screen.findByRole("button", { name: "创建月份" });
+    fireEvent.click(createButton);
+    await waitFor(() => expect((monthSelect as HTMLSelectElement).value).toBe("2026-09"));
+    expect(createMonth).toHaveBeenCalledWith("2026-09");
+
+    fireEvent.click(screen.getByRole("button", { name: "删除月份" }));
+    await waitFor(() => expect((monthSelect as HTMLSelectElement).value).toBe("2026-08"));
+    expect(deleteMonth).toHaveBeenCalledWith("2026-09", expect.any(Number));
+    expect(month).toHaveBeenLastCalledWith("2026-08");
+    expect(screen.getByDisplayValue("恢复商品")).toBeTruthy();
+  });
+
   it("restores a month draft and reports an external revision change", async () => {
     const snapshot: MonthEditorDraftSnapshot = {
       kind: "transactions",

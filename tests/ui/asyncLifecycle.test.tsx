@@ -3,6 +3,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChangeEvent } from "react";
+import { Modal } from "obsidian";
 import { AssetTrackError } from "../../src/application/errors";
 import type { MonthEditorPort } from "../../src/services/ports";
 import type { CsvInspection } from "../../src/types/csv";
@@ -146,6 +147,7 @@ describe("async UI lifecycle guards", () => {
       }))
     } as unknown as MonthEditorPort;
     const setState = vi.fn();
+    const modalOpen = vi.spyOn(Modal.prototype, "open");
     const pendingOperationLogsRef = { current: [] };
     const hostWindow = {
       confirm: vi.fn(() => true)
@@ -158,6 +160,7 @@ describe("async UI lifecycle guards", () => {
     const { result, rerender } = renderHook(
       ({ currentDraft, currentMonth }: { currentDraft: MonthWorkspace; currentMonth: string }) =>
         useTransactionOperations({
+          app: {} as InstanceType<typeof import("obsidian").App>,
           api,
           hostWindow,
           month: currentMonth,
@@ -187,6 +190,7 @@ describe("async UI lifecycle guards", () => {
     });
 
     expect(mark).toHaveBeenCalledTimes(1);
+    expect(modalOpen).not.toHaveBeenCalled();
     expect(setState).toHaveBeenNthCalledWith(1, expect.objectContaining({ kind: "pending" }));
     expect(setState).toHaveBeenLastCalledWith({ kind: "idle" });
   });

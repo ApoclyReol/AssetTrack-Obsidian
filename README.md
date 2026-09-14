@@ -13,9 +13,10 @@ focused monthly review: import what already exists, resolve the few things that 
 judgment, check the result, and move on.
 
 > [!IMPORTANT]
-> Current recommended version: **1.8.1**. This patch release accepts more common bill date formats,
-> including short-year dates such as `8/31/26`, and makes rule-list filtering, grouping, and sorting
-> easier. It does not introduce a database or settings migration.
+> Current recommended version: **1.9.0**. This release makes the monthly review easier to follow:
+> bill import is split into clear structure, mapping, and preview steps, while transaction warnings,
+> grouped views, monthly progress, and reconciliation explanations are presented more compactly.
+> It does not introduce a database or settings migration.
 
 ## Why Asset Track
 
@@ -105,7 +106,7 @@ you explicitly choose a backup export destination or restoration file.
 ## Compatibility
 
 - Desktop Obsidian only: macOS, Windows, and Linux.
-- Version 1.8.1 requires Obsidian 1.13.0 or later. Update to the latest available 1.13.x desktop release before installing or updating.
+- Version 1.9.0 requires Obsidian 1.13.0 or later. Update to the latest available 1.13.x desktop release before installing or updating.
 - The plugin does not require Python, a separate Node.js installation, or a sidecar.
 
 ## Read more

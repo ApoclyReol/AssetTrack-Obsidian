@@ -63,6 +63,51 @@ it("loads product history only after a filter and keeps the shell lightweight", 
     expect(repository.productHistoryIndex({ min_occurrences: 2 }).groups).toEqual([]);
   });
 
+  it("keeps default history statistics at five years but supports all history for edits", async () => {
+    const { repository } = fixture();
+    const food = categoryKey("餐饮基础");
+    const investment = [{
+      account_key: "investment-default",
+      principal: 0,
+      market_value: 0,
+      cash_balance: 0
+    }];
+    const save = (month: string, product: string) => repository.saveMonth(
+      month,
+      0,
+      [{ account_key: "cash-default", balance: 100 }],
+      investment,
+      [{
+        transaction_date: `${month}-01`,
+        type: "支出",
+        category_key: food,
+        category: "餐饮基础",
+        counterparty: "商户甲",
+        product,
+        amount: 20
+      }],
+      []
+    );
+
+    await save("2020-01", "旧记录");
+    await save("2026-01", "新记录");
+
+    const recent = repository.productHistory({ category_key: food });
+    expect(recent.scope).toMatchObject({
+      from_date: "2021-02-01",
+      to_date: "2026-01-31"
+    });
+    expect(recent.rows.map((row) => row.product)).toEqual(["新记录"]);
+
+    const all = repository.productHistory({ category_key: food, read_scope: "all" });
+    expect(all.scope).toMatchObject({
+      from_date: "2020-01-01",
+      to_date: "2026-01-31"
+    });
+    expect(all.rows.map((row) => row.product)).toEqual(expect.arrayContaining(["旧记录", "新记录"]));
+    expect(all.rows).toHaveLength(2);
+  });
+
   it("does not allow history rename operations to rewrite investment facts", async () => {
     const { repository } = fixture();
     const saved = await repository.saveMonth(

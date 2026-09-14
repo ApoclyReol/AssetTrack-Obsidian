@@ -14,37 +14,51 @@ import type {
   CsvStructureSelection
 } from "../types/csv";
 import { scalarText } from "../domain/text";
-import { businessLabel, displayError, t } from "../i18n";
+import { businessLabel, displayError, fieldLabel, t } from "../i18n";
 import { issueIsBlocking } from "./editorPrimitives";
 import { StaticTableHeader } from "./TablePrimitives";
 
 const TYPES = ["支出", "收入", "代付", "加仓", "提现", "忽略"] as const;
-const REQUIRED_FIELDS: Array<[keyof CsvColumnMapping, string]> = [
-  ["date_column", t("日期", "Date")],
-  ["product_column", t("商品", "Item")],
-  ["amount_column", t("金额", "Amount")],
-  ["type_column", t("收支", "Type")]
-];
-const OPTIONAL_FIELDS: Array<[keyof CsvColumnMapping, string]> = [
-  ["counterparty_column", t("对方", "Counterparty")],
-  ["category_column", t("分类", "Category")],
-  ["status_column", t("状态", "Status")]
-];
-const FIELD_HELP: Partial<Record<keyof CsvColumnMapping, string>> = {
-  date_column: t("用于判断流水是否属于当前月份", "Used to check whether a row belongs to the current month"),
-  product_column: t("商品、备注或交易说明", "Item, note, or transaction description"),
-  amount_column: t("应能识别为数字金额", "Should contain a recognizable numeric amount"),
-  type_column: t("决定记为支出、收入或理财流水", "Determines whether a row is an expense, income, or investment flow"),
-  counterparty_column: t("交易对方或商户名称", "Counterparty or merchant name"),
-  category_column: t("可用于补充或覆盖分类", "Can be used to add or replace a category"),
-  status_column: t("用于筛选已完成、成功等状态", "Used to filter completed, successful, or other statuses")
-};
-const FILTER_LABELS: Record<string, string> = {
-  outside_month: t("跨月", "Outside month"),
-  status_filtered: t("状态过滤", "Status filtered"),
-  ignored_type: t("忽略类型", "Ignored type"),
-  invalid: t("无效字段", "Invalid field")
-};
+function requiredFields(): Array<[keyof CsvColumnMapping, string]> {
+  return [
+    ["date_column", t("日期", "Date")],
+    ["product_column", t("商品", "Item")],
+    ["amount_column", t("金额", "Amount")],
+    ["type_column", t("收支", "Type")]
+  ];
+}
+
+function optionalFields(): Array<[keyof CsvColumnMapping, string]> {
+  return [
+    ["counterparty_column", t("对方", "Counterparty")],
+    ["category_column", t("分类", "Category")],
+    ["status_column", t("状态", "Status")]
+  ];
+}
+
+function fieldHelp(field: keyof CsvColumnMapping): string {
+  switch (field) {
+    case "date_column": return t("用于判断流水是否属于当前月份", "Used to check whether a row belongs to the current month");
+    case "product_column": return t("商品、备注或交易说明", "Item, note, or transaction description");
+    case "amount_column": return t("应能识别为数字金额", "Should contain a recognizable numeric amount");
+    case "type_column": return t("决定记为支出、收入或理财流水", "Determines whether a row is an expense, income, or investment flow");
+    case "counterparty_column": return t("交易对方或商户名称", "Counterparty or merchant name");
+    case "category_column": return t("可用于补充或覆盖分类", "Can be used to add or replace a category");
+    case "status_column": return t("用于筛选已完成、成功等状态", "Used to filter completed, successful, or other statuses");
+    default: return "";
+  }
+}
+
+function filterLabel(reason: string): string {
+  return {
+    outside_month: t("跨月", "Outside month"),
+    status_filtered: t("状态过滤", "Status filtered"),
+    ignored_type: t("忽略类型", "Ignored type"),
+    invalid_date: t("日期无法识别", "Invalid date"),
+    invalid_amount: t("金额无法识别", "Invalid amount"),
+    unmapped_type: t("收支值未映射", "Unmapped type")
+  }[reason] ?? reason;
+}
 const FOCUSABLE_SELECTOR = [
   "button:not([disabled])",
   "input:not([disabled])",
@@ -52,6 +66,9 @@ const FOCUSABLE_SELECTOR = [
   "textarea:not([disabled])",
   "[tabindex]:not([tabindex='-1'])"
 ].join(",");
+const SAMPLE_VALUE_LIMIT = 18;
+
+type ImportDialogPage = 1 | 2 | 3;
 
 function canFocus(
   element: Element | null
@@ -66,14 +83,19 @@ function describeExample(example: Record<string, unknown>): string {
     .map(([key, value]) => key === "row"
       ? t(`第 ${String(value)} 行`, `row ${String(value)}`)
       : key === "status" && !String(value)
-        ? `${key} ${t("（空状态）", "(empty status)")}`
-      : `${key} ${String(value)}`)
+        ? `${fieldLabel(key)} ${t("（空状态）", "(empty status)")}`
+      : `${fieldLabel(key)} ${key === "reason" ? displayError(value) : String(value)}`)
     .join(t("，", ", "));
 }
 
 function totalFilteredRows(preview: CsvImportPreview): number {
   return Object.values(preview.import_stats.filtered)
     .reduce((total, count) => total + Number(count ?? 0), 0);
+}
+
+function invalidFilteredRows(preview: CsvImportPreview): number {
+  return ["invalid_date", "invalid_amount", "unmapped_type"]
+    .reduce((total, reason) => total + Number(preview.import_stats.filtered[reason] ?? 0), 0);
 }
 
 function statusValuesFor(
@@ -111,6 +133,13 @@ function sampleValuesFor(
   return values;
 }
 
+function shortenSampleValue(value: string): string {
+  const characters = Array.from(value);
+  return characters.length > SAMPLE_VALUE_LIMIT
+    ? `${characters.slice(0, SAMPLE_VALUE_LIMIT).join("")}…`
+    : value;
+}
+
 function valueCountFor(
   inspection: CsvInspection,
   column: string,
@@ -129,7 +158,7 @@ function formatColumnMeta(
   inspection: CsvInspection,
   column: string
 ): string {
-  const samples = sampleValuesFor(inspection, column);
+  const samples = sampleValuesFor(inspection, column).map(shortenSampleValue);
   const emptyCount = inspection.empty_counts?.[column];
   const empty = emptyCount === undefined
     ? inspection.empty_values[column]
@@ -147,6 +176,20 @@ function formatFileType(filename: string): string {
   return extension || t("未知格式", "Unknown format");
 }
 
+function formatEncoding(encoding?: string): string {
+  if (encoding === "utf-8") return "UTF-8";
+  if (encoding === "gb18030") return "GB18030";
+  if (encoding === "utf-8-fallback") return t("UTF-8（宽松读取）", "UTF-8 (fallback)");
+  return t("不适用", "Not applicable");
+}
+
+function formatDelimiter(delimiter?: string): string {
+  if (delimiter === "\t") return t("制表符 Tab", "Tab");
+  if (delimiter === ";") return ";";
+  if (delimiter === ",") return ",";
+  return t("不适用", "Not applicable");
+}
+
 function acceptedDateRange(preview: CsvImportPreview): string {
   const dates = preview.rows
     .map((row) => row.transaction_date)
@@ -156,6 +199,18 @@ function acceptedDateRange(preview: CsvImportPreview): string {
   const first = dates[0];
   const last = dates.at(-1) ?? first;
   return first === last ? first : `${first} → ${last}`;
+}
+
+function previewIssueText(issue: Record<string, unknown>): string {
+  const field = fieldLabel(scalarText(issue.field) || "流水");
+  const row = Number(issue.row_index);
+  const rowLabel = Number.isFinite(row)
+    ? t(`第 ${row + 1} 行`, `row ${row + 1}`)
+    : "";
+  const reason = scalarText(issue.issue ?? issue.reason)
+    || t("需要检查这条流水", "This transaction needs review");
+  const suggestion = scalarText(issue.suggestion);
+  return `${rowLabel ? `${rowLabel} · ` : ""}${field}${t("：", ": ")}${displayError(reason)}${suggestion ? ` · ${displayError(suggestion)}` : ""}`;
 }
 
 function initialMapping(
@@ -202,6 +257,7 @@ export function CsvImportDialog({
   savedMapping,
   onCancel,
   onHeaderRowChange,
+  onClearSavedMapping,
   onPreview,
   onApply
 }: {
@@ -209,7 +265,10 @@ export function CsvImportDialog({
   inspection: CsvInspection;
   savedMapping?: CsvColumnMapping;
   onCancel: () => void;
-  onHeaderRowChange?: (headerRow: number) => Promise<CsvInspection>;
+  onHeaderRowChange?: (
+    selection: CsvStructureSelection
+  ) => Promise<CsvInspection>;
+  onClearSavedMapping?: (signature: string) => Promise<void>;
   onPreview: (
     mapping: CsvColumnMapping,
     selection?: CsvStructureSelection
@@ -231,12 +290,14 @@ export function CsvImportDialog({
   const [preview, setPreview] = useState<CsvImportPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [headerBusy, setHeaderBusy] = useState(false);
+  const [mappingBusy, setMappingBusy] = useState(false);
+  const [page, setPage] = useState<ImportDialogPage>(1);
   const [headerRowInput, setHeaderRowInput] = useState(
     String(inspection.header_row ?? 1)
   );
   const [headerError, setHeaderError] = useState("");
   const [headerSelectorOpen, setHeaderSelectorOpen] = useState(
-    inspection.header_status === "needs_confirmation"
+    inspection.header_status === "needs_confirmation" && !inspection.header_confirmed
   );
   const [error, setError] = useState("");
   const previewRequestSequence = useRef(0);
@@ -244,6 +305,7 @@ export function CsvImportDialog({
     setActiveInspection(inspection);
     setMapping(initialMapping(inspection, savedMapping));
     setPreview(null);
+    setPage(1);
     setHeaderRowInput(String(inspection.header_row ?? 1));
     setHeaderError("");
     setHeaderSelectorOpen(
@@ -262,13 +324,18 @@ export function CsvImportDialog({
       }
     };
   }, [hostWindow]);
-  const interactionBusy = busy || headerBusy;
+  const interactionBusy = busy || headerBusy || mappingBusy;
   const headerStatus = activeInspection.header_status ?? "normal";
   const headerRow = activeInspection.header_row ?? 1;
   const headerCandidates = activeInspection.header_candidates ?? [];
   const rawRows = activeInspection.raw_rows ?? [];
   const rawRowCount = activeInspection.raw_row_count ?? rawRows.length;
-  const headerNeedsConfirmation = headerStatus === "needs_confirmation";
+  const headerNeedsConfirmation = headerStatus === "needs_confirmation"
+    || activeInspection.header_confirmed === false;
+  const worksheetCandidates = activeInspection.worksheet_candidates ?? [];
+  const selectedWorksheetName = activeInspection.worksheet_name
+    ?? worksheetCandidates[0]?.name
+    ?? "";
   const directionValues = useMemo(
     () => typeValuesFor(activeInspection, mapping.type_column),
     [activeInspection, mapping.type_column]
@@ -280,6 +347,7 @@ export function CsvImportDialog({
   const setColumn = (field: keyof CsvColumnMapping, value: string) => {
     previewRequestSequence.current += 1;
     setPreview(null);
+    setPage(2);
     setMapping((current) => {
       const next = { ...current, [field]: value };
       if (field === "type_column") {
@@ -298,15 +366,18 @@ export function CsvImportDialog({
       return next;
     });
   };
-  const selectHeaderRow = async (row: number): Promise<void> => {
+  const selectStructure = async (
+    selection: CsvStructureSelection
+  ): Promise<void> => {
     if (!onHeaderRowChange) {
       setHeaderError(t(
-        "当前导入会话不支持重新读取表头，请重新选择文件。",
-        "This import session cannot reread the header. Select the file again."
+        "当前导入会话不支持重新读取文件结构，请重新选择文件。",
+        "This import session cannot reread the file structure. Select the file again."
       ));
       return;
     }
-    if (!Number.isInteger(row) || row < 1 || row > rawRowCount) {
+    const row = selection.header_row;
+    if (row !== undefined && (!Number.isInteger(row) || row < 1 || row > rawRowCount)) {
       setHeaderError(t(
         `表头行号必须在 1 到 ${rawRowCount} 之间。`,
         `The header row must be between 1 and ${rawRowCount}.`
@@ -319,18 +390,21 @@ export function CsvImportDialog({
     setError("");
     setPreview(null);
     try {
-      const nextInspection = await onHeaderRowChange(row);
+      const nextInspection = await onHeaderRowChange(selection);
       setActiveInspection(nextInspection);
       setMapping(initialMapping(nextInspection));
-      setHeaderRowInput(String(nextInspection.header_row ?? row));
-      setHeaderSelectorOpen(false);
+      setHeaderRowInput(String(nextInspection.header_row ?? row ?? 1));
+      setHeaderSelectorOpen(
+        nextInspection.header_status === "needs_confirmation"
+        && !nextInspection.header_confirmed
+      );
     } catch (reason) {
       setHeaderError(displayError(reason));
     } finally {
       setHeaderBusy(false);
     }
   };
-  const valid = REQUIRED_FIELDS.every(([field]) =>
+  const valid = requiredFields().every(([field]) =>
     scalarText(mapping[field]).trim()
   )
     && directionValues.every((value) => Boolean(mapping.type_values[value]))
@@ -346,6 +420,30 @@ export function CsvImportDialog({
     && preview.import_stats.accepted_rows > 0
     && blockingIssueCount === 0
   );
+  const canLeaveFilePage = activeInspection.headers.length > 0
+    && !headerNeedsConfirmation
+    && !interactionBusy;
+
+  const openMappingPage = (): void => {
+    if (!canLeaveFilePage) return;
+    setError("");
+    setPage(2);
+  };
+
+  const clearSavedMapping = async (): Promise<void> => {
+    previewRequestSequence.current += 1;
+    setPreview(null);
+    setError("");
+    setMappingBusy(true);
+    try {
+      await onClearSavedMapping?.(activeInspection.header_signature);
+      setMapping(initialMapping(activeInspection));
+    } catch (reason) {
+      setError(displayError(reason));
+    } finally {
+      setMappingBusy(false);
+    }
+  };
 
   const createPreview = async () => {
     const sequence = ++previewRequestSequence.current;
@@ -355,9 +453,17 @@ export function CsvImportDialog({
     try {
       const nextPreview = await onPreview(
         requestedMapping,
-        { header_row: activeInspection.header_row ?? 1 }
+        {
+          header_row: activeInspection.header_row ?? 1,
+          ...(activeInspection.worksheet_name
+            ? { worksheet_name: activeInspection.worksheet_name }
+            : {})
+        }
       );
-      if (sequence === previewRequestSequence.current) setPreview(nextPreview);
+      if (sequence === previewRequestSequence.current) {
+        setPreview(nextPreview);
+        setPage(3);
+      }
     } catch (reason) {
       if (sequence === previewRequestSequence.current) setError(displayError(reason));
     } finally {
@@ -367,6 +473,7 @@ export function CsvImportDialog({
   const changeMode = (nextMode: ImportMode) => {
     previewRequestSequence.current += 1;
     setPreview(null);
+    setPage(2);
     setMode(nextMode);
   };
   const apply = async () => {
@@ -379,6 +486,11 @@ export function CsvImportDialog({
       setError(displayError(reason));
       setBusy(false);
     }
+  };
+  const returnToPreviousPage = (): void => {
+    if (interactionBusy) return;
+    setError("");
+    setPage((current) => current === 3 ? 2 : 1);
   };
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === "Escape" && !interactionBusy) {
@@ -440,16 +552,16 @@ export function CsvImportDialog({
           aria-label={t("导入步骤", "Import steps")}
         >
           <ol>
-            <li className="is-complete">
+            <li className={page > 1 ? "is-complete" : "is-active"} aria-current={page === 1 ? "step" : undefined}>
               <span aria-hidden="true">1</span>{t("文件已读取", "File read")}
             </li>
-            <li className={!preview ? "is-active" : "is-complete"}>
+            <li className={page > 2 ? "is-complete" : page === 2 ? "is-active" : ""} aria-current={page === 2 ? "step" : undefined}>
               <span aria-hidden="true">2</span>{t("确认映射", "Confirm mapping")}
             </li>
-            <li className={preview ? "is-active" : ""}>
+            <li className={busy && page === 3 ? "is-complete" : page === 3 ? "is-active" : ""} aria-current={page === 3 && !busy ? "step" : undefined}>
               <span aria-hidden="true">3</span>{t("检查预览", "Review preview")}
             </li>
-            <li>
+            <li className={busy && page === 3 ? "is-active" : ""} aria-current={busy && page === 3 ? "step" : undefined}>
               <span aria-hidden="true">4</span>{t("加入草稿", "Add to draft")}
             </li>
           </ol>
@@ -462,10 +574,16 @@ export function CsvImportDialog({
           )}
         </p>
 
-        <section
-          className="asset-track-import-file-summary"
-          aria-labelledby={`${titleId}-file`}
-        >
+        {page === 1 && (
+          <div className="asset-track-import-page" aria-labelledby={`${titleId}-page-file`}>
+            <div className="asset-track-import-page-heading">
+              <strong id={`${titleId}-page-file`}>{t("第 1 步：确认文件结构", "Step 1: Confirm the file structure")}</strong>
+              <span>{t("选择正确的工作表和表头行，说明段落不会被当作流水。", "Choose the right worksheet and header row so preamble text is not imported as transactions.")}</span>
+            </div>
+            <section
+              className="asset-track-import-file-summary"
+              aria-labelledby={`${titleId}-file`}
+            >
           <div className="asset-track-import-section-heading">
             <div>
               <h3 id={`${titleId}-file`}>{t("账单文件", "Statement file")}</h3>
@@ -483,6 +601,14 @@ export function CsvImportDialog({
               <dd>{formatFileType(activeInspection.filename)}</dd>
             </div>
             <div>
+              <dt>{t("编码", "Encoding")}</dt>
+              <dd>{formatEncoding(activeInspection.encoding)}</dd>
+            </div>
+            <div>
+              <dt>{t("分隔符", "Delimiter")}</dt>
+              <dd>{formatDelimiter(activeInspection.delimiter)}</dd>
+            </div>
+            <div>
               <dt>{t("数据行", "Data rows")}</dt>
               <dd>{activeInspection.row_count}</dd>
             </div>
@@ -494,8 +620,69 @@ export function CsvImportDialog({
               <dt>{t("目标月份", "Target month")}</dt>
               <dd>{activeInspection.month}</dd>
             </div>
+            {activeInspection.worksheet_name && (
+              <div>
+                <dt>{t("当前工作表", "Current worksheet")}</dt>
+                <dd>{activeInspection.worksheet_name}</dd>
+              </div>
+            )}
           </dl>
         </section>
+
+        {worksheetCandidates.length > 1 && (
+          <fieldset
+            className="asset-track-import-worksheet-selector"
+            aria-labelledby={`${titleId}-worksheet-selector`}
+          >
+            <legend id={`${titleId}-worksheet-selector`}>
+              {t("选择工作表", "Choose a worksheet")}
+            </legend>
+            <p>
+              {t(
+                "这个工作簿包含多张表。请选择真正包含账单明细的工作表；系统会为每张表显示行数和表头识别结果。",
+                "This workbook contains multiple worksheets. Choose the one with the statement details; each option shows its row count and header detection result."
+              )}
+            </p>
+            <div
+              className="asset-track-import-worksheet-list"
+              role="radiogroup"
+              aria-labelledby={`${titleId}-worksheet-selector`}
+            >
+              {worksheetCandidates.map((worksheet) => {
+                const candidate = worksheet.header_candidates[0];
+                const worksheetMeta = worksheet.row_count === 0
+                  ? t("空工作表", "Empty worksheet")
+                  : candidate
+                    ? t(
+                      `${worksheet.row_count} 行 · 建议第 ${candidate.row} 行作为表头 · 识别 ${candidate.matched_fields.length} 个字段`,
+                      `${worksheet.row_count} rows · row ${candidate.row} suggested as header · ${candidate.matched_fields.length} fields detected`
+                    )
+                    : t(
+                      `${worksheet.row_count} 行 · 未识别到可信表头`,
+                      `${worksheet.row_count} rows · no reliable header detected`
+                    );
+                return (
+                  <label
+                    key={worksheet.name}
+                    className={worksheet.name === selectedWorksheetName ? "is-selected" : ""}
+                  >
+                    <input
+                      type="radio"
+                      name={`${titleId}-worksheet`}
+                      checked={worksheet.name === selectedWorksheetName}
+                      disabled={interactionBusy || !onHeaderRowChange}
+                      onChange={() => void selectStructure({ worksheet_name: worksheet.name })}
+                    />
+                    <span>
+                      <strong>{worksheet.name}</strong>
+                      <small>{worksheetMeta}</small>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+        )}
 
         <section
           className={`asset-track-import-header-status ${headerNeedsConfirmation ? "is-warning" : "is-ok"}`}
@@ -563,7 +750,7 @@ export function CsvImportDialog({
                     {t("系统建议：", "Suggested by the system: ")}
                     {headerCandidates.slice(0, 3).map((candidate) => (
                       <span key={candidate.row}>
-                        {t(`第 ${candidate.row} 行`, `row ${candidate.row}`)} · {candidate.matched_fields.join(t("、", ", "))}
+                        {t(`第 ${candidate.row} 行`, `row ${candidate.row}`)} · {candidate.matched_fields.map(businessLabel).join(t("、", ", "))}
                       </span>
                     ))}
                   </p>
@@ -583,7 +770,12 @@ export function CsvImportDialog({
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
                       event.preventDefault();
-                      void selectHeaderRow(Number(headerRowInput));
+                      void selectStructure({
+                        header_row: Number(headerRowInput),
+                        ...(activeInspection.worksheet_name
+                          ? { worksheet_name: activeInspection.worksheet_name }
+                          : {})
+                      });
                     }
                   }}
                 />
@@ -591,7 +783,12 @@ export function CsvImportDialog({
               <button
                 type="button"
                 disabled={interactionBusy}
-                onClick={() => void selectHeaderRow(Number(headerRowInput))}
+                onClick={() => void selectStructure({
+                  header_row: Number(headerRowInput),
+                  ...(activeInspection.worksheet_name
+                    ? { worksheet_name: activeInspection.worksheet_name }
+                    : {})
+                })}
               >
                 {headerBusy
                   ? t("正在读取…", "Reading…")
@@ -631,7 +828,7 @@ export function CsvImportDialog({
                             {candidate
                               ? t(
                                 `候选：${candidate.matched_fields.join("、")}`,
-                                `Candidate: ${candidate.matched_fields.join(", ")}`
+                                `Candidate: ${candidate.matched_fields.map(businessLabel).join(", ")}`
                               )
                               : row.row === headerRow
                                 ? t("当前表头", "Current header")
@@ -641,7 +838,12 @@ export function CsvImportDialog({
                             <button
                               type="button"
                               disabled={interactionBusy}
-                              onClick={() => void selectHeaderRow(row.row)}
+                              onClick={() => void selectStructure({
+                                header_row: row.row,
+                                ...(activeInspection.worksheet_name
+                                  ? { worksheet_name: activeInspection.worksheet_name }
+                                  : {})
+                              })}
                             >
                               {row.row === headerRow
                                 ? t("确认此行", "Confirm this row")
@@ -670,9 +872,39 @@ export function CsvImportDialog({
           </section>
         )}
 
+          </div>
+        )}
+
+        {page === 2 && (
+          <div className="asset-track-import-page" aria-labelledby={`${titleId}-page-mapping`}>
+            <div className="asset-track-import-page-heading">
+              <strong id={`${titleId}-page-mapping`}>{t("第 2 步：确认字段和筛选", "Step 2: Confirm fields and filters")}</strong>
+              <span>{t("确认导入范围、必填字段、收支映射和需要保留的状态。", "Confirm the import scope, required fields, type mappings, and statuses to keep.")}</span>
+            </div>
+
+            {savedMapping && (
+              <section className="asset-track-import-profile-notice" role="status">
+                <div>
+                  <strong>{t("已应用上次映射", "Last mapping applied")}</strong>
+                  <span>{t("它按当前文件的表头结构复用；仍建议检查下方字段和数量。", "The mapping was reused for this file structure. Check the fields and counts below before previewing.")}</span>
+                </div>
+                <button
+                  type="button"
+                  disabled={interactionBusy}
+                  onClick={() => void clearSavedMapping()}
+                >
+                  {mappingBusy
+                    ? t("正在清除…", "Clearing…")
+                    : t("清除并使用系统建议", "Clear and use suggestions")}
+                </button>
+              </section>
+            )}
+
         <fieldset className="asset-track-import-fieldset">
           <legend>
-            <span>{t("导入方式", "Import mode")}</span>
+            <span className="asset-track-import-legend-title" role="heading" aria-level={3}>
+              {t("导入方式", "Import mode")}
+            </span>
             <small>{t("先选择本次操作的范围", "Choose the scope of this import")}</small>
           </legend>
           <div className="asset-track-import-mode">
@@ -725,11 +957,13 @@ export function CsvImportDialog({
 
         <fieldset className="asset-track-import-fieldset">
           <legend>
-            <span>{t("必须确认的字段", "Required fields")}</span>
+            <span className="asset-track-import-legend-title" role="heading" aria-level={3}>
+              {t("必填字段", "Required fields")}
+            </span>
             <small>{t("这 4 项都确认后才能生成预览", "All four must be confirmed before previewing")}</small>
           </legend>
           <div className="asset-track-mapping-grid">
-            {REQUIRED_FIELDS.map(([field, label]) => {
+            {requiredFields().map(([field, label]) => {
               const selected = scalarText(mapping[field]);
               const meta = selected === "__month_start__"
                 ? t("每条流水使用当前月 1 日", "Every row uses the first day of the target month")
@@ -740,13 +974,14 @@ export function CsvImportDialog({
                 <label key={field} className="asset-track-import-field">
                   <span className="asset-track-import-field-label">
                     <strong>{label}</strong>
-                    <small>{FIELD_HELP[field]}</small>
+                    <small>{fieldHelp(field)}</small>
                   </span>
                   <span className="asset-track-import-field-control">
                     <select
                       value={selected}
                       disabled={interactionBusy}
                       aria-required="true"
+                      title={meta}
                       onChange={(event) => setColumn(field, event.target.value)}
                     >
                       <option value="">{t("请选择字段", "Select a field")}</option>
@@ -762,7 +997,6 @@ export function CsvImportDialog({
                         <option key={header} value={header}>{header}</option>
                       ))}
                     </select>
-                    <small className="asset-track-import-field-meta">{meta}</small>
                   </span>
                 </label>
               );
@@ -772,11 +1006,13 @@ export function CsvImportDialog({
 
         <fieldset className="asset-track-import-fieldset is-optional">
           <legend>
-            <span>{t("可选补充字段", "Optional fields")}</span>
+            <span className="asset-track-import-legend-title" role="heading" aria-level={3}>
+              {t("可选字段", "Optional fields")}
+            </span>
             <small>{t("没有对应列时可以保持不使用", "Leave unused when the file has no matching column")}</small>
           </legend>
           <div className="asset-track-mapping-grid">
-            {OPTIONAL_FIELDS.map(([field, label]) => {
+            {optionalFields().map(([field, label]) => {
               const selected = scalarText(mapping[field]);
               const meta = selected
                 ? formatColumnMeta(activeInspection, selected)
@@ -785,12 +1021,13 @@ export function CsvImportDialog({
                 <label key={field} className="asset-track-import-field">
                   <span className="asset-track-import-field-label">
                     <strong>{label}</strong>
-                    <small>{FIELD_HELP[field]}</small>
+                    <small>{fieldHelp(field)}</small>
                   </span>
                   <span className="asset-track-import-field-control">
                     <select
                       value={selected}
                       disabled={interactionBusy}
+                      title={meta}
                       onChange={(event) => setColumn(field, event.target.value)}
                     >
                       <option value="">{t("不使用此字段", "Do not use this field")}</option>
@@ -798,33 +1035,39 @@ export function CsvImportDialog({
                         <option key={header} value={header}>{header}</option>
                       ))}
                     </select>
-                    <small className="asset-track-import-field-meta">{meta}</small>
                   </span>
                 </label>
               );
             })}
           </div>
+          <p className="asset-track-import-note">
+            {t(
+              "分类是可选字段；如需导入分类，请先在系统配置中设置。文件中无法匹配的分类会重置为“未分类”。",
+              "Category is optional. To import categories, define them in the system first. Unmatched file categories are reset to ‘Uncategorized’."
+            )}
+          </p>
         </fieldset>
 
         {directionValues.length > 0 && (
-          <section
-            className="asset-track-import-values"
-            aria-labelledby={`${titleId}-types`}
-          >
-            <div className="asset-track-import-section-heading">
-              <div>
-                <h3 id={`${titleId}-types`}>{t("收支映射", "Type mapping")}</h3>
-                <p>
-                  {t(
-                    "每个原始收支值都必须明确映射；选择“忽略”表示这些行不会进入预览。",
-                    "Map every raw type explicitly. Choosing Ignore keeps those rows out of the preview."
-                  )}
-                </p>
-              </div>
+          <fieldset className="asset-track-import-fieldset asset-track-import-values">
+            <legend>
+              <span
+                className="asset-track-import-legend-title"
+                role="heading"
+                aria-level={3}
+              >
+                {t("收支映射", "Type mapping")}
+              </span>
+              <small>
+                {t(
+                  "每个原始收支值都必须明确映射；选择“忽略”表示这些行不会进入预览。",
+                  "Map every raw type explicitly. Choosing Ignore keeps those rows out of the preview."
+                )}
+              </small>
               <span className="asset-track-import-count">
                 {directionValues.length} {t("种原始值", "raw values")}
               </span>
-            </div>
+            </legend>
             <div className="asset-track-import-control-list">
               {directionValues.map((raw) => {
                 const count = valueCountFor(activeInspection, mapping.type_column, raw);
@@ -845,6 +1088,7 @@ export function CsvImportDialog({
                       onChange={(event) => {
                         previewRequestSequence.current += 1;
                         setPreview(null);
+                        setPage(2);
                         setMapping((current) => ({
                           ...current,
                           type_values: {
@@ -863,28 +1107,29 @@ export function CsvImportDialog({
                 );
               })}
             </div>
-          </section>
+          </fieldset>
         )}
 
         {mapping.status_column && statusValues.length > 0 && (
-          <section
-            className="asset-track-import-statuses"
-            aria-labelledby={`${titleId}-statuses`}
-          >
-            <div className="asset-track-import-section-heading">
-              <div>
-                <h3 id={`${titleId}-statuses`}>{t("导入哪些状态", "Statuses to import")}</h3>
-                <p>
-                  {t(
-                    "只会导入勾选的状态；未勾选的行会在预览中标记为状态过滤。",
-                    "Only checked statuses are imported. Unchecked rows appear in the preview as status-filtered."
-                  )}
-                </p>
-              </div>
+          <fieldset className="asset-track-import-fieldset asset-track-import-statuses">
+            <legend>
+              <span
+                className="asset-track-import-legend-title"
+                role="heading"
+                aria-level={3}
+              >
+                {t("导入状态", "Statuses to import")}
+              </span>
+              <small>
+                {t(
+                  "只会导入勾选的状态；未勾选的行会在预览中标记为状态过滤。",
+                  "Only checked statuses are imported. Unchecked rows appear in the preview as status-filtered."
+                )}
+              </small>
               <span className="asset-track-import-count">
                 {mapping.included_statuses.length} / {statusValues.length} {t("已选择", "selected")}
               </span>
-            </div>
+            </legend>
             <div className="asset-track-import-control-list">
               {statusValues.map((status) => {
                 const count = valueCountFor(activeInspection, mapping.status_column ?? "", status);
@@ -898,6 +1143,7 @@ export function CsvImportDialog({
                       onChange={(event) => {
                         previewRequestSequence.current += 1;
                         setPreview(null);
+                        setPage(2);
                         setMapping((current) => ({
                           ...current,
                           included_statuses: event.target.checked
@@ -920,15 +1166,22 @@ export function CsvImportDialog({
                 );
               })}
             </div>
-          </section>
+          </fieldset>
         )}
 
-        {preview && (
+          </div>
+        )}
+
+        {page === 3 && preview && (
           <section
             className="asset-track-import-preview"
             aria-labelledby={`${titleId}-preview`}
             aria-live="polite"
           >
+            <div className="asset-track-import-page-heading">
+              <strong>{t("第 3 步：检查预览", "Step 3: Review the preview")}</strong>
+              <span>{t("确认接受、过滤和异常数量后，完成导入到当前草稿。", "Review accepted, filtered, and invalid rows before completing the import into the current draft.")}</span>
+            </div>
             <div className="asset-track-import-preview-heading">
               <div>
                 <h3 id={`${titleId}-preview`}>{t("导入预览", "Import preview")}</h3>
@@ -953,6 +1206,11 @@ export function CsvImportDialog({
                 <span>{t("被过滤", "Filtered")}</span>
                 <strong>{totalFilteredRows(preview)}</strong>
                 <small>{t("不会进入草稿", "will stay out of the draft")}</small>
+              </div>
+              <div className="asset-track-import-preview-card is-warning">
+                <span>{t("异常行", "Invalid rows")}</span>
+                <strong>{invalidFilteredRows(preview)}</strong>
+                <small>{t("需要回到字段或原文件检查", "check the mapping or source file")}</small>
               </div>
               <div className="asset-track-import-preview-card">
                 <span>{t("日期补为月初", "Dates defaulted")}</span>
@@ -981,6 +1239,36 @@ export function CsvImportDialog({
                 </dd>
               </div>
             </dl>
+            {preview.issues.length > 0 && (
+              <div className="asset-track-import-issue-summary" role="alert">
+                <strong>
+                  {t(
+                    `导入后检查发现 ${blockingIssueCount} 项错误、${warningIssueCount} 项警告`,
+                    `Post-import checks found ${blockingIssueCount} errors and ${warningIssueCount} warnings`
+                  )}
+                </strong>
+                <ul>
+                  {preview.issues.slice(0, 8).map((issue, index) => (
+                    <li key={`${scalarText(issue.code ?? issue.field) || "issue"}-${index}`}>
+                      <span className={issueIsBlocking(issue) ? "is-error" : "is-warning"}>
+                        {issueIsBlocking(issue)
+                          ? t("错误", "Error")
+                          : t("警告", "Warning")}
+                      </span>
+                      {previewIssueText(issue)}
+                    </li>
+                  ))}
+                </ul>
+                {preview.issues.length > 8 && (
+                  <small>
+                    {t(
+                      `其余 ${preview.issues.length - 8} 项检查结果会在加入草稿后按行显示。`,
+                      `${preview.issues.length - 8} more checks will be shown by row after adding to the draft.`
+                    )}
+                  </small>
+                )}
+              </div>
+            )}
             {Object.entries(preview.import_stats.defaulted_examples)
               .filter(([, examples]) => examples.length > 0)
               .map(([kind, examples]) => (
@@ -995,7 +1283,7 @@ export function CsvImportDialog({
                 <ul>
                   {filteredSummary.map(([reason, count]) => (
                     <li key={reason}>
-                      <span>{FILTER_LABELS[reason] ?? reason}</span>
+                      <span>{filterLabel(reason)}</span>
                       <strong>{count} {t("行", "rows")}</strong>
                     </li>
                   ))}
@@ -1003,12 +1291,15 @@ export function CsvImportDialog({
               </div>
             )}
             {preview.import_stats.accepted_rows === 0 && (
-              <p className="asset-track-import-empty-result" role="status">
-                {t(
-                  "没有流水可以加入草稿。请检查字段映射、收支结果和状态选择，再重新生成预览。",
-                  "No rows can be added to the draft. Check the field mapping, type results, and status selection, then generate the preview again."
-                )}
-              </p>
+              <div className="asset-track-import-empty-result" role="status">
+                <strong>{t("没有流水可以加入草稿", "No rows can be added to the draft")}</strong>
+                <p>
+                  {t(
+                    "当前草稿未改变。请检查字段映射、收支结果和状态选择，再重新生成预览。",
+                    "The current draft is unchanged. Check the field mapping, type results, and status selection, then generate the preview again."
+                  )}
+                </p>
+              </div>
             )}
             {preview.import_stats.filtered_rows.length > 0 && (
               <details className="asset-track-import-filtered-rows">
@@ -1033,7 +1324,7 @@ export function CsvImportDialog({
                       {preview.import_stats.filtered_rows.map((item) => (
                         <tr key={`${item.row}-${item.reason}`}>
                           <td>{item.row}</td>
-                          <td>{FILTER_LABELS[item.reason] ?? item.reason}</td>
+                          <td>{filterLabel(item.reason)}</td>
                           {activeInspection.headers.map((header) => (
                             <td key={header}>{item.values[header] ?? ""}</td>
                           ))}
@@ -1047,39 +1338,70 @@ export function CsvImportDialog({
           </section>
         )}
         {error && (
-          <p className="asset-track-status is-error" role="alert">
-            {error}
-          </p>
+          <div className="asset-track-status is-error" role="alert">
+            <strong>{t("预览或应用未完成", "Preview or apply did not finish")}</strong>
+            <p>{error}</p>
+            <small>
+              {t(
+                "下一步：按上面的提示修正字段、表头或状态选择，然后重新生成预览；未成功应用的内容不会写入数据库。",
+                "Next: correct the fields, header, or status selection above and generate the preview again. Content that was not successfully applied is not written to the database."
+              )}
+            </small>
+          </div>
         )}
 
-        <footer>
+        <footer className="asset-track-import-footer">
           <button type="button" onClick={onCancel} disabled={interactionBusy}>
             {t("取消", "Cancel")}
           </button>
-          <button
-            type="button"
-            onClick={() => void createPreview()}
-            disabled={!valid || busy}
-          >
-            {busy && !preview
-              ? t("正在解析…", "Parsing…")
-              : preview
-                ? t("重新生成预览", "Regenerate preview")
+          {page > 1 && (
+            <button
+              type="button"
+              onClick={returnToPreviousPage}
+              disabled={interactionBusy}
+            >
+              {page === 2
+                ? t("上一步：文件读取", "Back: file structure")
+                : t("上一步：确认映射", "Back: mapping")}
+            </button>
+          )}
+          {page === 1 && (
+            <button
+              type="button"
+              onClick={openMappingPage}
+              disabled={!canLeaveFilePage}
+            >
+              {t("下一步：确认映射", "Next: confirm mapping")}
+            </button>
+          )}
+          {page === 2 && (
+            <button
+              type="button"
+              onClick={() => void createPreview()}
+              disabled={!valid || busy}
+            >
+              {busy
+                ? t("正在解析…", "Parsing…")
                 : t("生成预览", "Generate preview")}
-          </button>
-          <button
-            type="button"
-            className="mod-cta"
-            onClick={() => void apply()}
-            disabled={!canApply || busy}
-          >
-            {preview
-              ? t(
-                `应用 ${preview.import_stats.accepted_rows} 条到草稿`,
-                `Add ${preview.import_stats.accepted_rows} rows to draft`
-              )
-              : t("应用到草稿", "Apply to draft")}
-          </button>
+            </button>
+          )}
+          {page === 3 && (
+            <button
+              type="button"
+              className="mod-cta"
+              onClick={() => void apply()}
+              disabled={!canApply || busy}
+            >
+              {busy
+                ? t("正在加入草稿…", "Adding to draft…")
+                : preview
+                  ? t(
+                    `完成并加入 ${preview.import_stats.accepted_rows} 条`,
+                    `Complete and add ${preview.import_stats.accepted_rows} rows`
+                  )
+                  : t("完成并加入草稿", "Complete and add to draft")}
+            </button>
+          )}
         </footer>
       </section>
     </div>

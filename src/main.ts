@@ -412,12 +412,25 @@ export default class AssetTrackPlugin extends Plugin {
   }
 
   async saveCsvMapping(profile: CsvMappingProfile): Promise<void> {
+    const previousMappings = this.settings.csvMappings;
     this.settings.csvMappings = [
       ...this.settings.csvMappings.filter(
         (item) => item.header_signature !== profile.header_signature
       ),
       profile
     ].slice(-20);
+    try {
+      await this.saveSettings();
+    } catch (error) {
+      this.settings.csvMappings = previousMappings;
+      throw error;
+    }
+  }
+
+  async clearCsvMapping(signature: string): Promise<void> {
+    this.settings.csvMappings = this.settings.csvMappings.filter(
+      (profile) => profile.header_signature !== signature
+    );
     await this.saveSettings();
   }
 

@@ -2,13 +2,16 @@ import { createHash, randomUUID } from "node:crypto";
 import * as XLSX from "xlsx";
 import type {
   CsvColumnMapping,
+  CsvDelimiter,
+  CsvEncoding,
   CsvImportFilterReason,
   CsvImportFilteredRow,
   CsvImportPreview,
   CsvInspection,
   CsvHeaderCandidate,
   CsvRawRow,
-  CsvStructureSelection
+  CsvStructureSelection,
+  CsvWorksheetCandidate
 } from "../types/csv";
 import type {
   Transaction
@@ -52,24 +55,35 @@ function parseAmount(value: string): number | null {
   return Number.isFinite(amount) ? amount : null;
 }
 
-function decodeCsv(content: Buffer): string {
+interface DecodedCsv {
+  text: string;
+  encoding: CsvEncoding;
+}
+
+function decodeCsv(content: Buffer): DecodedCsv {
   for (const encoding of ["utf-8", "gb18030"] as const) {
     try {
-      return new TextDecoder(encoding, { fatal: true }).decode(content)
-        .replace(/^\ufeff/, "");
+      return {
+        text: new TextDecoder(encoding, { fatal: true }).decode(content)
+          .replace(/^\ufeff/, ""),
+        encoding
+      };
     } catch {
       // Try the next supported bill encoding.
     }
   }
-  return new TextDecoder("utf-8").decode(content).replace(/^\ufeff/, "");
+  return {
+    text: new TextDecoder("utf-8").decode(content).replace(/^\ufeff/, ""),
+    encoding: "utf-8-fallback"
+  };
 }
 
-function delimiterFor(content: string): string {
+function delimiterFor(content: string): CsvDelimiter {
   const firstLine = content.split(/\r?\n/, 1)[0] ?? "";
-  const candidates = [",", "\t", ";"];
+  const candidates: CsvDelimiter[] = [",", "\t", ";"];
   return candidates.sort(
     (left, right) => firstLine.split(right).length - firstLine.split(left).length
-  )[0];
+  )[0] ?? ",";
 }
 
 function parseRows(content: string, preserveBlankRows = false): string[][] {
@@ -129,6 +143,9 @@ function validateHeaders(headers: string[]): void {
 interface SourceMatrix {
   rows: string[][];
   sheet_name?: string;
+  worksheet_candidates?: CsvWorksheetCandidate[];
+  encoding?: CsvEncoding;
+  delimiter?: CsvDelimiter;
 }
 
 interface SourceObjectRow {
@@ -142,36 +159,83 @@ interface SourceObjects {
   raw_rows: string[][];
   header_row: number;
   sheet_name?: string;
+  worksheet_candidates?: CsvWorksheetCandidate[];
 }
 
 function csvMatrix(content: Buffer): SourceMatrix {
-  return { rows: parseRows(decodeCsv(content), true) };
+  const decoded = decodeCsv(content);
+  return {
+    rows: parseRows(decoded.text, true),
+    encoding: decoded.encoding,
+    delimiter: delimiterFor(decoded.text)
+  };
 }
 
-function workbookMatrix(content: Buffer): SourceMatrix {
+function worksheetRows(sheet: XLSX.WorkSheet | undefined): string[][] {
+  if (!sheet) return [];
+  const values = XLSX.utils.sheet_to_json<Array<string | number | boolean>>(
+    sheet,
+    { header: 1, raw: false, defval: "", blankrows: true }
+  );
+  return values.map((row) => row.map((value) => String(value ?? "").trim()));
+}
+
+function workbookMatrix(
+  content: Buffer,
+  selection?: CsvStructureSelection
+): SourceMatrix {
   const workbook = XLSX.read(content, {
     type: "buffer",
     cellDates: false,
     raw: false
   });
-  const sheetName = workbook.SheetNames[0];
-  if (!sheetName) throw new AssetTrackError({ code: "csv.worksheet_missing", status: 422 });
-  const values = XLSX.utils.sheet_to_json<Array<string | number | boolean>>(
-    workbook.Sheets[sheetName],
-    { header: 1, raw: false, defval: "", blankrows: true }
-  );
-  if (!values.length) throw new AssetTrackError({ code: "csv.worksheet_header_missing", status: 422 });
+  if (!workbook.SheetNames.length) {
+    throw new AssetTrackError({ code: "csv.worksheet_missing", status: 422 });
+  }
+  const worksheetCandidates = workbook.SheetNames.map((name) => {
+    const rows = worksheetRows(workbook.Sheets[name]);
+    return {
+      name,
+      row_count: rows.filter(rowHasValue).length,
+      header_candidates: headerCandidatesFor(rows)
+    } satisfies CsvWorksheetCandidate;
+  });
+  const bestWorksheet = [...worksheetCandidates].sort((left, right) => {
+    const scoreDifference = (right.header_candidates[0]?.score ?? -1)
+      - (left.header_candidates[0]?.score ?? -1);
+    if (scoreDifference !== 0) return scoreDifference;
+    const rowDifference = right.row_count - left.row_count;
+    if (rowDifference !== 0) return rowDifference;
+    return workbook.SheetNames.indexOf(left.name) - workbook.SheetNames.indexOf(right.name);
+  })[0]?.name ?? workbook.SheetNames[0];
+  const sheetName = selection?.worksheet_name ?? bestWorksheet;
+  if (!workbook.SheetNames.includes(sheetName)) {
+    throw new AssetTrackError({
+      code: "csv.worksheet_invalid",
+      status: 422,
+      params: { worksheet: sheetName }
+    });
+  }
+  const rows = worksheetRows(workbook.Sheets[sheetName]);
+  if (!rows.length) {
+    throw new AssetTrackError({ code: "csv.worksheet_header_missing", status: 422 });
+  }
   return {
     sheet_name: sheetName,
-    rows: values.map((row) => row.map((value) => String(value ?? "").trim()))
+    rows,
+    worksheet_candidates: worksheetCandidates
   };
 }
 
-function sourceMatrix(filename: string, content: Buffer): SourceMatrix {
+function sourceMatrix(
+  filename: string,
+  content: Buffer,
+  selection?: CsvStructureSelection
+): SourceMatrix {
   const extension = filename.toLocaleLowerCase("en-US").split(".").at(-1);
   if (extension === "csv") return csvMatrix(content);
   if (extension === "xlsx" || extension === "xls") {
-    return workbookMatrix(content);
+    return workbookMatrix(content, selection);
   }
   throw new AssetTrackError({ code: "csv.extension_unsupported", status: 422 });
 }
@@ -336,14 +400,18 @@ function sourceObjects(
   content: Buffer,
   selection?: CsvStructureSelection
 ): SourceObjects {
-  const source = sourceMatrix(filename, content);
+  const source = sourceMatrix(filename, content, selection);
   if (!source.rows.length) {
     throw new AssetTrackError({ code: "csv.header_missing", status: 422 });
   }
   const candidates = headerCandidatesFor(source.rows);
   const headerRow = resolvedHeaderRow(source.rows, candidates, selection);
   const parsed = objectsFromMatrix(source.rows, headerRow);
-  return { ...parsed, sheet_name: source.sheet_name };
+  return {
+    ...parsed,
+    sheet_name: source.sheet_name,
+    worksheet_candidates: source.worksheet_candidates
+  };
 }
 
 function rawRowsForDisplay(
@@ -377,7 +445,7 @@ export function inspectCsv(
   if (!isMonth(month)) {
     throw new AssetTrackError({ code: "month.invalid", status: 422, params: { month } });
   }
-  const source = sourceMatrix(filename, content);
+  const source = sourceMatrix(filename, content, selection);
   if (!source.rows.length) {
     throw new AssetTrackError({ code: "csv.header_missing", status: 422 });
   }
@@ -386,8 +454,15 @@ export function inspectCsv(
   const parsed = objectsFromMatrix(source.rows, headerRow);
   const { headers } = parsed;
   const rows = parsed.rows.map(({ values }) => values);
+  const signatureSource = source.sheet_name
+    ? {
+        worksheet_name: source.sheet_name,
+        header_row: headerRow,
+        headers
+      }
+    : headers;
   const signature = createHash("sha256")
-    .update(JSON.stringify(headers), "utf8")
+    .update(JSON.stringify(signatureSource), "utf8")
     .digest("hex");
   const suggested: Partial<CsvColumnMapping> = {};
   for (const [field, aliases] of Object.entries(CSV_FIELD_ALIASES)) {
@@ -456,13 +531,19 @@ export function inspectCsv(
       }
       return [header, values];
     })),
-    header_status: selection || firstRowIsReasonable ? "normal" : "needs_confirmation",
-    header_confirmed: Boolean(selection),
+    header_status: selection?.header_row !== undefined || firstRowIsReasonable
+      ? "normal"
+      : "needs_confirmation",
+    header_confirmed: selection?.header_row !== undefined,
     header_row: headerRow,
     data_start_row: headerRow + 1,
     raw_row_count: source.rows.length,
     raw_rows: rawRowsForDisplay(source.rows, headerRow, candidates),
     header_candidates: candidates,
+    worksheet_name: source.sheet_name,
+    worksheet_candidates: source.worksheet_candidates,
+    encoding: source.encoding,
+    delimiter: source.delimiter,
     suggested_mapping: suggested
   };
 }
@@ -524,8 +605,10 @@ export function previewCsv(
   const examples: Record<string, Array<Record<string, unknown>>> = {
     outside_month: [],
     status_filtered: [],
-    invalid: [],
-    ignored_type: []
+    ignored_type: [],
+    invalid_date: [],
+    invalid_amount: [],
+    unmapped_type: []
   };
   const defaulted: Record<string, number> = { date: 0 };
   const defaultedExamples: Record<string, Array<Record<string, unknown>>> = {
@@ -533,6 +616,7 @@ export function previewCsv(
   };
   const filtered = Object.fromEntries(Object.keys(examples).map((key) => [key, 0]));
   const filteredRows: CsvImportFilteredRow[] = [];
+  const acceptedSourceRows: CsvRawRow[] = [];
   const recordFiltered = (
     reason: CsvImportFilterReason,
     row: number,
@@ -560,7 +644,7 @@ export function previewCsv(
       return;
     }
     if (!ALLOWED_TYPES.has(type)) {
-      recordFiltered("invalid", rowNumber, sourceValues, { row: rowNumber, reason: `收支值“${rawType}”尚未映射` });
+      recordFiltered("unmapped_type", rowNumber, sourceValues, { row: rowNumber, reason: `收支值“${rawType}”尚未映射` });
       return;
     }
     const sourceDate = mapping.date_column === "__month_start__"
@@ -573,7 +657,7 @@ export function previewCsv(
     try {
       date = normalizeDate(rawDate, month);
     } catch {
-      recordFiltered("invalid", rowNumber, sourceValues, { row: rowNumber, reason: `日期无法识别：${rawDate}` });
+      recordFiltered("invalid_date", rowNumber, sourceValues, { row: rowNumber, reason: `日期无法识别：${rawDate}` });
       return;
     }
     if (dateWasDefaulted) {
@@ -590,7 +674,7 @@ export function previewCsv(
     const rawAmount = sourceValues[mapping.amount_column] ?? "";
     const amount = parseAmount(rawAmount);
     if (amount === null) {
-      recordFiltered("invalid", rowNumber, sourceValues, { row: rowNumber, reason: "金额为空或无法识别" });
+      recordFiltered("invalid_amount", rowNumber, sourceValues, { row: rowNumber, reason: "金额为空或无法识别" });
       return;
     }
     const category = ["加仓", "提现"].includes(type)
@@ -600,7 +684,7 @@ export function previewCsv(
         : "";
     rows.push({
       client_id: `import:${randomUUID()}:${rowNumber}`,
-      source: filename,
+      source: `${filename} · 原始第 ${rowNumber} 行`,
       transaction_date: date,
       product,
       amount: Math.abs(amount),
@@ -611,6 +695,7 @@ export function previewCsv(
         ? sourceValues[mapping.counterparty_column]?.trim() ?? ""
         : ""
     });
+    acceptedSourceRows.push({ row: rowNumber, values: headers.map((header) => sourceValues[header] ?? "") });
   });
   const typeSummary: Record<string, number> = {};
   rows.forEach((row) => {
@@ -619,6 +704,7 @@ export function previewCsv(
   return {
     month,
     rows,
+    source_rows: acceptedSourceRows,
     issues: [],
     type_summary: typeSummary,
     modes: ["append", "replace"],

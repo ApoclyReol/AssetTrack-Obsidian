@@ -21,10 +21,13 @@ import type {
   Transaction
 } from "../types/transactions";
 import type {
+  CsvRawRow
+} from "../types/csv";
+import type {
   TransactionBusinessTab
 } from "../types/operations";
 import { scalarText } from "../domain/text";
-import { businessLabel, t } from "../i18n";
+import { businessLabel, displayError, fieldLabel, t } from "../i18n";
 import { money } from "../domain/moneyFormat";
 import {
   transactionBlockNumber,
@@ -140,11 +143,41 @@ function groupIssuesByRow(
 function issueSummaryText(issues: Array<Record<string, unknown>>): string {
   return issues
     .map((issue) => {
-      const field = scalarText(issue.field) || t("字段", "Field");
+      const field = fieldLabel(scalarText(issue.field) || "字段");
       const reason = scalarText(issue.issue ?? issue.reason) || t("无效", "Invalid");
-      return `${field}：${reason}`;
+      return `${field}${t("：", ": ")}${displayError(reason)}`;
     })
     .join(t("；", "; "));
+}
+
+function issueFieldsFor(field: keyof Transaction): string[] {
+  const aliases: Partial<Record<keyof Transaction, string[]>> = {
+    transaction_date: ["日期", "transaction_date"],
+    type: ["收支", "类型", "type"],
+    counterparty: ["对方", "交易对手", "counterparty"],
+    product: ["商品", "product"],
+    category: ["分类", "category", "category_key"],
+    amount: ["金额", "amount"],
+    account_key: ["账户", "account", "account_key"]
+  };
+  return aliases[field] ?? [String(field)];
+}
+
+function fieldIssueTitle(
+  issues: Array<Record<string, unknown>> | undefined,
+  field: keyof Transaction
+): string | undefined {
+  const names = new Set(issueFieldsFor(field));
+  const matching = issues?.filter((issue) => names.has(scalarText(issue.field))) ?? [];
+  if (!matching.length) return undefined;
+  return issueSummaryText(matching);
+}
+
+function sourceRowNumber(source?: string): number | null {
+  const match = source?.match(/原始第\s*(\d+)\s*行/);
+  if (!match) return null;
+  const row = Number(match[1]);
+  return Number.isInteger(row) && row > 0 ? row : null;
 }
 
 function RowIssueMarker({
@@ -161,8 +194,8 @@ function RowIssueMarker({
   return (
     <span
       className={`asset-track-row-issue-marker ${blocking > 0 ? "is-error" : "is-warning"}`}
-      title={`${label} · ${severity} ${issues.length}：${summary}`}
-      aria-label={`${label} · ${severity} ${issues.length}：${summary}`}
+      title={`${label} · ${severity} ${issues.length}${t("：", ": ")}${summary}`}
+      aria-label={`${label} · ${severity} ${issues.length}${t("：", ": ")}${summary}`}
     >
       {blocking > 0 ? "!" : "?"}
     </span>
@@ -171,6 +204,19 @@ function RowIssueMarker({
 
 function stableGroupKey(group: TransactionGroup): string {
   return `${group.type}:${group.groupBy}:${group.indexes.join(",")}`;
+}
+
+function SummaryColumnGroup({ hasCategory }: { hasCategory: boolean }) {
+  return (
+    <colgroup>
+      <col className="asset-track-summary-col-type" />
+      <col className="asset-track-summary-col-group" />
+      <col className="asset-track-summary-col-count" />
+      <col className="asset-track-summary-col-amount" />
+      {hasCategory && <col className="asset-track-summary-col-category" />}
+      <col className="asset-track-summary-col-actions" />
+    </colgroup>
+  );
 }
 
 export interface TransactionRuleControlContext {
@@ -201,6 +247,10 @@ export interface TransactionTableProps {
   onToggleTransaction?: (key: TransactionKey) => void;
   renderRuleControls?: TransactionRuleControls;
   renderTransactionActions?: TransactionRowActions;
+  focusIndex?: number | null;
+  showSecondaryFields?: boolean;
+  sourceRows?: readonly CsvRawRow[];
+  onViewSourceRow?: (row: Transaction, sourceRow: CsvRawRow) => void;
 }
 
 export interface TransactionSummaryTableProps {
@@ -240,7 +290,11 @@ export function TransactionTable({
   selectedTransactionKeys,
   onToggleTransaction,
   renderRuleControls,
-  renderTransactionActions
+  renderTransactionActions,
+  focusIndex,
+  showSecondaryFields = true,
+  sourceRows = [],
+  onViewSourceRow
 }: TransactionTableProps) {
   const displayTitle = businessLabel(title);
   const [sort, setSort] = useState<SortState>(null);
@@ -254,6 +308,10 @@ export function TransactionTable({
   const pendingFocusKey = useRef<string | null>(null);
   const usesCategory = transactionTypeUsesCategory(title);
   const issuesByRow = useMemo(() => groupIssuesByRow(issues), [issues]);
+  const sourceRowsByNumber = useMemo(
+    () => new Map(sourceRows.map((sourceRow) => [sourceRow.row, sourceRow] as const)),
+    [sourceRows]
+  );
   const usesInvestmentAccount = title === "加仓" || title === "提现";
   const businessClass = title === "支出"
     ? " asset-track-grid--outgoing"
@@ -261,7 +319,9 @@ export function TransactionTable({
       ? " asset-track-grid--incoming"
       : " asset-track-grid--investment";
   const gridClassName = `asset-track-grid${businessClass}${usesInvestmentAccount || usesCategory
-    ? "" : " asset-track-grid--no-category"}`;
+    ? "" : " asset-track-grid--no-category"}${!usesInvestmentAccount && !showSecondaryFields
+      ? " asset-track-grid--compact"
+      : ""}`;
   const columns: Array<[string, string]> = usesInvestmentAccount
     ? [
       ["transaction_date", t("日期", "Date")],
@@ -270,8 +330,12 @@ export function TransactionTable({
     ]
     : [
       ["transaction_date", t("日期", "Date")],
-      ["counterparty", t("交易对手", "Counterparty")],
-      ...(usesCategory ? [["category", t("分类", "Category")] as [string, string]] : []),
+      ...(showSecondaryFields
+        ? [["counterparty", t("交易对手", "Counterparty")] as [string, string]]
+        : []),
+      ...(showSecondaryFields && usesCategory
+        ? [["category", t("分类", "Category")] as [string, string]]
+        : []),
       ["product", t("商品", "Item")],
       ["amount", t("金额", "Amount")]
     ];
@@ -314,6 +378,17 @@ export function TransactionTable({
     }
     previousRowCount.current = rows.length;
   }, [rowHeight, rows, sorted, title]);
+  useEffect(() => {
+    if (focusIndex === null || focusIndex === undefined) return;
+    const sortedPosition = sorted.findIndex(({ row }) => row === focusIndex);
+    if (sortedPosition < 0) return;
+    const table = virtualTableRef.current;
+    if (!table) return;
+    const nextScrollTop = Math.max(0, sortedPosition * rowHeight - rowHeight);
+    pendingFocusKey.current = tableRowKey(rows[focusIndex], focusIndex);
+    table.scrollTop = nextScrollTop;
+    setViewport({ scrollTop: nextScrollTop, height: table.clientHeight });
+  }, [focusIndex, rowHeight, rows, sorted]);
   useEffect(() => {
     if (!pendingFocusKey.current) return;
     const target = Array.from(virtualTableRef.current?.querySelectorAll("[data-asset-track-row-key]") ?? [])
@@ -386,7 +461,11 @@ export function TransactionTable({
           {visibleRows.map(({ row: originalIndex }) => {
             const row = rows[originalIndex];
             const blockNumber = blockNumbers[originalIndex];
+            const rowIssues = issuesByRow.get(originalIndex) ?? [];
             const stableKey = transactionKey(row);
+            const sourceRow = sourceRowNumber(row.source)
+              ? sourceRowsByNumber.get(sourceRowNumber(row.source) as number)
+              : undefined;
             const options = usesCategory ? categories.filter(
               (category) =>
                 category.transaction_type === categoryTypeForTransaction(row.type) &&
@@ -413,12 +492,22 @@ export function TransactionTable({
                   )}
                   <span>{blockNumber}</span>
                   <RowIssueMarker
-                    issues={issuesByRow.get(originalIndex)}
+                    issues={rowIssues}
                     label={t(`${title}第 ${blockNumber} 行`, `${displayTitle} row ${blockNumber}`)}
                   />
+                  <small
+                    className="asset-track-transaction-source"
+                    title={row.source || t("手工新增流水", "Manually added transaction")}
+                  >
+                    {row.source
+                      ? t("导入", "Imported")
+                      : t("手工", "Manual")}
+                  </small>
                 </span>
                 <input
                   aria-label={t(`${title}第 ${blockNumber} 行日期`, `${displayTitle} row ${blockNumber} date`)}
+                  aria-invalid={Boolean(fieldIssueTitle(rowIssues, "transaction_date"))}
+                  title={fieldIssueTitle(rowIssues, "transaction_date")}
                   type="date"
                   value={row.transaction_date}
                   onChange={(event) => onUpdate(originalIndex, "transaction_date", event.target.value)}
@@ -426,6 +515,8 @@ export function TransactionTable({
                 {usesInvestmentAccount && (
                   <select
                     aria-label={t(`${title}第 ${blockNumber} 行账户`, `${displayTitle} row ${blockNumber} account`)}
+                    aria-invalid={Boolean(fieldIssueTitle(rowIssues, "account_key"))}
+                    title={fieldIssueTitle(rowIssues, "account_key")}
                     value={row.account_key ?? ""}
                     onChange={(event) => onUpdate(originalIndex, "account_key", event.target.value)}
                   >
@@ -439,15 +530,19 @@ export function TransactionTable({
                       ))}
                   </select>
                 )}
-                {!usesInvestmentAccount && <input
+                {!usesInvestmentAccount && showSecondaryFields && <input
                   aria-label={t(`${title}第 ${blockNumber} 行交易对手`, `${displayTitle} row ${blockNumber} counterparty`)}
+                  aria-invalid={Boolean(fieldIssueTitle(rowIssues, "counterparty"))}
+                  title={fieldIssueTitle(rowIssues, "counterparty")}
                   value={row.counterparty ?? ""}
                   placeholder={t("交易对手", "Counterparty")}
                   onChange={(event) => onUpdate(originalIndex, "counterparty", event.target.value)}
                 />}
-                {!usesInvestmentAccount && usesCategory && (
+                {!usesInvestmentAccount && showSecondaryFields && usesCategory && (
                   <select
                     aria-label={t(`${title}第 ${blockNumber} 行分类`, `${displayTitle} row ${blockNumber} category`)}
+                    aria-invalid={Boolean(fieldIssueTitle(rowIssues, "category"))}
+                    title={fieldIssueTitle(rowIssues, "category")}
                     value={row.category_key ?? ""}
                     onChange={(event) => onUpdate(originalIndex, "category_key", event.target.value)}
                   >
@@ -461,11 +556,15 @@ export function TransactionTable({
                 )}
                 {!usesInvestmentAccount && <input
                   aria-label={t(`${title}第 ${blockNumber} 行商品`, `${displayTitle} row ${blockNumber} item`)}
+                  aria-invalid={Boolean(fieldIssueTitle(rowIssues, "product"))}
+                  title={fieldIssueTitle(rowIssues, "product")}
                   value={row.product}
                   onChange={(event) => onUpdate(originalIndex, "product", event.target.value)}
                 />}
                 <input
                   aria-label={t(`${title}第 ${blockNumber} 行金额`, `${displayTitle} row ${blockNumber} amount`)}
+                  aria-invalid={Boolean(fieldIssueTitle(rowIssues, "amount"))}
+                  title={fieldIssueTitle(rowIssues, "amount")}
                   type="number"
                   min="0"
                   step="0.01"
@@ -483,6 +582,17 @@ export function TransactionTable({
                     index: originalIndex,
                     transactionKey: stableKey
                   })}
+                  {sourceRow && onViewSourceRow && (
+                    <button
+                      type="button"
+                      className="asset-track-source-row-action"
+                      title={t("查看导入时保留的原始账单行", "View the raw statement row retained for this import")}
+                      aria-label={t(`查看${title}第 ${blockNumber} 行原始账单`, `View raw statement for ${displayTitle} row ${blockNumber}`)}
+                      onClick={() => onViewSourceRow(row, sourceRow)}
+                    >
+                      {t("原始行", "Source row")}
+                    </button>
+                  )}
                   <button
                     type="button"
                     aria-label={t(`删除${title}第 ${blockNumber} 行`, `Delete ${displayTitle} row ${blockNumber}`)}
@@ -554,6 +664,7 @@ export function TransactionSummaryTable({
     <Section title={summaryTitle}>
       <div className="asset-track-table-scroll">
         <table className={`asset-track-summary-table ${summaryClassName}`.trim()}>
+          <SummaryColumnGroup hasCategory={hasCategory} />
           <thead>
             <tr>
               <th scope="col" className="asset-track-type-column">
@@ -657,15 +768,8 @@ export function TransactionSummaryTable({
                   <tr key={`${groupViewKey}:expanded`} className="asset-track-summary-detail-row">
                     <td className="asset-track-summary-detail-host-cell" colSpan={5 + (hasCategory ? 1 : 0)}>
                       <div className="asset-track-summary-details">
-                        <table className={`asset-track-summary-detail-table${hasCategory ? " asset-track-summary-detail-table--has-category" : ""}`}>
-                          <colgroup>
-                            <col />
-                            <col />
-                            <col />
-                            <col />
-                            {hasCategory && <col />}
-                            <col />
-                          </colgroup>
+                        <table className={`asset-track-summary-detail-table asset-track-summary-detail-table--nested${hasCategory ? " asset-track-summary-detail-table--has-category" : ""}`}>
+                          <SummaryColumnGroup hasCategory={hasCategory} />
                           <thead>
                             <tr>
                               <th scope="col">{t("行号", "Row")}</th>

@@ -12,7 +12,8 @@ export function AnalysisView({
   year,
   annualState,
   monthlyState,
-  reconciliationTolerance
+  reconciliationTolerance,
+  onOpenTransactions
 }: {
   month: string;
   mode: AnalysisMode;
@@ -20,6 +21,7 @@ export function AnalysisView({
   annualState: LoadState<AnnualOverview>;
   monthlyState: LoadState<MonthOverview>;
   reconciliationTolerance: number;
+  onOpenTransactions?: () => void;
 }) {
   return (
     <main className="asset-track-analysis">
@@ -31,6 +33,7 @@ export function AnalysisView({
           month={month}
           state={monthlyState}
           reconciliationTolerance={reconciliationTolerance}
+          onOpenTransactions={onOpenTransactions}
         />
       )}
       {mode === "monthly" && !month && <Empty text={t("尚无可分析月份。", "No months are available for analysis.")} />}

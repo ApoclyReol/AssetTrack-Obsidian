@@ -39,11 +39,9 @@ import {
 import { businessLabel, displayError, getLocale, t } from "../i18n";
 import { configureMoneyFormat, money } from "../domain/moneyFormat";
 import type { ChoiceAction } from "./ConfirmModal";
-import {
-  EmptyState,
-  messageFor
-} from "./editorPrimitives";
+import { messageFor } from "./editorPrimitives";
 import type { LoadState } from "./AnalysisPrimitives";
+import { ReconciliationHint } from "./ReconciliationHint";
 import type { EditorDraftSnapshot } from "./editorDraft";
 import type { EditorSession } from "./editorSession";
 import {
@@ -86,6 +84,7 @@ interface Props {
     signature: string,
     mapping: CsvColumnMapping
   ) => Promise<void>;
+  clearCsvMapping?: (signature: string) => Promise<void>;
 }
 
 
@@ -116,12 +115,47 @@ function MonthMetricsSummary({
         <strong>{money(metrics.expense)}</strong>
       </div>
       <div className={`asset-track-month-metric ${reconciliationTone(metrics.discrepancy, reconciliationTolerance) ?? ""}`}>
-        <span>{t("对账差额", "Reconciliation difference")}</span>
+        <span className="asset-track-month-metric-label">
+          {t("对账差额", "Reconciliation difference")}
+          <ReconciliationHint
+            discrepancy={metrics.discrepancy}
+            tolerance={reconciliationTolerance}
+          />
+        </span>
         <strong>
           {metrics.discrepancy === null ? t("不可比较", "Unavailable") : money(metrics.discrepancy)}
           {discrepancyStatus && <small className="asset-track-month-metric-suffix">（{businessLabel(discrepancyStatus)}）</small>}
         </strong>
       </div>
+    </section>
+  );
+}
+
+function EmptyMonthGuide({
+  canCreate,
+  onCreate
+}: {
+  canCreate: boolean;
+  onCreate: () => void;
+}) {
+  return (
+    <section className="asset-track-empty-month-guide">
+      <h2>{t("从一个月度结算开始", "Start with a monthly close")}</h2>
+      <p>{t("创建月份后，按下面顺序完成一次闭环：", "After creating a month, complete the loop in this order:")}</p>
+      <ol>
+        <li>{t("导入账单并确认表头、字段和收支映射", "Import a statement and confirm its header, fields, and type mapping")}</li>
+        <li>{t("整理流水，处理异常并保存", "Organize transactions, resolve issues, and save")}</li>
+        <li>{t("补充资产账户和借款信息", "Complete asset accounts and debt information")}</li>
+        <li>{t("回到分析页检查对账和月度变化", "Return to analysis to check reconciliation and monthly changes")}</li>
+      </ol>
+      <button
+        type="button"
+        className="mod-cta"
+        disabled={!canCreate}
+        onClick={onCreate}
+      >
+        {t("创建第一个月份", "Create the first month")}
+      </button>
     </section>
   );
 }
@@ -143,7 +177,8 @@ export function AssetTrackEditorApp({
   notifyDataChanged,
   subscribeDataChanges,
   getCsvMapping,
-  saveCsvMapping
+  saveCsvMapping,
+  clearCsvMapping
 }: Props) {
   configureMoneyFormat({
     locale: getLocale(),
@@ -180,6 +215,10 @@ export function AssetTrackEditorApp({
       ? recoveryDraft.current.month
       : initialMonth ?? ""
   );
+  const transactionRecoveryDraft = recoveryDraft.current?.kind === "transactions"
+    && recoveryDraft.current.month === month
+    ? recoveryDraft.current
+    : undefined;
   const [dataVersion, setDataVersion] = useState(0);
   const monthRefreshSequence = useRef(0);
   const navigationSequence = useRef(0);
@@ -292,7 +331,7 @@ export function AssetTrackEditorApp({
     }
   }, [analysisYear, analysisYears.join(",")]);
   useEffect(() => {
-    if (initializing) return;
+    if (initializing || mode !== "analysis") return;
     if (analysisMode === "monthly" && savedMonths.length === 0) {
       setAnalysisMode("annual");
     }
@@ -430,6 +469,7 @@ export function AssetTrackEditorApp({
     if (sequence !== navigationSequence.current) return;
     await refreshMonths();
     if (sequence !== navigationSequence.current) return;
+    recoveryDraft.current = undefined;
     setMonth(target);
     notifyDataChanged();
     new Notice(t(`${target} 已创建`, `${target} created`));
@@ -590,6 +630,7 @@ export function AssetTrackEditorApp({
           annualState={currentAnnualState}
           monthlyState={currentMonthlyState}
           reconciliationTolerance={settings.reconciliationTolerance}
+          onOpenTransactions={() => void switchMode("transactions")}
         />
       )}
       {mode === "transactions" && month && (
@@ -615,6 +656,8 @@ export function AssetTrackEditorApp({
                 `The month was deleted, but the month list could not refresh: ${messageFor(error)}`
               ));
             }
+            recoveryDraft.current = undefined;
+            onSessionChange(null);
             setMonth(next);
             notifyDataChanged();
           }}
@@ -629,16 +672,22 @@ export function AssetTrackEditorApp({
             }
             notifyDataChanged();
           }}
+          onNavigateSection={switchMonthSection}
+          onNavigateAnalysis={() => switchMode("analysis")}
           onDataChanged={notifyDataChanged}
-          initialDraft={recoveryDraft.current?.kind === "transactions"
-            ? recoveryDraft.current
-            : undefined}
+          initialDraft={transactionRecoveryDraft}
           onSessionChange={handleSessionChange}
           getCsvMapping={getCsvMapping}
           saveCsvMapping={saveCsvMapping}
+          clearCsvMapping={clearCsvMapping}
         />
       )}
-      {mode === "transactions" && !month && <EmptyState text={t("尚无月份，请创建第一个月份。", "No months exist yet. Create the first month.")} />}
+      {mode === "transactions" && !month && (
+        <EmptyMonthGuide
+          canCreate={Boolean(monthPolicy?.can_create)}
+          onCreate={() => void createNext().catch((error) => new Notice(messageFor(error)))}
+        />
+      )}
       {mode === "rules" && (
         <RulesEditor
           ref={rulesEditorRef}

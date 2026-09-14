@@ -52,7 +52,6 @@ export class AssetTrackEditorView extends ItemView {
   ): (() => void) => this.plugin.onDataChange(listener);
   private readonly notifyDataChanged = (): void => {
     this.plugin.notifyDataChanged();
-    void this.plugin.refreshViews();
   };
   private readonly getCsvMapping = (
     signature: string
@@ -66,6 +65,8 @@ export class AssetTrackEditorView extends ItemView {
     mapping,
     updated_at: new Date().toISOString()
   });
+  private readonly clearCsvMapping = (headerSignature: string): Promise<void> =>
+    this.plugin.clearCsvMapping(headerSignature);
   private readonly confirmAction = (
     title: string,
     message: string,
@@ -236,7 +237,8 @@ export class AssetTrackEditorView extends ItemView {
           notifyDataChanged: this.notifyDataChanged,
           subscribeDataChanges: this.subscribeDataChanges,
           getCsvMapping: this.getCsvMapping,
-          saveCsvMapping: this.saveCsvMapping
+          saveCsvMapping: this.saveCsvMapping,
+          clearCsvMapping: this.clearCsvMapping
         })
       )
     );

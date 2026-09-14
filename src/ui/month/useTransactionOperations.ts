@@ -366,8 +366,10 @@ export function useTransactionOperations({
       { preview: result.preview, selection }
     ];
     mark({ ...draft, transactions: result.rows }, "transactions");
-    new Notice(operationSuccessNotice(request, result.preview));
-  }, [draft, ensureRequestContext, mark, month, pendingOperationLogsRef]);
+    const message = operationSuccessNotice(request, result.preview);
+    new Notice(message);
+    setState({ kind: "success", message });
+  }, [draft, ensureRequestContext, mark, month, pendingOperationLogsRef, setState]);
 
   const applyOperationPreview = useCallback(async (
     request: MonthOperationRequest,
@@ -544,11 +546,11 @@ export function useTransactionOperations({
       const message = operationType === "income-to-daifu"
         ? t(
           `将 ${selectedRows.length} 条收入改为代付回款，并清空分类。此操作用于纠正账单导入方向，是否继续？`,
-          `Convert ${selectedRows.length} income transactions to daifu repayments and clear their categories? This is used to correct imported bill direction.`
+          `Convert ${selectedRows.length} income transactions to paid-on-behalf repayments and clear their categories? This is used to correct imported bill direction.`
         )
         : t(
           `将 ${selectedRows.length} 条代付回款改为收入，并清空分类。此操作用于纠正账单导入方向，是否继续？`,
-          `Convert ${selectedRows.length} daifu repayment transactions to income and clear their categories? This is used to correct imported bill direction.`
+          `Convert ${selectedRows.length} paid-on-behalf repayment transactions to income and clear their categories? This is used to correct imported bill direction.`
         );
       const confirmed = app
         ? await confirmAction(
@@ -598,7 +600,7 @@ export function useTransactionOperations({
       business
     );
     if (!rows.length) {
-      new Notice(t("请选择可分类的支出、收入或代付流水。", "Select classifiable expense, income, or daifu transactions."));
+      new Notice(t("请选择可分类的支出、收入或代付流水。", "Select classifiable expense, income, or paid-on-behalf transactions."));
       return;
     }
     const sourceDraft = draft;

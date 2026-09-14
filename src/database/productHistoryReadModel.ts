@@ -20,10 +20,12 @@ import { normalizeProductKey, RuleMatcher, ruleMatchLevel } from "../domain/rule
 import { roundHalfEven } from "../domain/money";
 import {
   createDateReadWindow,
+  createMonthReadWindow,
   PRODUCT_OVERVIEW_MONTHS,
   recentMonthReadWindow,
   SYSTEM_CHECK_MONTHS
 } from "../domain/readWindows";
+import { isMonth } from "../domain/dates";
 import { scalarText } from "../domain/text";
 import { RuleReportReadModel } from "./ruleReportReadModel";
 import { transactionWindowPredicate } from "./readWindowSql";
@@ -489,7 +491,15 @@ export class ProductHistoryReadModel {
       }
       return scope;
     }
-    const latestMonth = this.context.savedMonths(db).sort().at(-1);
+    const savedMonths = this.context.savedMonths(db).filter(isMonth).sort();
+    if (query.read_scope === "all") {
+      const firstMonth = savedMonths.at(0);
+      const latestMonth = savedMonths.at(-1);
+      return firstMonth && latestMonth
+        ? createMonthReadWindow(defaultWindowKind, firstMonth, latestMonth)
+        : null;
+    }
+    const latestMonth = savedMonths.at(-1);
     return recentMonthReadWindow(
       defaultWindowKind,
       latestMonth,

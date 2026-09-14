@@ -30,6 +30,12 @@ export interface CsvHeaderCandidate {
   confidence: "high" | "medium" | "low";
 }
 
+export interface CsvWorksheetCandidate {
+  name: string;
+  row_count: number;
+  header_candidates: CsvHeaderCandidate[];
+}
+
 export interface CsvRawRow {
   row: number;
   values: string[];
@@ -37,14 +43,21 @@ export interface CsvRawRow {
 
 export interface CsvStructureSelection {
   /** One-based source row number, matching the row number shown to users. */
-  header_row: number;
+  header_row?: number;
+  /** Workbook worksheet name. CSV sources leave this unset. */
+  worksheet_name?: string;
 }
+
+export type CsvEncoding = "utf-8" | "gb18030" | "utf-8-fallback";
+export type CsvDelimiter = "," | "\t" | ";";
 
 export type CsvImportFilterReason =
   | "outside_month"
   | "status_filtered"
   | "ignored_type"
-  | "invalid";
+  | "invalid_date"
+  | "invalid_amount"
+  | "unmapped_type";
 
 export interface CsvImportFilteredRow {
   row: number;
@@ -70,6 +83,10 @@ export interface CsvInspection {
   raw_row_count?: number;
   raw_rows?: CsvRawRow[];
   header_candidates?: CsvHeaderCandidate[];
+  worksheet_name?: string;
+  worksheet_candidates?: CsvWorksheetCandidate[];
+  encoding?: CsvEncoding;
+  delimiter?: CsvDelimiter;
   suggested_mapping: Partial<CsvColumnMapping>;
 }
 
@@ -86,6 +103,8 @@ export interface CsvImportStats {
 export interface CsvImportPreview {
   month: string;
   rows: Transaction[];
+  /** Raw source cells for accepted rows, kept in memory for the current import session. */
+  source_rows?: CsvRawRow[];
   issues: Array<Record<string, unknown>>;
   type_summary: Record<string, number>;
   modes: ImportMode[];

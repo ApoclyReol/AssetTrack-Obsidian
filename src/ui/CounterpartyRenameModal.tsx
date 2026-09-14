@@ -58,6 +58,7 @@ export function CounterpartyRenameContent({
       setLoading(true);
       setMessage(t("正在加载当前交易对手的流水…", "Loading transactions for the current counterparty…"));
       void api.productHistory({
+        read_scope: "all",
         group_by: "counterparty",
         transaction_type: group.transaction_type,
         product_key: group.product_key

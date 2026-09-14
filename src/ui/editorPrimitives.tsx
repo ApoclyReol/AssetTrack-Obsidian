@@ -1,6 +1,6 @@
-import { type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { scalarText } from "../domain/text";
-import { businessLabel, displayError, getLocale, t } from "../i18n";
+import { businessLabel, displayError, fieldLabel, getLocale, t } from "../i18n";
 import { transactionBlockNumber } from "./analysisModel";
 import type {
   Transaction
@@ -152,6 +152,12 @@ export function IssueList({
   const visibleIssues = orderedIssues(issues).slice(0, MAX_VISIBLE_ISSUES);
   const omittedCount = issues.length - visibleIssues.length;
   const omittedBlocking = blocking - visibleIssues.filter(({ issue }) => issueIsBlocking(issue)).length;
+  const [collapsed, setCollapsed] = useState(
+    () => issues.length > 0 && blocking === 0
+  );
+  useEffect(() => {
+    if (blocking > 0) setCollapsed(false);
+  }, [blocking]);
   const summary = blocking > 0
     ? omittedCount > 0
       ? t(
@@ -173,45 +179,61 @@ export function IssueList({
       );
   return (
     <div className="asset-track-issues" role="alert">
-      <strong>{summary}</strong>
-      <ul>
-        {visibleIssues.map(({ issue, originalIndex }) => {
-          const globalIndex = Number(issue.row_index ?? 0);
-          const type = scalarText(
-            issue.type ?? rows[globalIndex]?.type ?? t("流水", "Transaction")
-          );
-          const blockRow = transactionBlockNumber(rows, globalIndex);
-          const severity = issueIsBlocking(issue)
-            ? t("错误", "Error")
-            : t("警告", "Warning");
-          const issueReason = scalarText(issue.issue ?? issue.reason) || "无效";
-          const hasRuleConflict = Array.isArray(issue.rule_ids) && issue.rule_ids.length > 0;
-          const visibleReason = hasRuleConflict
-            ? t("规则存在冲突，未自动覆盖", "Rules conflict; no automatic override was applied.")
-            : issueReason;
-          return (
-            <li key={originalIndex}>
-              {t(
-                `［${severity}］${businessLabel(type)}第 ${Math.max(1, blockRow)} 行／${scalarText(issue.field) || "规则"}／${visibleReason}`,
-                `[${severity}] ${businessLabel(type)} row ${Math.max(1, blockRow)} / ${businessLabel(scalarText(issue.field) || "规则")} / ${displayError(visibleReason)}`
-              )}
-              {scalarText(issue.suggestion) && <small> · {displayError(scalarText(issue.suggestion))}</small>}
-            </li>
-          );
-        })}
-      </ul>
-      {omittedCount > 0 && (
-        <small className="asset-track-issues-omitted">
-          {omittedBlocking > 0
-            ? t(
-              `其余 ${omittedCount} 项已省略，其中 ${omittedBlocking} 项会阻止保存。`,
-              `${omittedCount} more issues are hidden, including ${omittedBlocking} that block saving.`
-            )
-            : t(
-              `其余 ${omittedCount} 项已省略。`,
-              `${omittedCount} more issues are hidden.`
-            )}
-        </small>
+      <div className="asset-track-issues-heading">
+        <strong>{summary}</strong>
+        <button
+          type="button"
+          className="asset-track-issues-toggle"
+          aria-expanded={!collapsed}
+          onClick={() => setCollapsed((current) => !current)}
+        >
+          {collapsed
+            ? t("展开问题列表", "Expand issue list")
+            : t("收起问题列表", "Collapse issue list")}
+        </button>
+      </div>
+      {!collapsed && (
+        <>
+          <ul>
+            {visibleIssues.map(({ issue, originalIndex }) => {
+              const globalIndex = Number(issue.row_index ?? 0);
+              const type = scalarText(
+                issue.type ?? rows[globalIndex]?.type ?? t("流水", "Transaction")
+              );
+              const blockRow = transactionBlockNumber(rows, globalIndex);
+              const severity = issueIsBlocking(issue)
+                ? t("错误", "Error")
+                : t("警告", "Warning");
+              const issueReason = scalarText(issue.issue ?? issue.reason) || t("无效", "Invalid");
+              const hasRuleConflict = Array.isArray(issue.rule_ids) && issue.rule_ids.length > 0;
+              const visibleReason = hasRuleConflict
+                ? t("规则存在冲突，未自动覆盖", "Rules conflict; no automatic override was applied.")
+                : issueReason;
+              return (
+                <li key={originalIndex}>
+                  {t(
+                    `［${severity}］${businessLabel(type)}第 ${Math.max(1, blockRow)} 行／${scalarText(issue.field) || "规则"}／${visibleReason}`,
+                    `[${severity}] ${businessLabel(type)} row ${Math.max(1, blockRow)} / ${fieldLabel(scalarText(issue.field) || "规则")} / ${displayError(visibleReason)}`
+                  )}
+                  {scalarText(issue.suggestion) && <small> · {displayError(scalarText(issue.suggestion))}</small>}
+                </li>
+              );
+            })}
+          </ul>
+          {omittedCount > 0 && (
+            <small className="asset-track-issues-omitted">
+              {omittedBlocking > 0
+                ? t(
+                  `其余 ${omittedCount} 项已省略，其中 ${omittedBlocking} 项会阻止保存。`,
+                  `${omittedCount} more issues are hidden, including ${omittedBlocking} that block saving.`
+                )
+                : t(
+                  `其余 ${omittedCount} 项已省略。`,
+                  `${omittedCount} more issues are hidden.`
+                )}
+            </small>
+          )}
+        </>
       )}
     </div>
   );

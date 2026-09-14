@@ -187,6 +187,9 @@ export function HistoryBackfillContent({
   ) => {
     const detailQuery = {
       ...baseQuery,
+      from_date: undefined,
+      to_date: undefined,
+      read_scope: "all" as const,
       transaction_type: group.transaction_type,
       product_key: group.product_key
     };
@@ -241,7 +244,7 @@ export function HistoryBackfillContent({
         && (!source || category.transaction_type === source.transaction_type))?.category_key ?? ""
     );
     void loadStatsForQuery(
-      { category_key: initialQuery.category_key },
+      { category_key: initialQuery.category_key, read_scope: "all" },
       true
     );
   }, [categories, detailOnly, initialQuery?.category_key, loadStatsForQuery, mode]);
@@ -434,7 +437,7 @@ export function HistoryBackfillContent({
     {scope && !detailOnly && <p className="asset-track-read-window-note" role="note">{overview
       ? t(`商品总览范围：${scope.from_date} 至 ${scope.to_date}`, `Item overview range: ${scope.from_date} to ${scope.to_date}`)
       : mode === "category"
-        ? t(`分类历史范围：近 5 年（${scope.from_date} 至 ${scope.to_date}）`, `Category history range: last 5 years (${scope.from_date} to ${scope.to_date})`)
+        ? t(`分类历史范围：全部历史（${scope.from_date} 至 ${scope.to_date}）`, `Category history range: all history (${scope.from_date} to ${scope.to_date})`)
         : t(`统计范围：近 5 年（${scope.from_date} 至 ${scope.to_date}）`, `Statistics range: last 5 years (${scope.from_date} to ${scope.to_date})`)}</p>}
 
     {message && <p className="asset-track-rule-history-message" role="status">{message}</p>}

@@ -44,7 +44,14 @@ const imported = {
 const preview: CsvImportPreview = {
   month: "2026-07",
   rows: [imported],
-  issues: [{ code: "transaction.category.missing", severity: "warning" }],
+  source_rows: [{ row: 2, values: ["2026-07-02", "导入流水", "2", "支出"] }],
+  issues: [{
+    code: "transaction.category.missing",
+    field: "分类",
+    row_index: 0,
+    severity: "警告",
+    blocking: false
+  }],
   type_summary: { 支出: 1 },
   modes: ["append", "replace"],
   import_stats: {
@@ -99,6 +106,12 @@ function createSession() {
   };
 }
 
+function createSessionWithMappingFailure() {
+  const session = createSession();
+  session.saveCsvMapping.mockRejectedValue(new Error("映射保存失败"));
+  return session;
+}
+
 async function openImport(result: ReturnType<typeof createSession>["result"]) {
   const file = {
     name: "账单.csv",
@@ -113,6 +126,26 @@ async function openImport(result: ReturnType<typeof createSession>["result"]) {
 }
 
 describe("CSV import session", () => {
+  it("hides empty-category reminders in import preview but restores them after applying", async () => {
+    const session = createSession();
+    await openImport(session.result);
+
+    let previewResult: CsvImportPreview | undefined;
+    await act(async () => {
+      previewResult = await session.result.current.previewMappedCsv(mapping);
+    });
+
+    expect(previewResult?.issues).toEqual([]);
+    await act(async () => {
+      await session.result.current.applyCsvPreview(previewResult!, "append", mapping);
+    });
+    expect(session.mark).toHaveBeenCalledWith(
+      { ...session.draft, transactions: [...session.draft.transactions, imported] },
+      "transactions",
+      preview.issues
+    );
+  });
+
   it("puts accepted rows directly into the draft without opening an operation preview", async () => {
     const session = createSession();
     await openImport(session.result);
@@ -132,6 +165,42 @@ describe("CSV import session", () => {
     expect(session.previewTransactionOperation).not.toHaveBeenCalled();
     expect(session.invalidatePendingOperationLogs).not.toHaveBeenCalled();
     expect(session.saveCsvMapping).toHaveBeenCalledWith("signature", mapping);
+    expect(session.result.current.importFeedback?.kind).toBe("success");
+    expect(session.result.current.lastImportedSource).toMatchObject({
+      filename: "账单.csv",
+      headers: ["日期", "商品", "金额", "类型"],
+      rows: [{ row: 2, values: ["2026-07-02", "导入流水", "2", "支出"] }]
+    });
+    expect(session.result.current.importFeedback?.message)
+      .toContain("已把 1 条接受流水加入");
+    expect(session.setState).toHaveBeenLastCalledWith({ kind: "idle" });
+  });
+
+  it("keeps accepted rows when mapping persistence fails", async () => {
+    const session = createSessionWithMappingFailure();
+    await openImport(session.result);
+
+    await act(async () => {
+      await session.result.current.applyCsvPreview(preview, "append", mapping);
+    });
+
+    expect(session.mark).toHaveBeenCalledWith(
+      {
+        ...session.draft,
+        transactions: [...session.draft.transactions, imported]
+      },
+      "transactions",
+      preview.issues
+    );
+    expect(session.saveCsvMapping).toHaveBeenCalledWith("signature", mapping);
+    expect(session.mark.mock.invocationCallOrder[0])
+      .toBeLessThan(session.saveCsvMapping.mock.invocationCallOrder[0]);
+    expect(session.result.current.importFeedback).toEqual({
+      kind: "warning",
+      message: "流水已加入，但映射未保存。",
+      canRetry: false
+    });
+    expect(session.setState).toHaveBeenLastCalledWith({ kind: "idle" });
   });
 
   it("invalidates stale operation logs before replacing the draft", async () => {
@@ -143,5 +212,35 @@ describe("CSV import session", () => {
     });
 
     expect(session.invalidatePendingOperationLogs).toHaveBeenCalledOnce();
+  });
+
+  it("explains when the preview has no accepted rows", async () => {
+    const session = createSession();
+    await openImport(session.result);
+    const emptyPreview: CsvImportPreview = {
+      ...preview,
+      rows: [],
+      type_summary: {},
+      import_stats: {
+        ...preview.import_stats,
+        accepted_rows: 0,
+        filtered_rows: [{
+          row: 2,
+          reason: "ignored_type",
+          values: { 日期: "2026-07-02", 商品: "被忽略", 金额: "2", 类型: "其他" }
+        }],
+        filtered: { ignored_type: 1 }
+      }
+    };
+
+    await act(async () => {
+      await session.result.current.applyCsvPreview(emptyPreview, "append", mapping);
+    });
+
+    expect(session.result.current.importFeedback?.kind).toBe("warning");
+    expect(session.result.current.importFeedback?.message)
+      .toContain("没有通过预览");
+    expect(session.mark).not.toHaveBeenCalled();
+    expect(session.setState).toHaveBeenLastCalledWith({ kind: "idle" });
   });
 });

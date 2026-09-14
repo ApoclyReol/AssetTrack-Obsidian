@@ -73,6 +73,12 @@ export function CategoryDefinitionsTable({
   const categoryView = sortRows(categories, sort, (row, key) => row[key as keyof CategoryDefinition]);
 
   return <Section>
+    <p className="asset-track-rule-history-message" role="note">
+      {t(
+        "如需停用分类，请先将该分类中的流水条目迁移到其他分类，并处理相关规则引用，然后再删除分类。",
+        "To stop using a category, first migrate its transaction entries to another category and resolve related rule references, then delete the category."
+      )}
+    </p>
     {categoryView.length === 0 ? <EmptyState text={t("尚无分类定义。", "No category definitions yet.")} /> : <div ref={tableScrollRef} className="asset-track-table-scroll asset-track-responsive-scroll asset-track-rule-table-scroll">
       <table className="asset-track-category-table"><thead><tr>{[
         ["name", t("名称", "Name")], ["description", t("定义说明", "Description")], ["transaction_type", t("收支", "Type")], ["necessity", t("必要性", "Necessity")], ["pattern", t("消费频率", "Frequency")], ["is_big_ticket", t("大额", "Large")], ["color", t("颜色", "Color")], ["transaction_count", t("流水数", "Transactions")]

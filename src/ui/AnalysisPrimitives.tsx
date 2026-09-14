@@ -71,6 +71,7 @@ export function Cards({
     value: string;
     tone?: "inflow" | "outflow";
     suffix?: string;
+    hint?: string;
   }>;
 }) {
   return (
@@ -84,6 +85,7 @@ export function Cards({
               <small className="asset-track-analysis-card-suffix">（{item.suffix}）</small>
             ) : null}
           </strong>
+          {item.hint ? <small className="asset-track-analysis-card-hint">{item.hint}</small> : null}
         </div>
       ))}
     </div>

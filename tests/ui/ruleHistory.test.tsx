@@ -119,7 +119,10 @@ describe("rule history workspace loading", () => {
       />
     );
 
-    await waitFor(() => expect(loadCategory).toHaveBeenCalledWith({ category_key: "food" }));
+    await waitFor(() => expect(loadCategory).toHaveBeenCalledWith({
+      category_key: "food",
+      read_scope: "all"
+    }));
     expect(loadIndex).not.toHaveBeenCalled();
     expect(screen.getByText("该分类没有可迁移的历史商品。")).toBeTruthy();
   });

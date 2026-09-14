@@ -66,6 +66,7 @@ export function ProductRenameContent({
       setLoading(true);
       setMessage(t("正在加载当前商品名的流水…", "Loading transactions for the current item name…"));
       void api.productHistory({
+        read_scope: "all",
         transaction_type: group.transaction_type,
         product_key: group.product_key
       })

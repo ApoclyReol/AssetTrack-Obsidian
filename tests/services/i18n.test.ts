@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { businessLabel, displayError, localeFromLanguage } from "../../src/i18n";
+import { businessLabel, displayError, fieldLabel, localeFromLanguage } from "../../src/i18n";
 import { AssetTrackError } from "../../src/application/errors";
 import { setTestLanguage } from "../mocks/obsidian";
 
@@ -108,5 +108,26 @@ describe("locale selection", () => {
     expect(businessLabel("少收入")).toBe("Income under-recorded");
     expect(businessLabel("少支出")).toBe("Expense under-recorded");
     expect(businessLabel("平账")).toBe("Reconciled");
+    expect(businessLabel("收支")).toBe("Type");
+    expect(businessLabel("状态")).toBe("Status");
+    expect(businessLabel("对方")).toBe("Counterparty");
+  });
+
+  it("translates field identifiers and operation reasons in English", () => {
+    setTestLanguage("en-US");
+    expect(fieldLabel("category_key")).toBe("Category");
+    expect(fieldLabel("account_key")).toBe("Account");
+    expect(displayError(new Error("理财流水不能设置分类"))).toBe(
+      "Investment transactions cannot have a category."
+    );
+    expect(displayError(new Error("只有代付流水可以执行此转换"))).toBe(
+      "Only Paid on behalf transactions can be converted this way."
+    );
+    expect(displayError(new Error("商品规则存在重复规则"))).toBe(
+      "Item rule contains duplicate rules."
+    );
+    expect(displayError(new Error("位于本次保护范围"))).toBe(
+      "This row is protected from this operation."
+    );
   });
 });

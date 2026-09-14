@@ -157,6 +157,7 @@ total_withdraw   = SUM(amount WHERE type == "提现")
 - 跨月、状态未选中、映射为“忽略”或必要字段无效的行不进入草稿，并在预览中计数。
 - 所有接受行逐项保留；商品/交易对手汇总只是草稿编辑入口，保存时仍写回逐笔流水，不形成汇总事实表。
 - 导入只更新 React 草稿，经过质检并点击保存后才写入 SQLite。
+- 导入映射在接受行成功加入当前草稿后单独保存；映射保存失败不会撤回草稿，只提示流水已加入但映射未保存。
 
 备份导出的流水包含
 `month, transaction_date, type, category_key, category, counterparty, product, amount`，

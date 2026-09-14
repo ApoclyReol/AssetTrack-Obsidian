@@ -16,6 +16,8 @@ export type ProductHistoryIssueFilter =
   | "mismatch";
 
 export interface ProductHistoryQuery {
+  /** Use the complete saved history for an operation that changes historical rows. */
+  read_scope?: "all";
   group_by?: "product" | "counterparty";
   transaction_type?: RuleTransactionType;
   product_key?: string;

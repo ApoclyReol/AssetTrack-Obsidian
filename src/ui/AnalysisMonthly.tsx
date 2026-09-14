@@ -41,16 +41,24 @@ import {
 export function MonthlyAnalysis({
   month,
   state,
-  reconciliationTolerance
+  reconciliationTolerance,
+  onOpenTransactions
 }: {
   month: string;
   state: LoadState<MonthOverview>;
   reconciliationTolerance: number;
+  onOpenTransactions?: () => void;
 }) {
   if (state.kind === "loading") return <Empty text={t(`正在加载 ${month} 月度分析…`, `Loading ${month} monthly analysis…`)} />;
   if (state.kind === "error") return <Empty text={state.message} />;
   const overview = state.data;
-  if (!overview.available || !overview.metrics) return <Empty text={t(`${month} 暂无可分析数据。`, `No analyzable data is available for ${month}.`)} />;
+  if (!overview.available || !overview.metrics) return (
+    <section className="asset-track-analysis-integrity is-warning" role="status">
+      <h2>{t(`${month} 暂无完整分析数据`, `Incomplete analysis data for ${month}`)}</h2>
+      <p>{t("分析需要已保存的流水和资产快照。请先回到流水页完成导入、整理并保存。", "Analysis needs saved transactions and asset snapshots. Return to the transactions page to import, organize, and save first.")}</p>
+      {onOpenTransactions && <button type="button" onClick={onOpenTransactions}>{t("返回当前月流水", "Return to this month's transactions")}</button>}
+    </section>
+  );
   const structure = overview.structure;
   const necessity = structure
     ? [
@@ -90,18 +98,32 @@ export function MonthlyAnalysis({
         roi_delta_percent: null
       }
     }] : []);
+  const reconciliationIncomplete = !overview.reconciliation?.available
+    || overview.reconciliation.theoretical.previous_cash === null;
   return (
     <>
       <div className="asset-track-analysis-heading">
-        <div><h2>{t(`${month} 月度分析`, `${month} monthly analysis`)}</h2><span>{t("固定资产不参与资产、对账和消费计算", "Fixed assets are excluded from assets, reconciliation, and spending calculations")}</span></div>
+        <div>
+          <h2>{t(`${month} 月度分析`, `${month} monthly analysis`)}</h2>
+          <span>{t("固定资产不参与资产、对账和消费计算", "Fixed assets are excluded from assets, reconciliation, and spending calculations")}</span>
+        </div>
+        {onOpenTransactions && <button type="button" onClick={onOpenTransactions}>{t("返回当前月流水", "Return to transactions")}</button>}
       </div>
+      {reconciliationIncomplete && (
+        <section className="asset-track-analysis-integrity is-warning" role="status">
+          <strong>{t("数据完整性提示", "Data integrity check")}</strong>
+          <p>{t("当前月度指标可以查看，但缺少上月现金或资产快照，因此对账差额和部分环比结果不可比较。下一步请补充资产账户或创建前置月份。", "Monthly metrics are available, but the previous cash or asset snapshot is missing. Reconciliation and some comparisons cannot be computed. Complete asset accounts or create the preceding month next.")}</p>
+          {onOpenTransactions && <button type="button" onClick={onOpenTransactions}>{t("去补充资产和流水", "Complete assets and transactions")}</button>}
+        </section>
+      )}
       <Cards items={[
-        { label: t("收入", "Income"), value: money(overview.metrics.total_income), tone: "inflow" },
-        { label: t("净支出", "Net expense"), value: money(overview.metrics.total_expense), tone: "outflow" },
+        { label: t("收入", "Income"), value: money(overview.metrics.total_income), tone: "inflow", hint: t("本月入账合计", "Total income this month") },
+        { label: t("净支出", "Net expense"), value: money(overview.metrics.total_expense), tone: "outflow", hint: t("支出减去代付", "Expenses minus paid-on-behalf transactions") },
         {
           label: t("储蓄", "Savings"),
           value: money(overview.metrics.surplus),
-          tone: overview.metrics.surplus >= 0 ? "inflow" : "outflow"
+          tone: overview.metrics.surplus >= 0 ? "inflow" : "outflow",
+          hint: t("收入减净支出", "Income minus net expense")
         },
         {
           label: t("储蓄率", "Savings rate"),
@@ -112,16 +134,18 @@ export function MonthlyAnalysis({
             ? undefined
             : overview.metrics.savings_rate >= 0
               ? "inflow"
-              : "outflow"
+              : "outflow",
+          hint: t("储蓄占收入比例", "Savings as a share of income")
         },
-        { label: t("总资产", "Total assets"), value: money(overview.metrics.total_assets) },
-        { label: t("市场净资产", "Market net assets"), value: money(overview.metrics.market_net_assets) },
+        { label: t("总资产", "Total assets"), value: money(overview.metrics.total_assets), hint: t("现金减借款加投入本金", "Cash minus debt plus invested principal") },
+        { label: t("市场净资产", "Market net assets"), value: money(overview.metrics.market_net_assets), hint: t("按当前理财市值计算", "Uses current investment market value") },
         {
           label: t("资产环比", "Asset change"),
           value: overview.metrics.asset_delta === null
             ? t("不可比较", "Unavailable")
             : money(overview.metrics.asset_delta),
-          tone: changeTone(overview.metrics.asset_delta)
+          tone: changeTone(overview.metrics.asset_delta),
+          hint: t("与上月资产比较", "Compared with the previous month")
         },
         {
           label: t("对账差额", "Reconciliation difference"),
@@ -129,7 +153,8 @@ export function MonthlyAnalysis({
             ? money(overview.reconciliation.discrepancy)
             : t("不可比较", "Unavailable"),
           tone: reconciliationTone(discrepancy, reconciliationTolerance),
-          suffix: discrepancyStatus ? businessLabel(discrepancyStatus) : undefined
+          suffix: discrepancyStatus ? businessLabel(discrepancyStatus) : undefined,
+          hint: t("实际净支出减理论消费", "Actual net expense minus theoretical consumption")
         }
       ]} />
       <div className="asset-track-analysis-grid">
@@ -223,7 +248,7 @@ export function MonthlyAnalysis({
       </ChartPanel>
       <div className="asset-track-analysis-grid asset-track-anomaly-grid">
         <BigTicketPanel rows={overview.big_tickets ?? []} />
-        <AnomalyPanel anomalies={overview.anomalies} />
+        <AnomalyPanel anomalies={overview.anomalies} onOpenTransactions={onOpenTransactions} />
       </div>
     </>
   );
@@ -284,16 +309,19 @@ function BigTicketPanel({
 }
 
 function AnomalyPanel({
-  anomalies
+  anomalies,
+  onOpenTransactions
 }: {
   anomalies: MonthOverview["anomalies"];
+  onOpenTransactions?: () => void;
 }) {
   const rows = buildAnomalyDisplayRows(anomalies);
   return (
     <ChartPanel title={t("异常与变化", "Anomalies and changes")} className="asset-track-anomaly-panel">
       {rows.length ? (
-        <div className="asset-track-table-scroll">
-          <table className="asset-track-analysis-anomaly-table">
+        <>
+          <div className="asset-track-table-scroll">
+            <table className="asset-track-analysis-anomaly-table">
             <thead>
               <tr>
                 <StaticTableHeader label={t("分类", "Category")} />
@@ -310,8 +338,10 @@ function AnomalyPanel({
                 </tr>
               ))}
             </tbody>
-          </table>
-        </div>
+            </table>
+          </div>
+          {onOpenTransactions && <button type="button" onClick={onOpenTransactions}>{t("查看相关流水", "View related transactions")}</button>}
+        </>
       ) : <Empty text={t("暂无达到阈值的异常变化。", "No anomalous changes reached the threshold.")} />}
     </ChartPanel>
   );

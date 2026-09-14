@@ -12,10 +12,14 @@ import type {
   Transaction
 } from "../../types/transactions";
 import type {
+  CsvRawRow
+} from "../../types/csv";
+import type {
   TransactionBusinessTab,
   TransactionViewMode
 } from "../../types/operations";
 import { t } from "../../i18n";
+import { scalarText } from "../../domain/text";
 import { transactionTypesForTab } from "../../domain/transactionOperations";
 import { transactionIndexes } from "../analysisModel";
 import {
@@ -30,7 +34,9 @@ import {
   type TransactionGroupBy,
   type TransactionKey
 } from "../transactionGrouping";
-import type { SortState } from "../editorPrimitives";
+import {
+  type SortState
+} from "../editorPrimitives";
 
 export const TRANSACTION_BUSINESS_TABS: Array<{
   value: TransactionBusinessTab;
@@ -90,6 +96,8 @@ export interface MonthEditorTransactionsSectionProps {
   renderRuleControls?: MonthEditorRuleControls;
   renderTransactionActions?: MonthEditorTransactionActions;
   showBusinessTabs?: boolean;
+  sourceRows?: readonly CsvRawRow[];
+  onViewSourceRow?: (row: Transaction, sourceRow: CsvRawRow) => void;
 }
 
 export function MonthEditorTransactionsSection({
@@ -116,7 +124,9 @@ export function MonthEditorTransactionsSection({
   onCreateRule,
   renderRuleControls,
   renderTransactionActions,
-  showBusinessTabs = true
+  showBusinessTabs = true,
+  sourceRows = [],
+  onViewSourceRow
 }: MonthEditorTransactionsSectionProps) {
   const [localBusinessTab, setLocalBusinessTab] = useState<TransactionBusinessTab>(
     businessTab ?? "outgoing"
@@ -172,6 +182,16 @@ export function MonthEditorTransactionsSection({
   const selectedCount = currentViewTransactionKeys.filter((key) => effectiveSelectedKeys.has(key)).length;
   const allCurrentViewSelected = currentViewTransactionKeys.length > 0
     && selectedCount === currentViewTransactionKeys.length;
+  const secondaryIssueCount = issues.filter((issue) => {
+    const field = scalarText(issue.field);
+    return field === "对方"
+      || field === "交易对手"
+      || field === "counterparty"
+      || field === "分类"
+      || field === "category"
+      || field === "category_key";
+  }).length;
+  const effectiveShowSecondaryFields = secondaryIssueCount > 0;
 
   const commitSelection = (next: Set<TransactionKey>): void => {
     if (selectedTransactionKeys === undefined) setLocalSelectedTransactionKeys(next);
@@ -241,6 +261,15 @@ export function MonthEditorTransactionsSection({
                 </button>
               ))}
             </div>}
+            {showBusinessTabs && (
+              <span className="asset-track-transaction-tab-description">
+                {activeBusinessTab === "outgoing"
+                  ? t("支出和需要分类整理的出账流水。", "Expenses and outgoing transactions that need categories.")
+                  : activeBusinessTab === "incoming"
+                    ? t("收入、代付回款及其方向核对。", "Income, paid-on-behalf repayments, and direction checks.")
+                    : t("加仓和提现等不参与消费分类的理财流水。", "Investment deposits and withdrawals, outside spending categories.")}
+              </span>
+            )}
           </div>
           {!isInvestmentTab && <div className="asset-track-transaction-batch-actions asset-track-transaction-batch-actions--primary">
               <button
@@ -288,6 +317,13 @@ export function MonthEditorTransactionsSection({
             {t("按交易对手汇总", "Group by counterparty")}
           </button>
           </div>
+          <span className="asset-track-transaction-view-description">
+            {activeViewMode === "detail"
+              ? t("适合逐笔修改和处理问题。", "Best for correcting individual rows and issues.")
+              : activeViewMode === "product"
+                ? t("适合按商品检查重复、合并或批量修改。", "Best for checking duplicates and batch-editing by item.")
+                : t("适合核对同一交易对手的流水。", "Best for checking transactions by counterparty.")}
+          </span>
           <div className="asset-track-transaction-batch-actions asset-track-transaction-batch-actions--secondary">
             {renderBatchActions?.({
               businessTab: activeBusinessTab,
@@ -313,6 +349,9 @@ export function MonthEditorTransactionsSection({
             visibleIndexes={transactionIndexes(draft.transactions, type)}
             categories={categories}
             issues={issues}
+            showSecondaryFields={effectiveShowSecondaryFields}
+            sourceRows={sourceRows}
+            onViewSourceRow={onViewSourceRow}
             investmentAccounts={draft.investment_accounts}
             selectedTransactionKeys={isInvestmentTab ? undefined : effectiveSelectedKeys}
             onToggleTransaction={isInvestmentTab ? undefined : toggleTransaction}

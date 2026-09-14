@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.9.0
+
+### 中文更新
+
+- 导入：流程拆分为文件读取、确认映射和检查预览，增加表头、工作表、过滤原因和分类处理提示；分类不再在导入阶段报警告。
+- 流水与工作台：合并状态提示，简化警告和汇总视图，并补充原始账单行回溯、月份切换和对账差额说明。
+- 规则与保存：规则确认后直接进入草稿；映射保存失败不回滚已加入的流水，只提示保存结果，并补齐英文回退。
+
+### English updates
+
+- Import: split bill import into file reading, mapping, and preview, with clearer header, worksheet, filtering, and category guidance; categories no longer produce import-stage warnings.
+- Transactions and workspace: consolidated status feedback, simplified warnings and summary views, and improved raw-row tracing, month navigation, and reconciliation explanations.
+- Rules and persistence: rules enter the draft directly after confirmation; mapping failures keep the draft and report the result, with English fallbacks added for the new UI.
+
+### Compatibility and validation
+
+- No schema, backup-format, database-path, or settings migration is introduced. Minimum Obsidian version remains 1.13.0.
+- The release remains desktop-only and uses the standard `main.js`, `manifest.json`, and `styles.css` assets.
+- Final automated checks and real Obsidian smoke results are recorded in [Release v1.9.0](docs/logs/release-v1.9.0.md).
+
 ## 1.8.1
 
 ### 中文更新

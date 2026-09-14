@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   IssueList,
@@ -17,8 +17,12 @@ import {
   calculateVirtualRowRange,
   virtualSpacerBlocks
 } from "../../src/ui/virtualRows";
+import { setTestLanguage } from "../mocks/obsidian";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  setTestLanguage("zh-CN");
+});
 
 const rows: Transaction[] = Array.from({ length: 12 }, (_, index) => ({
   client_id: `draft-${index}`,
@@ -81,6 +85,55 @@ describe("editor issue presentation", () => {
       "商品",
       "金额"
     ]);
+  });
+
+  it("collapses warning-only issue details until the user expands them", () => {
+    render(
+      <IssueList
+        rows={rows}
+        issues={[{
+          row_index: 0,
+          type: "支出",
+          field: "分类",
+          issue: "分类为空",
+          severity: "警告",
+          blocking: false
+        }]}
+      />
+    );
+
+    const alert = screen.getByRole("alert");
+    const toggle = within(alert).getByRole("button", { name: "展开问题列表" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(within(alert).queryByRole("listitem")).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(within(alert).getByRole("button", { name: "收起问题列表" })
+      .getAttribute("aria-expanded")).toBe("true");
+    expect(within(alert).getByRole("listitem")).toBeTruthy();
+  });
+
+  it("localizes row issue fields and reasons in English", () => {
+    setTestLanguage("en-US");
+    render(
+      <IssueList
+        rows={rows}
+        issues={[{
+          row_index: 0,
+          type: "支出",
+          field: "分类",
+          issue: "分类为空",
+          severity: "警告",
+          blocking: false
+        }]}
+      />
+    );
+
+    const alert = screen.getByRole("alert");
+    fireEvent.click(within(alert).getByRole("button", { name: "Expand issue list" }));
+    expect(within(alert).getByRole("listitem").textContent).toContain(
+      "Category / Category is empty."
+    );
   });
 
   it("counts only canonical category keys as assigned categories", () => {

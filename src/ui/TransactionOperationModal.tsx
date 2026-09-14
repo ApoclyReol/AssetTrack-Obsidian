@@ -8,7 +8,7 @@ import type {
 import type {
   Transaction
 } from "../types/transactions";
-import { businessLabel, t } from "../i18n";
+import { businessLabel, displayError, t } from "../i18n";
 import { scalarText } from "../domain/text";
 import { money } from "../domain/moneyFormat";
 import { messageFor } from "./editorPrimitives";
@@ -149,17 +149,38 @@ function OperationPreviewContent({
   const isTypeConversion = current.operation_type === "income-to-daifu"
     || current.operation_type === "daifu-to-income";
   const isAiClassification = current.operation_type === "ai-classification";
+  const isRuleApplication = current.operation_type === "apply-rules";
+  const unmatchedRuleCount = isRuleApplication
+    ? current.changes.filter((change) => change.status === "skip" && !(change.rule_ids?.length ?? 0)).length
+    : 0;
+  const ruleConflictCount = isRuleApplication
+    ? current.changes.filter((change) => change.status === "failure" || (change.reason ?? "").includes("冲突")).length
+    : 0;
   return <div className="asset-track-operation-preview">
     {error && <p role="alert" className="asset-track-operation-error">{error}</p>}
-    <p>{t("写入前预览。确认后只会进入当前月份草稿，仍需保存流水。", "Preview before writing. Confirmation only changes the current-month draft; save transactions to persist it.")}</p>
+    <p>{isRuleApplication
+      ? t("规则会检查当前月份的支出、收入和代付流水，并只把预览中确认的变化放入草稿。不会自动保存或改写其他月份。", "Rules will check this month's expense, income, and paid-on-behalf transactions. Only confirmed preview changes enter the draft; other months are not changed and nothing is saved automatically.")
+      : t("写入前预览。确认后只会进入当前月份草稿，仍需保存流水。", "Preview before writing. Confirmation only changes the current-month draft; save transactions to persist it.")}</p>
     <div className="asset-track-operation-preview-metrics" role="status">
       <span>{t("总数", "Total")} {current.total_count}</span>
       <span>{t("将变更", "Changes")} {current.change_count}</span>
       <span>{t("跳过", "Skipped")} {current.skipped_count}</span>
       <span>{t("失败", "Failed")} {current.failure_count}</span>
     </div>
+    {isRuleApplication && (
+      <div className="asset-track-operation-impact" role="status">
+        <strong>{t("规则处理结果", "Rule processing result")}</strong>
+        <div>
+          <span>{t("已修改", "Modified")}：{current.change_count}</span>
+          <span>{t("已跳过", "Skipped")}：{current.skipped_count}</span>
+          <span>{t("无匹配", "No match")}：{unmatchedRuleCount}</span>
+          <span>{t("冲突/失败", "Conflict / failure")}：{ruleConflictCount}</span>
+        </div>
+        <small>{t("确认后会进入流水草稿；如需持久化，请返回流水页点击保存。", "After confirmation, changes enter the transaction draft. Return to the transactions page and save to persist them.")}</small>
+      </div>
+    )}
     {isTypeConversion && <p className="asset-track-operation-preview-note">
-      {t("互转会清空分类字段。", "Converting between income and daifu clears the category field.")}
+      {t("互转会清空分类字段。", "Converting between income and paid-on-behalf clears the category field.")}
     </p>}
     {current.protected_count ? <p>{t(`默认保护 ${current.protected_count} 条已人工修改流水。`, `${current.protected_count} manually edited rows are protected by default.`)}</p> : null}
     {aiRows.length > 0 && <div className="asset-track-ai-result-summary" role="status">
@@ -171,7 +192,7 @@ function OperationPreviewContent({
         <strong>{t("前后对比（含跳过/失败示例）", "Before and after (including skipped/failed samples)")}</strong>
       {samples.map((change, index) => <div key={`${index}-${change.status}`}>
         <small>{displayFields(change.before, change.after, isAiClassification)}</small>
-        {change.reason && <small>{change.reason}</small>}
+        {change.reason && <small>{displayError(change.reason)}</small>}
       </div>)}
     </div>}
     {onRetry && availableRetryStatuses.length > 0 && <div className="asset-track-operation-retry-actions">

@@ -12,6 +12,7 @@ import { reconciliationStatus, reconciliationTone } from "../analysisModel";
 import { debtSummary } from "../MonthDebtSection";
 import type { OperationState } from "../editorPrimitives";
 import { TRANSACTION_BUSINESS_TABS } from "./MonthEditorTransactionsSection";
+import { ReconciliationHint } from "../ReconciliationHint";
 
 interface MonthEditorHeaderProps {
   activeSection?: MonthSection;
@@ -230,7 +231,13 @@ export function MonthEditorHeader({
           monthMetrics.discrepancy,
           reconciliationTolerance
         ) ?? ""}`}>
-          <span>{t("对账差额", "Reconciliation difference")}</span>
+          <span className="asset-track-month-metric-label">
+            {t("对账差额", "Reconciliation difference")}
+            <ReconciliationHint
+              discrepancy={monthMetrics.discrepancy}
+              tolerance={reconciliationTolerance}
+            />
+          </span>
           <strong>
             {monthMetrics.discrepancy === null
               ? t("不可比较", "Unavailable")

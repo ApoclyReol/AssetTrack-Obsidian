@@ -12,8 +12,12 @@ import type {
 import type {
   Transaction
 } from "../../src/types/transactions";
+import type {
+  MonthWorkspace
+} from "../../src/types/month";
 import { MonthDebtSection } from "../../src/ui/MonthDebtSection";
 import { TransactionSummaryTable, TransactionTable } from "../../src/ui/TransactionTables";
+import { MonthEditorTransactionsSection } from "../../src/ui/month/MonthEditorTransactionsSection";
 
 afterEach(cleanup);
 
@@ -126,6 +130,93 @@ describe("month debt and special transaction rows", () => {
     );
 
     expect(screen.getByLabelText("支出第 1 行 · 提醒 2：商品：商品为空；金额：金额为 0")).toBeDefined();
+    expect(document.querySelector(".asset-track-row-issue-details")).toBeNull();
+  });
+
+  it("does not render a repeated issue notice inside the transaction section", () => {
+    const rows: Transaction[] = [{
+      id: 1,
+      transaction_date: "2026-01-01",
+      type: "支出",
+      category_key: null,
+      category: "",
+      counterparty: "咖啡店",
+      product: "拿铁",
+      amount: 12
+    }];
+    const draft: MonthWorkspace = {
+      month: "2026-01",
+      revision: 1,
+      status: "draft",
+      debt_revision: 1,
+      cash_accounts: [],
+      investment_accounts: [],
+      transactions: rows,
+      debts: [],
+      fixed_assets: [],
+      computed: {},
+      overview: { available: false }
+    };
+
+    render(
+      <MonthEditorTransactionsSection
+        month="2026-01"
+        draft={draft}
+        categories={[]}
+        issues={[{ row_index: 0, field: "分类", issue: "分类为空", severity: "警告", blocking: false }]}
+        summarySort={null}
+        expandedGroup=""
+        onSummarySort={vi.fn()}
+        onExpandedGroupChange={vi.fn()}
+        onUpdate={vi.fn()}
+        onDelete={vi.fn()}
+        onAdd={vi.fn()}
+        businessTab="outgoing"
+        viewMode="detail"
+        onViewModeChange={vi.fn()}
+        showBusinessTabs={false}
+      />
+    );
+
+    expect(document.querySelector(".asset-track-transaction-issues")).toBeNull();
+    expect(document.querySelector(".asset-track-transaction-issues-notice")).toBeNull();
+    expect(screen.queryByRole("button", { name: "展开问题列表" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "显示分类和交易对手" })).toBeNull();
+  });
+
+  it("offers the retained source row for an imported transaction", () => {
+    const rows: Transaction[] = [{
+      id: 1,
+      source: "账单.csv · 原始第 2 行",
+      transaction_date: "2026-01-01",
+      type: "支出",
+      category_key: null,
+      category: "",
+      counterparty: "咖啡店",
+      product: "拿铁",
+      amount: 12
+    }];
+    const onViewSourceRow = vi.fn();
+
+    render(
+      <TransactionTable
+        title="支出"
+        rows={rows}
+        visibleIndexes={[0]}
+        categories={[]}
+        sourceRows={[{ row: 2, values: ["2026-01-01", "拿铁", "12", "支出"] }]}
+        onViewSourceRow={onViewSourceRow}
+        onUpdate={vi.fn()}
+        onDelete={vi.fn()}
+        onAdd={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "查看支出第 1 行原始账单" }));
+    expect(onViewSourceRow).toHaveBeenCalledWith(rows[0], {
+      row: 2,
+      values: ["2026-01-01", "拿铁", "12", "支出"]
+    });
   });
 
   it("removes rule coverage from item summary and keeps type/category sortable", () => {
@@ -307,5 +398,21 @@ describe("month debt and special transaction rows", () => {
     expect(screen.getByLabelText("选择支出第 1 行")).toBeDefined();
     expect(screen.getByText("新建规则")).toBeDefined();
     expect(screen.getByText("删除")).toBeDefined();
+    const parentColumns = Array.from(
+      document.querySelectorAll(".asset-track-summary-table > colgroup > col")
+    ).map((column) => column.className);
+    const detailColumns = Array.from(
+      document.querySelectorAll(".asset-track-summary-detail-table--nested > colgroup > col")
+    ).map((column) => column.className);
+    expect(parentColumns).toEqual([
+      "asset-track-summary-col-type",
+      "asset-track-summary-col-group",
+      "asset-track-summary-col-count",
+      "asset-track-summary-col-amount",
+      "asset-track-summary-col-category",
+      "asset-track-summary-col-actions"
+    ]);
+    expect(detailColumns).toEqual(parentColumns);
+    expect(document.querySelector(".asset-track-summary-detail-table--nested")).toBeTruthy();
   });
 });

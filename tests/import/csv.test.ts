@@ -47,6 +47,10 @@ describe("TypeScript CSV mapping", () => {
       amount: 12.5,
       type: "支出"
     });
+    expect(preview.source_rows).toEqual([{
+      row: 9,
+      values: ["2026-08-13 09:00:00", "消费", "咖啡店", "拿铁", "支出", "12.50"]
+    }]);
   });
 
   it("rejects duplicate headers instead of silently overwriting a source column", () => {
@@ -146,6 +150,7 @@ describe("TypeScript CSV mapping", () => {
     expect(preview.rows.map((row) => row.product)).toEqual(["拿铁", "拿铁"]);
     expect(preview.rows.map((row) => row.counterparty)).toEqual(["咖啡店", "咖啡店"]);
     expect(preview.rows.map((row) => row.amount)).toEqual([12.5, 12.5]);
+    expect(preview.source_rows?.map((row) => row.row)).toEqual([2, 3]);
     expect(preview.import_stats.filtered).toMatchObject({
       outside_month: 1,
       status_filtered: 1
@@ -253,13 +258,19 @@ describe("TypeScript CSV mapping", () => {
       accepted_rows: 1,
       defaulted: { date: 1 },
       filtered: {
-        invalid: 3,
+        invalid_date: 1,
+        invalid_amount: 1,
+        unmapped_type: 1,
         outside_month: 1,
         status_filtered: 1,
         ignored_type: 0
       }
     });
-    const invalidReasons = preview.import_stats.examples.invalid.map(
+    const invalidReasons = [
+      ...preview.import_stats.examples.invalid_date,
+      ...preview.import_stats.examples.invalid_amount,
+      ...preview.import_stats.examples.unmapped_type
+    ].map(
       (example) => typeof example.reason === "string" ? example.reason : ""
     );
     expect(invalidReasons.some((reason) => reason.includes("日期无法识别"))).toBe(true);
@@ -283,10 +294,21 @@ describe("TypeScript CSV mapping", () => {
       included_statuses: []
     });
     expect(preview.rows).toMatchObject([{ product: "合法千分位", amount: 1234.5 }]);
-    expect(preview.import_stats.filtered.invalid).toBe(1);
-    expect(preview.import_stats.examples.invalid).toEqual(expect.arrayContaining([
+    expect(preview.import_stats.filtered.invalid_amount).toBe(1);
+    expect(preview.import_stats.examples.invalid_amount).toEqual(expect.arrayContaining([
       expect.objectContaining({ reason: "金额为空或无法识别" })
     ]));
+  });
+
+  it("reports UTF-8 and tab-delimited CSV structure before mapping", () => {
+    const content = Buffer.from(
+      "交易时间\t商品\t金额\t收支\n2026-01-01\t早餐\t12\t支出\n",
+      "utf8"
+    );
+    const inspection = inspectCsv("2026-01", "tab-bill.csv", content);
+    expect(inspection.encoding).toBe("utf-8");
+    expect(inspection.delimiter).toBe("\t");
+    expect(inspection.row_count).toBe(1);
   });
 
   it.each(["csv", "xlsx", "xls"] as const)(
@@ -324,7 +346,7 @@ describe("TypeScript CSV mapping", () => {
   );
 
   it.each(["xlsx", "xls"] as const)(
-    "reads the first worksheet from %s bills",
+    "reads a single worksheet from %s bills",
     (extension) => {
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(
@@ -361,6 +383,68 @@ describe("TypeScript CSV mapping", () => {
     }
   );
 
+  it.each(["xlsx", "xls"] as const)(
+    "lists worksheets and imports from the selected %s worksheet",
+    (extension) => {
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.aoa_to_sheet([
+          ["导出说明"],
+          ["请打开账单明细工作表"]
+        ]),
+        "说明"
+      );
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.aoa_to_sheet([
+          ["微信支付账单明细"],
+          ["交易时间", "交易对方", "商品", "金额(元)", "收/支"],
+          ["2026-01-08", "示例商户", "午餐", 38.5, "支出"]
+        ]),
+        "账单明细"
+      );
+      const content = XLSX.write(workbook, {
+        type: "buffer",
+        bookType: extension
+      }) as Buffer;
+      const filename = `multi-sheet.${extension}`;
+      const initial = inspectCsv("2026-01", filename, content);
+      expect(initial.worksheet_name).toBe("账单明细");
+      expect(initial.worksheet_candidates?.map((item) => item.name)).toEqual([
+        "说明",
+        "账单明细"
+      ]);
+      expect(initial.worksheet_candidates?.find((item) => item.name === "账单明细"))
+        .toMatchObject({ row_count: 3 });
+
+      const selected = inspectCsv("2026-01", filename, content, {
+        worksheet_name: "账单明细",
+        header_row: 2
+      });
+      expect(selected.header_confirmed).toBe(true);
+      expect(selected.header_row).toBe(2);
+      const preview = previewCsv("2026-01", filename, content, {
+        date_column: "交易时间",
+        counterparty_column: "交易对方",
+        product_column: "商品",
+        amount_column: "金额(元)",
+        type_column: "收/支",
+        type_values: { 支出: "支出" },
+        included_statuses: []
+      }, {
+        worksheet_name: "账单明细",
+        header_row: 2
+      });
+      expect(preview.rows[0]).toMatchObject({
+        product: "午餐",
+        counterparty: "示例商户",
+        amount: 38.5,
+        type: "支出"
+      });
+    }
+  );
+
   it("imports an xlsx date formatted as month/day/year with time", () => {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(
@@ -389,6 +473,6 @@ describe("TypeScript CSV mapping", () => {
       amount: 7.4,
       type: "支出"
     });
-    expect(preview.import_stats.filtered.invalid).toBe(0);
+    expect(preview.import_stats.filtered.invalid_date).toBe(0);
   });
 });

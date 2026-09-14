@@ -1,12 +1,17 @@
 import {
   forwardRef,
+  useEffect,
   useImperativeHandle,
   useRef,
-  useState
+  useState,
+  type KeyboardEvent
 } from "react";
 import { Notice, type App } from "obsidian";
 import type {
   CsvColumnMapping
+} from "../types/csv";
+import type {
+  CsvRawRow
 } from "../types/csv";
 import type {
   FixedAsset,
@@ -26,7 +31,7 @@ import type {
 import type { SavedRule } from "../types/rules";
 import { createTransactionDraft } from "./analysisModel";
 import { CsvImportDialog } from "./CsvImportDialog";
-import { t } from "../i18n";
+import { displayError, t } from "../i18n";
 import type {
   EditorDraftSnapshot,
   MonthEditorDraftSnapshot
@@ -44,16 +49,20 @@ import {
   type MonthMetrics
 } from "./monthEditorModel";
 import { MonthEditorHeader } from "./month/MonthEditorHeader";
+import { MonthEditorStatusBar } from "./month/MonthEditorStatusBar";
 import { MonthEditorAssetsSection } from "./month/MonthEditorAssetsSection";
 import { MonthEditorTransactionsSection } from "./month/MonthEditorTransactionsSection";
 import { MonthEditorSupplementalSections } from "./month/MonthEditorSupplementalSections";
+import { monthWorkflowSummary } from "./monthWorkflow";
 import { RuleCreationModal } from "./RuleCreationModal";
 import { transactionKey as operationTransactionKey } from "../domain/transactionOperations";
 import { resolveRule, ruleCategoryType } from "../domain/rules";
 import type { EditorSession } from "./editorSession";
 import { useMonthEditorSession } from "./month/useMonthEditorSession";
 import { useTransactionOperations } from "./month/useTransactionOperations";
-import { useCsvImportSession } from "./month/useCsvImportSession";
+import {
+  useCsvImportSession
+} from "./month/useCsvImportSession";
 import type {
   TransactionGroup
 } from "./transactionGrouping";
@@ -65,6 +74,117 @@ export interface MonthEditorHandle extends EditorSession {
 }
 
 export { MONTH_SECTIONS, type MonthMetrics } from "./monthEditorModel";
+
+interface SourceRowPreview {
+  filename: string;
+  headers: string[];
+  row: CsvRawRow;
+}
+
+const SOURCE_ROW_FOCUSABLE_SELECTOR = [
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])"
+].join(",");
+
+function CsvSourceRowModal({
+  preview,
+  onClose
+}: {
+  preview: SourceRowPreview;
+  onClose: () => void;
+}) {
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+  }, []);
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = Array.from(
+      dialogRef.current?.querySelectorAll<HTMLElement>(SOURCE_ROW_FOCUSABLE_SELECTOR) ?? []
+    );
+    if (!focusable.length) {
+      event.preventDefault();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    const active = dialogRef.current?.ownerDocument.activeElement;
+    if (event.shiftKey && active === first) {
+      event.preventDefault();
+      last?.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
+  return (
+    <div
+      className="asset-track-modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        ref={dialogRef}
+        className="asset-track-modal asset-track-source-row-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="asset-track-source-row-title"
+        aria-describedby="asset-track-source-row-description"
+        onKeyDown={handleKeyDown}
+      >
+        <header>
+          <div>
+            <h2 id="asset-track-source-row-title">{t("原始账单行", "Raw statement row")}</h2>
+            <span className="asset-track-modal-subtitle">
+              {preview.filename} · {t(`原始第 ${preview.row.row} 行`, `Source row ${preview.row.row}`)}
+            </span>
+          </div>
+          <button ref={closeButtonRef} type="button" onClick={onClose}>
+            {t("关闭", "Close")}
+          </button>
+        </header>
+        <p id="asset-track-source-row-description" className="asset-track-import-intro">
+          {t("这是导入时保留的原始单元格内容，用于核对流水映射。它不会修改当前草稿。", "These are the source cells retained during import for checking the mapping. They do not modify the current draft.")}
+        </p>
+        <div className="asset-track-table-scroll asset-track-source-row-table">
+          <table>
+            <thead>
+              <tr>
+                {preview.headers.map((header) => <th key={header} scope="col">{header}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                {preview.headers.map((header, index) => (
+                  <td key={header}>
+                    {preview.row.values[index]?.trim() || t("（空）", "(empty)")}
+                  </td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <footer>
+          <button type="button" onClick={onClose}>{t("关闭", "Close")}</button>
+        </footer>
+      </section>
+    </div>
+  );
+}
 
 export const MonthEditor = forwardRef<MonthEditorHandle, {
   app?: App;
@@ -79,6 +199,8 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
   onMetricsChange?: (metrics: MonthMetrics | null) => void;
   onDeleted: (next: string) => Promise<void>;
   onSaved: () => Promise<void>;
+  onNavigateSection?: (section: MonthSection) => Promise<void>;
+  onNavigateAnalysis?: () => Promise<void>;
   onDataChanged?: () => void;
   initialDraft?: MonthEditorDraftSnapshot;
   onSessionChange: (snapshot: EditorDraftSnapshot | null) => void;
@@ -87,6 +209,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
     signature: string,
     mapping: CsvColumnMapping
   ) => Promise<void>;
+  clearCsvMapping?: (signature: string) => Promise<void>;
 }>(function MonthEditor({
   app,
   api,
@@ -100,11 +223,14 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
   onMetricsChange,
   onDeleted,
   onSaved,
+  onNavigateSection,
+  onNavigateAnalysis,
   onDataChanged,
   initialDraft,
   onSessionChange,
   getCsvMapping,
-  saveCsvMapping
+  saveCsvMapping,
+  clearCsvMapping
 }, ref) {
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -177,6 +303,8 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
   });
   const [expandedGroup, setExpandedGroup] = useState("");
   const [transactionViewMode, setTransactionViewMode] = useState<"detail" | "product" | "counterparty">("detail");
+  const [lastSavedAt, setLastSavedAt] = useState<string>();
+  const [sourceRowPreview, setSourceRowPreview] = useState<SourceRowPreview | null>(null);
   const actionRef = useRef<MonthEditorHandle>({
     requestDelete: () => undefined,
     openImport: () => undefined,
@@ -427,6 +555,24 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
     );
   };
 
+  const saveAndClearImportFeedback = async (): Promise<boolean> => {
+    const saved = await save();
+    if (saved) {
+      csv.clearImportFeedback();
+      setLastSavedAt(new Date().toLocaleTimeString());
+    }
+    return saved;
+  };
+
+  const saveAllAndClearImportFeedback = async (): Promise<boolean> => {
+    const saved = await saveAll();
+    if (saved) {
+      csv.clearImportFeedback();
+      setLastSavedAt(new Date().toLocaleTimeString());
+    }
+    return saved;
+  };
+
   const renderRuleControls = ({ row, index }: { row: Transaction; index: number }) => {
     if (row.type !== "支出" && row.type !== "收入" && row.type !== "代付") return null;
     const explanation = resolveRule(row, rules);
@@ -442,7 +588,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
       <button
         type="button"
         className="asset-track-rule-button"
-        title={explanation.reason}
+        title={displayError(explanation.reason)}
         aria-label={label}
         onClick={(event) => event.preventDefault()}
       >{label}</button>
@@ -486,12 +632,36 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
     requestDelete,
     openImport: csv.openImport,
     applyRules: operations.applyRules,
-    save,
-    saveAll,
+    save: saveAndClearImportFeedback,
+    saveAll: saveAllAndClearImportFeedback,
     discard: reloadCurrentSection,
     discardAll,
     getDraftSnapshot,
     hasUnsavedChanges
+  };
+
+  const workflow = monthWorkflowSummary(
+    draft,
+    issues,
+    dirtySections,
+    reconciliationTolerance
+  );
+  const goToNextStep = async (): Promise<void> => {
+    if (workflow.status === "completed") {
+      await onNavigateAnalysis?.();
+      return;
+    }
+    if (workflow.nextSection === "transactions") {
+      if (workflow.status === "not-started") {
+        csv.openImport();
+      } else if (activeSection === undefined || activeSection === "transactions") {
+        setTransactionViewMode("detail");
+      } else {
+        await onNavigateSection?.("transactions");
+      }
+      return;
+    }
+    if (workflow.nextSection) await onNavigateSection?.(workflow.nextSection);
   };
 
   return (
@@ -504,9 +674,16 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
             csv.csvSource.inspection.header_signature
           )}
           onCancel={csv.cancelImport}
-          onHeaderRowChange={csv.selectCsvHeader}
+          onHeaderRowChange={csv.selectCsvStructure}
           onPreview={csv.previewMappedCsv}
           onApply={csv.applyCsvPreview}
+          onClearSavedMapping={clearCsvMapping}
+        />
+      )}
+      {sourceRowPreview && (
+        <CsvSourceRowModal
+          preview={sourceRowPreview}
+          onClose={() => setSourceRowPreview(null)}
         />
       )}
       <input
@@ -533,7 +710,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
         onBusinessTabChange={operations.changeBusinessTab}
         onApplyRules={operations.applyRules}
         onReload={reloadCurrentSection}
-        onSave={async () => { await save(); }}
+        onSave={async () => { await saveAndClearImportFeedback(); }}
         onLoad={load}
         onRequestDelete={requestDelete}
         onDelete={deleteMonth}
@@ -543,9 +720,21 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
           setDeleteConfirm("");
         }}
       />
-      <span className="asset-track-sr-only" role="status" aria-live="polite">
-        {state.kind === "error" ? state.message : ""}
-      </span>
+      <MonthEditorStatusBar
+        state={state}
+        workflow={workflow}
+        issues={issues}
+        feedback={csv.importFeedback}
+        lastSavedAt={lastSavedAt}
+        activeSection={activeSection}
+        onNextStep={goToNextStep}
+        onRetryImport={csv.openImport}
+        onSaveImport={saveAndClearImportFeedback}
+        onDismissImport={csv.clearImportFeedback}
+        onViewTransactions={onNavigateSection
+          ? () => { void onNavigateSection("transactions"); }
+          : undefined}
+      />
       {(showAllSections || activeSection === "assets") && <MonthEditorAssetsSection
         draft={draft}
         onCashBalanceChange={updateCashBalance}
@@ -565,6 +754,16 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
         onUpdateGroup={updateTransactionGroup}
         onDelete={deleteTransaction}
         onAdd={addTransaction}
+        sourceRows={csv.lastImportedSource?.rows}
+        onViewSourceRow={(row, sourceRow) => {
+          const source = csv.lastImportedSource;
+          if (!source) return;
+          setSourceRowPreview({
+            filename: source.filename,
+            headers: source.headers,
+            row: sourceRow
+          });
+        }}
         businessTab={operations.businessTab}
         onBusinessTabChange={operations.changeBusinessTab}
         showBusinessTabs={activeSection !== "transactions"}
@@ -621,7 +820,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
                 keys,
                 (row) => row.type === "收入"
               )}
-            >{t("收入转代付", "Income to daifu")}</button>
+            >{t("收入转代付", "Income to paid on behalf")}</button>
             <button
               type="button"
               disabled={state.kind === "pending" || keys.size === 0}
@@ -631,7 +830,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
                 keys,
                 (row) => row.type === "代付"
               )}
-            >{t("代付转收入", "Daifu to income")}</button>
+            >{t("代付转收入", "Paid on behalf to income")}</button>
           </>}
         </>}
         renderRuleControls={renderRuleControls}
@@ -647,7 +846,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
                 new Set([transactionKey]),
                 (candidate) => candidate.type === "收入"
               )}
-            >{t("转为代付", "Convert to daifu")}</button>;
+            >{t("转为代付", "Convert to paid on behalf")}</button>;
           }
           if (currentTab === "incoming" && row.type === "代付") {
             return <button
