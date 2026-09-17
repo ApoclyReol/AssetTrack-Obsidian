@@ -4,7 +4,8 @@
 
 ## 当前发布状态
 
-v1.9.0 已完成需求实现和自动化发布门禁，真实 Obsidian smoke 仍按发布日志作为人工门禁。它在 v1.8.1 基础上集中整理账单导入、流水编辑、月度引导、规则应用和分析说明的易用性，继承纯 TypeScript 架构、个性化金额设置、双资产口径、周期消费
+v1.9.0 已完成需求实现、自动化发布门禁和真实 Obsidian 人工验收；此前人工验收只漏记在文档中，
+本次已补记到发布日志。它在 v1.8.1 基础上集中整理账单导入、流水编辑、月度引导、规则应用和分析说明的易用性，继承纯 TypeScript 架构、个性化金额设置、双资产口径、周期消费
 面板、自动中英文界面与规则工作台，并完成 Obsidian 1.13 兼容升级：
 
 - TypeScript Service/Repository 和 `node:sqlite`；
@@ -76,20 +77,22 @@ P3 代付关系模型仍是未来设计。
 
 ## v1.9.0 发布后质量门禁
 
-Asset Track 项目已通过 Community Plugins 审核并支持从社区目录安装当前稳定版。
-发布后仍需持续完成：
+Asset Track 项目已通过 Community Plugins 审核并支持从社区目录安装当前稳定版。v1.9.0
+真实 Obsidian 安装、更新、重载、卸载与重启验收已由项目维护者完成；此前只漏记在文档中，
+本次补记。下面是发布后的持续质量要求：
 
 1. 在隔离复制 Vault 验证 schema 9→10→11 与 10→11 迁移、保护备份、理财流水账户、通用规则、代付规则、批量操作日志、商品/交易对手汇总和回溯。
-2. 完成 macOS 与 Windows 真实 Obsidian 安装、更新、重载和卸载后重启 smoke。
-3. 验证多窗口 revision、关闭草稿恢复、中英文界面和窄窗口布局。
+2. 在每次正式版本上重复真实 Obsidian 安装、更新、重载和卸载后重启 smoke。
+3. 持续验证多窗口 revision、关闭草稿恢复、中英文界面和窄窗口布局。
 4. 保持真实 Obsidian 安装、更新、重载、卸载与重启记录，并持续核验正式三文件和
    attestations。
 
 ## 工程性路线
 
-- v1.8.1 修复阶段延续两轮职责拆分：分析页面、月度编辑区块、分类/匹配规则表、数据健康、
-  商品统一和规则创建均有独立 UI 模块；`AssetTrackEditorApp.tsx` 保留页面路由，月份和规则编辑器
-  分别保留各自的草稿、dirty、revision 与事务协调。后续只在边界稳定、能降低耦合时继续拆分，
+- v1.9.0 延续职责拆分：分析页面、月度编辑区块、分类/匹配规则表、数据健康、商品统一和规则创建
+  均有独立 UI 模块；`AssetTrackEditorApp.tsx` 保留页面路由，顶部导航和月度摘要已抽到
+  `AssetTrackEditorToolbar.tsx`，月份和规则编辑器分别保留各自的草稿、dirty、revision 与事务协调。
+  后续只在边界稳定、能降低耦合时继续拆分，
   不为目录层级而重排代码。
 - Repository 已完成第一轮读写拆分：`AssetTrackRepository.ts` 保留兼容 facade，写入职责位于
   `monthWriteRepository.ts`、`configurationWriteRepository.ts` 和 `historyWriteRepository.ts`，

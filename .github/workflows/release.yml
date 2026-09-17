@@ -14,8 +14,8 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22.16.0
           cache: npm
@@ -35,6 +35,9 @@ jobs:
         run: |
           test "$(find build -maxdepth 1 -type f | wc -l)" -eq 3
           test "$(find build -mindepth 1 -maxdepth 1 | wc -l)" -eq 3
+      - name: Smoke test plugin bundle
+        shell: bash
+        run: bash scripts/smoke_test_plugin.sh build
       - name: Attest release assets
         uses: actions/attest@v4
         with:

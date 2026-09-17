@@ -49,6 +49,14 @@ export class RuleHistoryReadModel {
     return this.reports.rules(db);
   }
 
+  savedRules(db: DatabaseSync): { revision: number; rows: SavedRule[] } {
+    const result = this.rules(db);
+    return {
+      revision: result.revision,
+      rows: this.reports.rawRuleDefinitions(result.rows)
+    };
+  }
+
   normalizedRuleRows(db: DatabaseSync): ReturnType<RuleReportReadModel["normalizedRuleRows"]> {
     return this.reports.normalizedRuleRows(db);
   }
@@ -83,7 +91,7 @@ export class RuleHistoryReadModel {
       rules_revision: data.rules.revision,
       scope: data.scope,
       categories: data.categories,
-      rules: data.rules.rows as unknown as SavedRule[],
+      rules: this.reports.rawRuleDefinitions(data.rules.rows),
       recommendations: data.recommendations,
       historical_products: data.historicalProducts,
       rule_conflicts: data.ruleConflicts,
@@ -232,7 +240,7 @@ export class RuleHistoryReadModel {
       rules: ruleData.data,
       scope: productData.scope,
       categories: enrichedCategories,
-      categoriesRevision: contentRevision(categories as unknown as Row[]),
+      categoriesRevision: contentRevision(categories),
       historicalProducts,
       recommendations,
       ruleConflicts,

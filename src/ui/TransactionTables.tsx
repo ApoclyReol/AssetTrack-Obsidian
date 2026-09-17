@@ -49,6 +49,7 @@ import {
   SortButton,
   issueIsBlocking,
   sortRows,
+  transactionInputValue,
   type SortState
 } from "./editorPrimitives";
 import { ActionTableHeader } from "./TablePrimitives";
@@ -568,7 +569,7 @@ export function TransactionTable({
                   type="number"
                   min="0"
                   step="0.01"
-                  value={row.amount}
+                  value={transactionInputValue(row.amount)}
                   onChange={(event) => onUpdate(originalIndex, "amount", event.target.value)}
                 />
                 <span className="asset-track-transaction-actions">
@@ -836,7 +837,7 @@ export function TransactionSummaryTable({
                                       <input
                                         className="asset-track-amount-cell"
                                         type="number"
-                                        value={item.amount}
+                                        value={transactionInputValue(item.amount)}
                                         aria-label={t(`${item.type}第 ${blockNumber} 行金额`, `${itemDisplayType} row ${blockNumber} amount`)}
                                         onChange={(event) => onUpdate(index, "amount", event.target.value)}
                                       />

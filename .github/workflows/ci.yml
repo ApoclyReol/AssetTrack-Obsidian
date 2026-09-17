@@ -15,8 +15,8 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22.16.0
           cache: npm
@@ -29,3 +29,6 @@ jobs:
         run: npm run test:perf
       - run: npm run build
       - run: npm run release:check
+      - name: Smoke test plugin bundle
+        shell: bash
+        run: bash scripts/smoke_test_plugin.sh build

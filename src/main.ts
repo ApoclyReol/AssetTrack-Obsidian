@@ -1,8 +1,14 @@
 import {
   FileSystemAdapter,
+  Platform,
   Plugin
 } from "obsidian";
-import { existsSync, mkdirSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  renameSync,
+  rmSync
+} from "node:fs";
 import { dirname, join } from "node:path";
 import {
   VIEW_TYPE_ASSET_TRACK,
@@ -22,6 +28,7 @@ import {
 } from "./services/AssetTrackService";
 import { LocalAssetTrackService } from "./services/LocalAssetTrackService";
 import type {
+  AnalysisRuntimeSettings,
   AssetTrackSettings
 } from "./types/settings";
 import type {
@@ -47,7 +54,36 @@ import {
   type EditorDraftSnapshot
 } from "./ui/editorDraft";
 
-const electronShell = loadElectronModule().shell;
+function desktopShell(): ReturnType<typeof loadElectronModule>["shell"] {
+  if (!Platform.isDesktop) {
+    throw new AssetTrackError({
+      code: "filesystem.desktop_vault_required",
+      status: 422
+    });
+  }
+  return loadElectronModule().shell;
+}
+
+function cloneSettings(settings: AssetTrackSettings): AssetTrackSettings {
+  return {
+    ...settings,
+    csvMappings: settings.csvMappings.map((profile) => ({
+      ...profile,
+      mapping: {
+        ...profile.mapping,
+        type_values: { ...profile.mapping.type_values },
+        included_statuses: [...profile.mapping.included_statuses]
+      }
+    }))
+  };
+}
+
+function restoreSettings(
+  target: AssetTrackSettings,
+  snapshot: AssetTrackSettings
+): void {
+  Object.assign(target, snapshot);
+}
 
 export type DatabaseState = "unconfigured" | "initializing" | "ready" | "error";
 export type DirectorySwitchMode = "migrate" | "load";
@@ -72,6 +108,7 @@ export default class AssetTrackPlugin extends Plugin {
   private databaseManager: DatabaseManager | null = null;
   private readonly dataListeners = new Set<() => void>();
   private readonly draftRecoveries = new DraftRecoveryStore();
+  private settingsWriteTail: Promise<void> = Promise.resolve();
   private viewOpenDatabaseInitialization: Promise<void> | null = null;
 
   async onload(): Promise<void> {
@@ -94,9 +131,41 @@ export default class AssetTrackPlugin extends Plugin {
     });
   }
 
-  async saveSettings(): Promise<void> {
-    await this.saveData(this.settings);
+  private enqueueSettingsWrite(operation: () => Promise<void>): Promise<void> {
+    const previous = this.settingsWriteTail ?? Promise.resolve();
+    const next = previous.then(operation, operation);
+    this.settingsWriteTail = next.then(() => undefined, () => undefined);
+    return next;
+  }
+
+  private async persistSettingsSnapshot(): Promise<void> {
+    await this.saveData(cloneSettings(this.settings));
     this.settingsIssues = [];
+  }
+
+  async saveSettings(): Promise<void> {
+    await this.enqueueSettingsWrite(() => this.persistSettingsSnapshot());
+  }
+
+  async updateSettings(
+    update: (settings: AssetTrackSettings) => void
+  ): Promise<void> {
+    await this.enqueueSettingsWrite(async () => {
+      const previous = cloneSettings(this.settings);
+      try {
+        update(this.settings);
+        await this.persistSettingsSnapshot();
+      } catch (error) {
+        restoreSettings(this.settings, previous);
+        throw error;
+      }
+    });
+  }
+
+  private async persistDataDirectorySettings(dataDirectory: string): Promise<void> {
+    await this.updateSettings((settings) => {
+      settings.dataDirectory = dataDirectory;
+    });
   }
 
   async openEditor(
@@ -236,7 +305,7 @@ export default class AssetTrackPlugin extends Plugin {
     }
 
     const inspection = await this.inspectDataDirectory(dataDirectory);
-    if (mode === "migrate" && inspection.exists) {
+    if (mode === "migrate" && (inspection.exists || inspection.recovery_available)) {
       throw new AssetTrackError({ code: "database.migration_target_exists", status: 409 });
     }
     if (mode === "load" && !canLoadDatabase(inspection)) {
@@ -252,23 +321,34 @@ export default class AssetTrackPlugin extends Plugin {
     const targetPath = this.fullDatabasePath(dataDirectory);
     if (mode === "migrate") {
       mkdirSync(dirname(targetPath), { recursive: true });
-      await currentManager.snapshot(targetPath);
-      const copied = DatabaseManager.inspect(targetPath);
-      if (!copied.valid) {
-        throw new AssetTrackError({
-          code: "database.migration_validation_failed",
-          status: 422,
-          params: { details: copied.error ?? "" }
-        });
+      const incomingPath = `${targetPath}.incoming`;
+      let incomingCreated = true;
+      try {
+        await currentManager.snapshot(incomingPath);
+        const copied = DatabaseManager.inspect(incomingPath);
+        if (!copied.valid) {
+          throw new AssetTrackError({
+            code: "database.migration_validation_failed",
+            status: 422,
+            params: { details: copied.error ?? "" }
+          });
+        }
+        if (existsSync(targetPath)) {
+          throw new AssetTrackError({
+            code: "database.migration_target_exists",
+            status: 409
+          });
+        }
+        renameSync(incomingPath, targetPath);
+        incomingCreated = false;
+      } finally {
+        if (incomingCreated) rmSync(incomingPath, { force: true });
       }
     }
     const next = this.buildService(dataDirectory);
     try {
       await next.api.meta();
-      await this.saveData({
-        dataDirectory,
-        csvMappings: this.settings.csvMappings
-      });
+      await this.persistDataDirectorySettings(dataDirectory);
     } catch (error) {
       await next.api.close();
       throw error;
@@ -276,7 +356,6 @@ export default class AssetTrackPlugin extends Plugin {
     const previousApi = this.api;
     this.databaseManager = next.manager;
     this.api = next.api;
-    this.settings.dataDirectory = dataDirectory;
     this.databaseState = "ready";
     this.databaseError = null;
     await previousApi.close();
@@ -285,6 +364,12 @@ export default class AssetTrackPlugin extends Plugin {
   }
 
   private filesystemAdapter(): FileSystemAdapter {
+    if (!Platform.isDesktop) {
+      throw new AssetTrackError({
+        code: "filesystem.desktop_vault_required",
+        status: 422
+      });
+    }
     const adapter = this.app.vault.adapter;
     if (!(adapter instanceof FileSystemAdapter)) {
       throw new AssetTrackError({ code: "filesystem.desktop_vault_required", status: 422 });
@@ -329,13 +414,9 @@ export default class AssetTrackPlugin extends Plugin {
       }
       next = this.buildService(dataDirectory);
       await next.api.meta();
-      await this.saveData({
-        dataDirectory,
-        csvMappings: this.settings.csvMappings
-      });
+      await this.persistDataDirectorySettings(dataDirectory);
       this.databaseManager = next.manager;
       this.api = next.api;
-      this.settings.dataDirectory = dataDirectory;
       this.databaseState = "ready";
       await this.refreshViews();
     } catch (error) {
@@ -388,6 +469,16 @@ export default class AssetTrackPlugin extends Plugin {
     }
   }
 
+  updateRuntimeSettings(): void {
+    if (!this.isDatabaseReady()) return;
+    const settings: AnalysisRuntimeSettings = {
+      reconciliationTolerance: this.settings.reconciliationTolerance,
+      largeExpenseThreshold: this.settings.largeExpenseThreshold
+    };
+    this.api.updateRuntimeSettings(settings);
+    this.notifyDataChanged();
+  }
+
   openPluginSettings(): void {
     const setting = (this.app as typeof this.app & {
       setting: { open(): void; openTabById(id: string): void };
@@ -412,37 +503,33 @@ export default class AssetTrackPlugin extends Plugin {
   }
 
   async saveCsvMapping(profile: CsvMappingProfile): Promise<void> {
-    const previousMappings = this.settings.csvMappings;
-    this.settings.csvMappings = [
-      ...this.settings.csvMappings.filter(
-        (item) => item.header_signature !== profile.header_signature
-      ),
-      profile
-    ].slice(-20);
-    try {
-      await this.saveSettings();
-    } catch (error) {
-      this.settings.csvMappings = previousMappings;
-      throw error;
-    }
+    await this.updateSettings((settings) => {
+      settings.csvMappings = [
+        ...settings.csvMappings.filter(
+          (item) => item.header_signature !== profile.header_signature
+        ),
+        profile
+      ].slice(-20);
+    });
   }
 
   async clearCsvMapping(signature: string): Promise<void> {
-    this.settings.csvMappings = this.settings.csvMappings.filter(
-      (profile) => profile.header_signature !== signature
-    );
-    await this.saveSettings();
+    await this.updateSettings((settings) => {
+      settings.csvMappings = settings.csvMappings.filter(
+        (profile) => profile.header_signature !== signature
+      );
+    });
   }
 
   async openDataDirectory(): Promise<void> {
     if (!this.settings.dataDirectory) throw new AssetTrackError({ code: "workspace.data_directory_required", status: 422 });
-    electronShell.showItemInFolder(
+    desktopShell().showItemInFolder(
       this.filesystemAdapter().getFullPath(this.settings.dataDirectory)
     );
   }
 
   showPathInFinder(path: string): void {
-    electronShell.showItemInFolder(path);
+    desktopShell().showItemInFolder(path);
   }
 
   async reopenDatabase(): Promise<void> {

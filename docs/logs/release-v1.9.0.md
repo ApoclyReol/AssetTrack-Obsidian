@@ -23,3 +23,13 @@ Import is split into navigable file-reading, mapping, and preview steps, with cl
 ### Transactions and monthly workspace
 
 Monthly progress, import feedback, and issue counts are consolidated, while row markers keep problem details close to the affected transaction. Summary table hierarchy, raw-row tracing, month navigation, and reconciliation explanations are clearer.
+
+## Validation
+
+- Automated validation passed: `npm run typecheck`, `npm run lint`, `npm test` (36 test files / 280 tests),
+  `npm run build`, `npm run release:check`, `bash scripts/smoke_test_plugin.sh build`, and `git diff --check`.
+- The generated `build/` directory contained only `main.js`, `manifest.json`, and `styles.css`; the final
+  `main.js` size was 1,553,967 bytes.
+- Real Obsidian installation, update, reload, uninstall, and restart acceptance passed, confirmed by the
+  project maintainer on 2026-09-16. The result had been completed but was missing from the earlier release
+  documentation; this section records that fact without storing private paths, databases, or bill samples.

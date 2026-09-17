@@ -3,6 +3,60 @@ import { categoryKey } from "../../src/database/schema";
 import { fixture } from "./databaseTestFixtures";
 
 describe("database read windows", () => {
+  it("applies runtime analysis settings without reopening the repository", async () => {
+    const { repository } = fixture();
+    const food = categoryKey("餐饮基础");
+    const investment = [{
+      account_key: "investment-default",
+      principal: 0,
+      market_value: 0,
+      cash_balance: 0
+    }];
+
+    await repository.saveMonth(
+      "2025-12",
+      0,
+      [{ account_key: "cash-default", balance: 1000 }],
+      investment,
+      [],
+      []
+    );
+    await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 850 }],
+      investment,
+      [{
+        transaction_date: "2026-01-01",
+        type: "支出",
+        category_key: food,
+        category: "餐饮基础",
+        product: "午餐",
+        amount: 100
+      }],
+      []
+    );
+
+    const before = await repository.getMonth("2026-01");
+    expect(before.computed).not.toBeNull();
+    if (!before.computed) throw new Error("expected computed monthly calculation");
+    expect(before.computed.big_tickets).toEqual([]);
+    expect(before.overview.reconciliation?.explanation.level).toBe("success");
+
+    repository.updateRuntimeSettings({
+      largeExpenseThreshold: 50,
+      reconciliationTolerance: 10
+    });
+
+    const after = await repository.getMonth("2026-01");
+    expect(after.computed).not.toBeNull();
+    if (!after.computed) throw new Error("expected computed monthly calculation");
+    expect(after.computed.big_tickets).toHaveLength(1);
+    expect(after.overview.reconciliation?.explanation.level).toBe("error");
+    expect(repository.monthOverview("2026-01").reconciliation?.explanation.level)
+      .toBe("error");
+  });
+
   it("defaults product overview to one year and system checks to five years", async () => {
     const { repository } = fixture();
     const food = categoryKey("餐饮基础");

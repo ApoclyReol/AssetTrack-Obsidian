@@ -28,7 +28,6 @@ import type {
   MonthEditorPort,
   RuleWritePort
 } from "../services/ports";
-import type { SavedRule } from "../types/rules";
 import { createTransactionDraft } from "./analysisModel";
 import { CsvImportDialog } from "./CsvImportDialog";
 import { displayError, t } from "../i18n";
@@ -526,7 +525,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
         operations.invalidatePendingOperationLogs();
         acknowledgeDataChange();
         onDataChanged?.();
-        setRules(saved.rows as unknown as SavedRule[]);
+        setRules(saved.rows);
         setRulesRevision(saved.revision);
         try {
           const updatedShell = await api.ruleWorkspaceShell();

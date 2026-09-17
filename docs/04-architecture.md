@@ -83,8 +83,7 @@ schema 10 在流水和自动规则中分别保存 `counterparty`；加仓、提�
 阻止完成，不静默选择。
 
 当前版本起，`data.json` 还保存基础货币、金额格式、平账容差、大额支出阈值和可选 AI
-地址、模型、超时；v1.8.0
-不改变这些设置的兼容方式。
+地址、模型、超时；当前维护线不改变这些设置的兼容方式。
 API Key 只通过 Obsidian SecretStorage 保存；AI 仅发送选中可分类流水的最小字段，结果必须
 预览、确认后才进入草稿。这些字段只影响展示、分析和可选建议，不改变财务事实。月度草稿使用 reducer
 动作标记 dirty，保存后以 canonical workspace 和新 revision 重置。账单文件以
@@ -98,7 +97,9 @@ API Key 只通过 Obsidian SecretStorage 保存；AI 仅发送选中可分类流
 
 当前结构边界：
 
-- `AssetTrackEditorApp.tsx` 只负责 ItemView 路由、页面导航和唯一的切换确认入口；
+- `AssetTrackEditorApp.tsx` 只负责 ItemView 路由、页面导航和唯一的切换确认入口；顶部主栏、
+  分析/记录/配置上下文导航和月度摘要位于 `AssetTrackEditorToolbar.tsx`，空月份引导位于
+  `AssetTrackEditorEmptyState.tsx`；
   `AssetTrackEditorView.ts` 只负责 Obsidian 生命周期、关闭拦截和草稿恢复。
   `MonthEditor.tsx` 的会话事实位于 `useMonthEditorSession.ts`，流水操作和账单导入分别位于
   `useTransactionOperations.ts`、`useCsvImportSession.ts`；资产、流水、借款和固定资产区块继续位于
@@ -117,6 +118,8 @@ API Key 只通过 Obsidian SecretStorage 保存；AI 仅发送选中可分类流
   `DatabaseSync` 上下文；每个公开写入入口仍只调用一次 `manager.write()`，不得让子模块自行打开连接。
   UI 通过 `MonthEditorPort`、`ConfigurationEditorPort`、`AnalysisPort`、`BackupPort` 等能力端口依赖
   Service；`LocalAssetTrackService` 仍是唯一运行时实现，不拆成多个 Service 类；
+- 设置页修改平账容差或大额阈值后，由插件通过 `updateRuntimeSettings()` 同步到已打开的
+  Repository/分析模型，并触发数据版本失效，避免设置显示与分析结果使用不同口径；
 - 全局类型按 CSV、transactions、month、configuration、rules、history、analysis 和 operations
   分域位于 `src/types/`，不保留一个重新导出全部类型的公共 barrel；
 - 结构化错误和请求级流水操作校验位于 `src/application/errors.ts` 与

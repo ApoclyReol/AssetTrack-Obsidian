@@ -34,6 +34,7 @@ import type {
 } from "../types/month";
 import type {
   RuleCandidate,
+  SavedRule,
   RuleWorkspaceAnalytics,
   RuleWorkspaceShell,
   RuleImpactPreview
@@ -41,6 +42,7 @@ import type {
 import type {
   Transaction
 } from "../types/transactions";
+import type { AnalysisRuntimeSettings } from "../types/settings";
 import type {
   OperationLogSummary,
   OperationAuditContext,
@@ -83,6 +85,7 @@ import type {
 } from "./repositoryWriteContext";
 
 export class AssetTrackRepository {
+  private readonly options: AnalysisRuntimeSettings;
   private readonly analysis: AnalysisReadModel;
   private readonly ruleHistory: RuleHistoryReadModel;
   private readonly monthWrites: MonthWriteRepository;
@@ -93,11 +96,12 @@ export class AssetTrackRepository {
 
   constructor(
     private readonly manager: DatabaseManager,
-    private readonly options: {
-      reconciliationTolerance: number;
-      largeExpenseThreshold: number;
-    } = { reconciliationTolerance: 100, largeExpenseThreshold: 1000 }
+    options: AnalysisRuntimeSettings = {
+      reconciliationTolerance: 100,
+      largeExpenseThreshold: 1000
+    }
   ) {
+    this.options = { ...options };
     this.analysis = new AnalysisReadModel({
       largeExpenseThreshold: this.options.largeExpenseThreshold,
       reconciliationTolerance: this.options.reconciliationTolerance,
@@ -154,6 +158,11 @@ export class AssetTrackRepository {
 
   invalidateCaches(): void {
     this.monthsCache = null;
+  }
+
+  updateRuntimeSettings(settings: AnalysisRuntimeSettings): void {
+    Object.assign(this.options, settings);
+    this.analysis.updateRuntimeSettings(settings);
   }
 
   private db(): DatabaseSync {
@@ -434,7 +443,7 @@ export class AssetTrackRepository {
 
   categories(db = this.db()): { revision: number; rows: CategoryDefinition[] } {
     const result = this.categoryDefinitions(db);
-    return { revision: contentRevision(result as unknown as Row[]), rows: result };
+    return { revision: contentRevision(result), rows: result };
   }
 
   async saveCategories(
@@ -502,7 +511,7 @@ export class AssetTrackRepository {
 
   accounts(db = this.db()): { revision: number; rows: AccountDefinition[] } {
     const result = this.accountRows(db);
-    return { revision: contentRevision(result as unknown as Row[]), rows: result };
+    return { revision: contentRevision(result), rows: result };
   }
 
   async saveAccounts(
@@ -725,7 +734,7 @@ export class AssetTrackRepository {
   } {
     const result = this.debtRowsForMonth(db, month, true);
     return {
-      revision: contentRevision(result as unknown as Row[]),
+      revision: contentRevision(result),
       rows: result
     };
   }
@@ -765,7 +774,7 @@ export class AssetTrackRepository {
         transactions,
         categories,
         this.options.largeExpenseThreshold
-      ) as unknown as Record<string, unknown>,
+      ),
       overview: this.analysis.draftMonthOverview(db, month, transactions, categories)
     };
   }
@@ -790,9 +799,9 @@ export class AssetTrackRepository {
 
   async saveRules(
     expectedRevision: number,
-    input: Row[],
+    input: Array<Row | SavedRule>,
     audit: OperationAuditContext = { source_page: "配置/匹配规则" }
-  ): Promise<{ revision: number; rows: Row[] }> {
+  ): Promise<{ revision: number; rows: SavedRule[] }> {
     return this.manager.write((db) => {
       const before = rows(db.prepare("SELECT * FROM auto_rules ORDER BY id").all());
       this.configurationWrites.saveRules(db, expectedRevision, input);
@@ -803,7 +812,7 @@ export class AssetTrackRepository {
         operation,
         audit.selection ?? operation.changes.map((change) => change.transaction_key ?? "")
       );
-      return this.rules(db);
+      return this.ruleHistory.savedRules(db);
     });
   }
 
@@ -940,7 +949,7 @@ export class AssetTrackRepository {
 
   debts(db = this.db()): { revision: number; rows: DebtRecord[] } {
     const result = this.debtRows(db);
-    return { revision: contentRevision(result as unknown as Row[]), rows: result };
+    return { revision: contentRevision(result), rows: result };
   }
 
   async saveDebts(expectedRevision: number, input: Row[]): Promise<{

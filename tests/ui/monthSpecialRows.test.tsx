@@ -154,7 +154,7 @@ describe("month debt and special transaction rows", () => {
       transactions: rows,
       debts: [],
       fixed_assets: [],
-      computed: {},
+    computed: null,
       overview: { available: false }
     };
 

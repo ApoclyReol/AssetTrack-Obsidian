@@ -13,7 +13,7 @@ tests/
 └─ mocks/        Obsidian 测试替身
 ```
 
-当前测试分为 30 个文件、228 个用例。文件数量优化不以删除安全网为目标：
+当前测试分为 36 个文件、288 个用例。文件数量优化不以删除安全网为目标：
 
 - 财务计算、schema constraint/migration/rollback、revision、备份恢复、Preview → Commit、规则优先级、导入解析、stale async、草稿恢复和 SQLite 性能测试必须保留。
 - 同一契约只在最接近的层补回归测试；纯算法放 `domain`，SQLite 约束与事务放 `database`，跨页面异步状态放 `ui`，只有真正跨层的问题才增加更高层测试。

@@ -439,7 +439,7 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
         setWorkspace((current) => current ? {
           ...current,
           rules_revision: result.revision,
-          rules: result.rows as unknown as SavedRule[]
+          rules: result.rows
         } : current);
         setDirtyFlags(dirtyFlagsRef.current.category, false);
         const message = t(
@@ -633,7 +633,7 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
         setWorkspace((current) => current ? {
           ...current,
           rules_revision: savedResult.revision,
-          rules: savedResult.rows as unknown as SavedRule[]
+          rules: savedResult.rows
         } : current);
         setHistoryPanelKey((value) => value + 1);
         commitReported = true;

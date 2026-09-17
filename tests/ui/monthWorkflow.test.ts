@@ -59,7 +59,7 @@ function workspace(
     transactions: overrides.transactions ?? [],
     debts: [],
     fixed_assets: [],
-    computed: {},
+    computed: null,
     overview: {
       available: true,
       reconciliation

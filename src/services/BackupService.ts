@@ -21,6 +21,11 @@ import {
 import { AssetTrackError } from "../application/errors";
 import { loadSqliteModule } from "./desktopRuntime";
 import { scalarText } from "../domain/text";
+import type {
+  BackupManifest,
+  BackupRestoreResult,
+  BackupValidation
+} from "../types/backup";
 
 type Row = Record<string, unknown>;
 
@@ -104,38 +109,7 @@ const CONFIG = [
   }
 ] as const;
 
-interface Manifest {
-  format_version: number;
-  schema_version: number;
-  app_version: string;
-  created_at: string;
-  required_tables: string[];
-  tables: Record<string, {
-    rows: number;
-    filename: string;
-    columns: readonly string[];
-    content_sha256: string;
-  }>;
-  files: Record<string, { size: number; sha256: string }>;
-  source_revision?: string | null;
-  backup_version?: number;
-  integrity_check?: string;
-}
-
-export interface BackupValidation {
-  valid: true;
-  mode: "complete" | "sqlite";
-  schema: {
-    valid: true;
-    integrity_check: "ok";
-    missing_tables: string[];
-    schema_version: number;
-  };
-  row_counts: Record<string, number>;
-  manifest: Manifest | null;
-  format_version: number;
-  required_tables: string[];
-}
+type Manifest = BackupManifest;
 
 function fail(code: string, params: Record<string, unknown> = {}): never {
   throw new AssetTrackError({
@@ -650,7 +624,7 @@ export class BackupService {
   async restore(
     source: string,
     beforeCommit?: () => void
-  ): Promise<Record<string, unknown>> {
+  ): Promise<BackupRestoreResult> {
     const materialized = await materialize(source);
     try {
       const validation = await this.validate(materialized.root);

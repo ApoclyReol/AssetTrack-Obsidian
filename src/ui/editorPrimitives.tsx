@@ -67,9 +67,13 @@ export function number(value: string): number {
 
 export function transactionAmount(value: string): number {
   const trimmed = value.trim();
-  if (!trimmed) return "" as unknown as number;
+  if (!trimmed) return Number.NaN;
   const parsed = Number(trimmed);
-  return Number.isFinite(parsed) ? parsed : "" as unknown as number;
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+export function transactionInputValue(value: number): number | "" {
+  return Number.isFinite(value) ? value : "";
 }
 
 export function clone<T>(data: T): T {

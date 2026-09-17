@@ -7,6 +7,7 @@ import type {
 import type {
   AnnualCostAudit,
   AnnualOverview,
+  MonthlyCalculation,
   RecurringExpenseSummary
 } from "../types/analysis";
 import type {
@@ -24,8 +25,7 @@ import {
   explainReconciliation,
   LEGACY_CATEGORY_ALIASES,
   previousMonths,
-  type ExtendedAnnualRow,
-  type MonthlyCalculation
+  type ExtendedAnnualRow
 } from "../domain/calculator";
 import { normalizeProductKey } from "../domain/rules";
 import {
@@ -39,11 +39,12 @@ import {
   sampleMonths
 } from "../domain/readWindows";
 import { roundHalfEven, sum } from "../domain/money";
+import type { AnalysisRuntimeSettings } from "../types/settings";
 import { RepositoryValidationError, type Row, rows, text, fixedAssetFromRow, transactionFromRow } from "./repositoryPrimitives";
 
 export interface AnalysisReadContext {
-  readonly largeExpenseThreshold: number;
-  readonly reconciliationTolerance: number;
+  largeExpenseThreshold: number;
+  reconciliationTolerance: number;
   getMonths(db: DatabaseSync): string[];
   savedMonths(db: DatabaseSync): string[];
   categoryDefinitions(db: DatabaseSync): CategoryDefinition[];
@@ -53,6 +54,11 @@ export interface AnalysisReadContext {
 
 export class AnalysisReadModel {
   constructor(private readonly context: AnalysisReadContext) {}
+
+  updateRuntimeSettings(settings: AnalysisRuntimeSettings): void {
+    this.context.largeExpenseThreshold = settings.largeExpenseThreshold;
+    this.context.reconciliationTolerance = settings.reconciliationTolerance;
+  }
 
   private transactionsByMonth(
     db: DatabaseSync,

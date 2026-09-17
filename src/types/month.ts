@@ -3,6 +3,7 @@ import type {
   InvestmentAccountBalance,
   InvestmentAccountAnalysis
 } from "./configuration";
+import type { MonthlyCalculation } from "./analysis";
 import type { Transaction } from "./transactions";
 import type { PendingOperationLog } from "./operations";
 import type { ReadWindow } from "./readWindows";
@@ -43,7 +44,7 @@ export interface MonthWorkspace {
   transactions: Transaction[];
   debts: DebtRecord[];
   fixed_assets: FixedAsset[];
-  computed: Record<string, unknown>;
+  computed: MonthlyCalculation | null;
   overview: MonthOverview;
 }
 

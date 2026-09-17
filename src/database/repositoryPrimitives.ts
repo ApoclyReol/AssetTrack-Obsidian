@@ -71,7 +71,7 @@ function stableJson(value: unknown): string {
   ).join(", ")}}`;
 }
 
-export function contentRevision(value: Row[]): number {
+export function contentRevision(value: readonly unknown[]): number {
   const digest = createHash("sha256").update(stableJson(value), "utf8").digest("hex");
   return Number.parseInt(digest.slice(0, 12), 16);
 }

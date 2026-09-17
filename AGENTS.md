@@ -34,14 +34,16 @@ npm run typecheck
 npm run lint
 npm test
 npm run build
+npm run notices:update
 npm run release:check
+bash scripts/smoke_test_plugin.sh build
 ```
 
 ## 分层边界
 
 ```text
 src/domain/                             财务计算、账单解析、规则和校验
-src/database/                           schema 10、连接管理和 Repository
+src/database/                           schema 11、连接管理和 Repository
 src/services/                           本地 Service、备份恢复
 src/ui/、src/views/                     React 界面与 ItemView
 scripts/                                插件构建、安装和冒烟
@@ -52,15 +54,15 @@ docs/                                   当前架构、用户、开发与发行�
 ## 当前 handoff
 
 - Asset Track 已在 Community Plugins 上线，社区目录是推荐安装与更新方式；
-  v1.7.1 是本轮导入、规则、警告和数据生命周期修复更新，要求 Obsidian 1.13.0+，并在发布
-  声明中要求用户使用当前最新的 1.13.x 桌面版；继续保持核心对账口径，在既有
-  月度结算基础上增加通用规则、三类流水 Tab、汇总选择、操作日志和可选 AI 建议。
+  v1.9.0 是当前稳定版，要求 Obsidian 1.13.0+，并在发布声明中要求用户使用当前最新的
+  1.13.x 桌面版；继续保持核心对账口径，在既有月度结算基础上维护通用规则、三类流水 Tab、
+  汇总选择、操作日志和可选 AI 建议。
 - 确认操作使用 Obsidian 原生 Modal，CSV 映射窗口支持焦点陷阱、Escape 和状态
   播报；流水逐项表按可视行渲染，分块编号为线性预计算。
-- schema 8 私有数据已在 2026-07-28 使用一次性离线流程迁移并核验；schema 9 到
-  schema 10 的在线迁移包含保护备份、规则作用域/规范化唯一键、分类描述、流水来源、
-  理财流水账户和操作日志。迁移工具及旧 Python/sidecar 目录不在开发仓库中；当前源码、
-  测试和文档只维护 schema 10 正式路径。
+- schema 8 私有数据已在 2026-07-28 使用一次性离线流程迁移并核验；schema 9→10 和
+  schema 10→11 的在线迁移包含保护备份、规则作用域/规范化唯一键、
+  分类描述、流水来源、理财流水账户、操作日志和代付规则类型。迁移工具及旧 Python/sidecar
+  目录不在开发仓库中；当前源码、测试和文档只维护 schema 11 正式路径。
 - 流水按类型分块编号并完整展开；人工新建流水分类为空，账单导入确认只将接受行进入当前
   草稿，规则应用由流水页独立预览确认。月度分析增加理财环比，分类
   对比排除大额分类，异常变化使用 30% 与 100 元双阈值；对账差额绝对值小于
@@ -71,8 +73,8 @@ docs/                                   当前架构、用户、开发与发行�
   规则、编辑、类型转换和 AI 建议都先预览，确认后进入当前草稿，保存时写入同一事务
   的操作日志。P3 代付与支出关系模型仍未实现。
 - 继续维护前先读 `docs/00-reading-guide.md`、`docs/01-product-requirements.md` 和
-  `docs/09-roadmap.md`；本次实现、兼容边界、测试和后续注意事项详见
-  `docs/logs/release-v1.7.1.md`。
+  `docs/09-roadmap.md`；稳定版实现、兼容边界、测试和后续注意事项详见
+  `docs/logs/release-v1.9.0.md`，未发布维护修复详见 `docs/logs/maintenance-audit-2026-09-16.md`。
 - 后续每次正式更新都在 `docs/logs/` 新增 `release-vN.N.N.md`，并同步修改受影响
   的编号长期文档，不把当前事实只留在 release 日志中。
 

@@ -411,7 +411,7 @@ export class ProductHistoryReadModel {
     }
     const data = this.historyGroups(db, query);
     return {
-      categories_revision: contentRevision(data.categories as unknown as Row[]),
+      categories_revision: contentRevision(data.categories),
       rules_revision: data.ruleData.data.revision,
       scope: data.scope,
       group_by: query.group_by ?? "product",
@@ -422,7 +422,7 @@ export class ProductHistoryReadModel {
   productOverview(db: DatabaseSync, query: ProductHistoryQuery = {}): ProductHistoryIndexResult {
     const data = this.historyGroups(db, query, "analysis");
     return {
-      categories_revision: contentRevision(data.categories as unknown as Row[]),
+      categories_revision: contentRevision(data.categories),
       rules_revision: data.ruleData.data.revision,
       scope: data.scope,
       group_by: query.group_by ?? "product",

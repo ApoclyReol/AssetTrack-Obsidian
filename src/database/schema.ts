@@ -529,9 +529,29 @@ interface LegacyRuleRow {
 }
 
 interface Schema10RuleRow extends LegacyRuleRow {
-  match_scope: "product" | "merchant" | "merchant_product";
+  match_scope: string;
   rewrite_merchant: string;
   rewrite_product: string;
+}
+
+function legacyRuleRow(row: Record<string, unknown>): LegacyRuleRow {
+  return {
+    id: Number(row.id),
+    transaction_type: scalarText(row.transaction_type),
+    counterparty: scalarText(row.counterparty),
+    product: scalarText(row.product),
+    category_key: scalarText(row.category_key),
+    category: scalarText(row.category)
+  };
+}
+
+function schema10RuleRow(row: Record<string, unknown>): Schema10RuleRow {
+  return {
+    ...legacyRuleRow(row),
+    match_scope: scalarText(row.match_scope),
+    rewrite_merchant: scalarText(row.rewrite_merchant),
+    rewrite_product: scalarText(row.rewrite_product)
+  };
 }
 
 interface MigratedRuleFields {
@@ -738,10 +758,10 @@ function migrateSchema9To10InTransaction(db: DatabaseSync): SchemaMigrationRepor
   const categories = db.prepare(
     "SELECT category_key FROM category_definitions"
   ).all() as Array<{ category_key: string }>;
-  const rows = db.prepare(`
+  const rows = (db.prepare(`
     SELECT id,transaction_type,counterparty,product,category_key,category
     FROM auto_rules ORDER BY id
-  `).all() as unknown as LegacyRuleRow[];
+  `).all() as Array<Record<string, unknown>>).map(legacyRuleRow);
   report.category_count = categories.length;
   report.rule_count = rows.length;
   report.issues = migrationRuleIssues(db, rows);
@@ -972,11 +992,11 @@ function migrateSchema10To11InTransaction(db: DatabaseSync): SchemaMigrationRepo
   const categories = db.prepare(
     "SELECT category_key FROM category_definitions"
   ).all() as Array<{ category_key: string }>;
-  const rows = db.prepare(`
+  const rows = (db.prepare(`
     SELECT id,transaction_type,match_scope,counterparty,product,
            rewrite_merchant,rewrite_product,category_key,category
     FROM auto_rules ORDER BY id
-  `).all() as unknown as Schema10RuleRow[];
+  `).all() as Array<Record<string, unknown>>).map(schema10RuleRow);
   report.category_count = categories.length;
   report.rule_count = rows.length;
   report.issues = schema10RuleIssues(db, rows);

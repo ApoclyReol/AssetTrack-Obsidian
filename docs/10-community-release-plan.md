@@ -15,8 +15,9 @@ styles.css
 ```
 
 插件不依赖 Python、sidecar、平台原生扩展或 CPU 架构包。v1.9.0 已完成自动化构建、
-跨平台 CI、标准三文件发布和 attestation；真实 Obsidian smoke 与复制 Vault 回归
-仍按发布日志作为发布后的人工质量门禁持续补充。Linux 验证属于发布后持续质量工作。
+跨平台 CI、标准三文件发布和 attestation；真实 Obsidian 安装、更新、重载、卸载与重启
+验收也已由项目维护者完成，本次补记此前遗漏的文档记录。复制 Vault 回归和 Linux 安装器
+验证继续作为发布后的持续质量工作。
 
 ## 稳定兼容边界
 
@@ -37,25 +38,32 @@ styles.css
 
 ## 发布后质量路线
 
-1. 补充 Linux 最新 Obsidian 安装器真实 smoke，并记录 Obsidian、安装器和操作
+1. 持续补充 Linux 最新 Obsidian 安装器真实 smoke，并记录 Obsidian、安装器和操作
    系统版本。
 2. 在复制 Vault 持续回归 schema 11 备份恢复、schema 9→10→11 与 10→11 迁移、数据库切换、锁释放、多 ItemView、
    弹窗焦点和大文件门禁。
 3. 在正式产物上采集插件加载耗时和大数据量分析性能，优先处理可复现退化。
 4. 保持 Ubuntu、macOS 和 Windows CI 的
-   `npm ci → typecheck → lint → test → build → release:check` 全部通过。
+   `npm ci → typecheck → lint → test → build → notices:update → release:check → bundle smoke` 全部通过。
 5. 每次发布继续只上传标准三文件，并为每个文件生成 artifact attestation。
-6. v1.9.0 发布后持续记录复制 Vault 升级、中文/英文界面、商品-分类冲突与回溯事务、商品
-   统一、部分覆盖、批量操作日志、AI SecretStorage、月流水借款区块、关闭草稿恢复和分类删除弹窗；不能把这些真实 Obsidian smoke
-   结果冒充为自动测试结果。
+6. v1.9.0 的真实 Obsidian 验收已完成并通过（项目维护者确认，本次补记）；后续继续记录复制
+   Vault 升级、中文/英文界面、商品-分类冲突与回溯事务、商品统一、部分覆盖、批量操作日志、
+   AI SecretStorage、月流水借款区块、关闭草稿恢复和分类删除弹窗；不能把这些真实 Obsidian
+   smoke 结果冒充为自动测试结果。
 
-真实 smoke 状态只允许记录为 `通过（日期/版本/测试人）`、`失败（issue）` 或
-`未测试`。记录不得包含真实数据库、账单内容、私有路径或其他敏感信息。
+真实 smoke 状态只允许记录为 `通过（日期/版本/测试人）`、`通过（维护者确认；本次补记）`、
+`失败（issue）` 或 `未测试`。记录不得包含真实数据库、账单内容、私有路径或其他敏感信息。
+
+## v1.9.0 人工验收记录
+
+- 真实 Obsidian 安装、更新、重载、卸载后重启：通过（项目维护者确认，2026-09-16 补记）。
+- 本条记录只补齐验收状态，不保存真实数据库、账单样本、私有路径或截图；后续版本沿用同一
+  记录格式，并在发布日志中写明版本和测试人。
 
 ## 功能路线
 
-- **前端边界整理：** 将当前大型编辑器按 feature 拆分，根组件只保留导航、月份、
-  数据订阅和未保存保护；月度 reducer 继续是草稿唯一所有者。
+- **前端边界整理：** 已先抽出 `AssetTrackEditorToolbar.tsx`，当前大型编辑器继续按 feature
+  拆分；根组件保留导航、月份、数据订阅和未保存保护，月度 reducer 继续是草稿唯一所有者。
 - **导入性能：** 在保持单文件 20 MiB 门禁、映射和预览契约不变的前提下，把
   CSV/XLSX/XLS 解析移入 Worker。当前版本只消除了 Base64 副本。
 - **错误与国际化：** 用稳定消息键和结构化错误码替代中文全文/正则翻译，业务层
@@ -65,6 +73,16 @@ styles.css
 - 在不改变 SQLite 事实层前提下扩展支付平台导入模板；
 - 继续采集 Recharts 3 的图表回归，并评估 SheetJS 延迟加载机会；
 - 移动端仅作为独立长期研究，不纳入当前桌面版承诺。
+
+## 已合入待发布 v1.9.1 的维护
+
+- **CI 与发布运行时：** `.github/workflows/ci.yml` 和
+  `.github/workflows/release.yml` 已将 `actions/checkout`、`actions/setup-node` 升级到
+  `@v5` 的 Node.js 24 action runtime，并加入标准 bundle smoke；项目当前
+  `node-version: 22.16.0`、插件运行时和数据库兼容边界不变。
+- 依据 [checkout v5 官方说明](https://github.com/actions/checkout#checkout-v5) 和
+  [setup-node 官方说明](https://github.com/actions/setup-node#breaking-changes-in-v5)，使用该版本要求
+  GitHub Actions Runner 至少为 `v2.327.1`；GitHub-hosted runner 满足该要求。
 
 ## 持续发布检查
 

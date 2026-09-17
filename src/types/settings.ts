@@ -11,3 +11,8 @@ export interface AssetTrackSettings {
   aiModel?: string;
   aiTimeoutMs?: number;
 }
+
+export type AnalysisRuntimeSettings = Pick<
+  AssetTrackSettings,
+  "reconciliationTolerance" | "largeExpenseThreshold"
+>;

@@ -23,7 +23,8 @@ judgment, check the result, and move on.
 - **Once a month:** replace continuous manual entry with a focused monthly routine.
 - **One financial record:** different bill formats are organized into one local SQLite source of truth.
 - **Checkable results:** asset changes and transaction data help reveal missing or inconsistent records.
-- **Completely private:** no account, no network requests, no telemetry, and no cloud classification.
+- **Private by default:** no account, no network requests by default, no telemetry, and no cloud classification;
+  the optional AI classifier only contacts an endpoint you explicitly configure.
 
 The guiding idea is simple: the system handles repetitive organization; you keep the final say.
 

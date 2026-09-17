@@ -10,6 +10,10 @@ export function setTestLanguage(value: string): void {
   language = value;
 }
 
+export const Platform = {
+  isDesktop: true
+};
+
 export const requestUrl = vi.fn();
 
 export class App {}

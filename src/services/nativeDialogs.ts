@@ -2,15 +2,17 @@ import {
   loadElectronModule,
   type DesktopOpenDialogOptions
 } from "./desktopRuntime";
+import { Platform } from "obsidian";
 import { AssetTrackError } from "../application/errors";
 import { t } from "../i18n";
-
-const electron = loadElectronModule();
 
 async function choose(
   options: DesktopOpenDialogOptions
 ): Promise<string | null> {
-  const dialog = electron.remote?.dialog;
+  if (!Platform.isDesktop) {
+    throw new AssetTrackError({ code: "filesystem.desktop_vault_required", status: 422 });
+  }
+  const dialog = loadElectronModule().remote?.dialog;
   if (!dialog) {
     throw new AssetTrackError({ code: "native.file_picker_unavailable", status: 503 });
   }

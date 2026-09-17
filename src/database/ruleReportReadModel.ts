@@ -45,6 +45,18 @@ export interface RuleReportReadContext {
   getRevision(month: string, db: DatabaseSync): number;
 }
 
+function optionalNumber(value: unknown): number | undefined {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function optionalNumberArray(value: unknown): number[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value
+    .map((item) => Number(item))
+    .filter((item) => Number.isFinite(item));
+}
+
 export class RuleReportReadModel {
   constructor(private readonly context: RuleReportReadContext) {}
 
@@ -128,7 +140,7 @@ export class RuleReportReadModel {
       base_revision: this.context.getRevision(month, db),
       rules_revision: ruleReport.revision,
       proposed_rows: result.proposed_rows,
-      issues: result.issues as unknown as Array<Record<string, unknown>>
+      issues: result.issues.map((issue) => ({ ...issue }))
     };
   }
 
@@ -253,7 +265,7 @@ export class RuleReportReadModel {
     providedRuleData?: ReturnType<RuleReportReadModel["normalizedRuleRows"]>
   ): RuleConflictGroup[] {
     const ruleData = providedRuleData ?? this.normalizedRuleRows(db, this.defaultWindow(db));
-    const savedRules = ruleData.data.rows as unknown as SavedRule[];
+    const savedRules = this.rawRuleDefinitions(ruleData.data.rows);
     const savedById = new Map(savedRules.map((rule) => [Number(rule.id), rule]));
     const groups: RuleConflictGroup[] = [];
     for (const conflict of findRuleConflicts(ruleData.rows)) {
@@ -304,18 +316,35 @@ export class RuleReportReadModel {
   }
 
   rawRuleDefinitions(rawRows: Row[]): SavedRule[] {
-    return rawRows.map((row) => ({
-      id: Number(row.id),
-      transaction_type: text(row.transaction_type) as RuleTransactionType,
-      match_scope: text(row.match_scope) as "product" | "merchant" | "merchant_product",
-      counterparty: text(row.match_scope) === "product" ? "" : text(row.counterparty),
-      product: text(row.product),
-      category_key: text(row.category_key),
-      category: text(row.category),
-      category_active: row.category_active === undefined ? undefined : Boolean(row.category_active),
-      rewrite_merchant: text(row.rewrite_merchant),
-      rewrite_product: text(row.rewrite_product)
-    }));
+    return rawRows.map((row) => {
+      const ruleStatus = text(row.rule_status);
+      const matchLevel = text(row.match_level);
+      const savedRule: SavedRule = {
+        id: Number(row.id),
+        transaction_type: text(row.transaction_type) as RuleTransactionType,
+        match_scope: text(row.match_scope) as "product" | "merchant" | "merchant_product",
+        counterparty: text(row.match_scope) === "product" ? "" : text(row.counterparty),
+        product: text(row.product),
+        category_key: text(row.category_key),
+        category: text(row.category),
+        category_active: row.category_active === undefined ? undefined : Boolean(row.category_active),
+        rewrite_merchant: text(row.rewrite_merchant),
+        rewrite_product: text(row.rewrite_product),
+        rule_status: ["正常", "重复", "冲突"].includes(ruleStatus)
+          ? ruleStatus as SavedRule["rule_status"]
+          : undefined,
+        duplicate_rule_ids: optionalNumberArray(row.duplicate_rule_ids),
+        conflict_rule_ids: optionalNumberArray(row.conflict_rule_ids),
+        occurrences: optionalNumber(row.occurrences),
+        months_count: optionalNumber(row.months_count),
+        last_month: row.last_month === undefined ? undefined : text(row.last_month),
+        last_used_date: row.last_used_date === undefined ? undefined : text(row.last_used_date),
+        match_level: ["product", "merchant", "merchant_product"].includes(matchLevel)
+          ? matchLevel as SavedRule["match_level"]
+          : undefined
+      };
+      return savedRule;
+    });
   }
 
   ruleWorkspaceShell(db: DatabaseSync) {

@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.9.1
+
+### 中文更新
+
+- 修复设置完整保存、失败回滚、运行中分析阈值同步和数据目录迁移边界。
+- 补充 bundle 冒烟门禁、类型约束、回归测试和编辑器边界整理。
+- 补记 v1.9.0 真实 Obsidian 验收记录。
+
+### English updates
+
+- Fixed settings persistence and rollback, live analysis threshold sync, and data-directory migration boundaries.
+- Added bundle smoke gates, tighter types, regression coverage, and editor boundary cleanup.
+- Recorded the completed v1.9.0 real Obsidian acceptance.
+
 ## 1.9.0
 
 ### 中文更新

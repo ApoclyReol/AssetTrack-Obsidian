@@ -20,7 +20,7 @@ describe("editor draft recovery store", () => {
         transactions: [],
         debts: [{ id: 7, description: "原草稿", counterparty: "", amount: 1, start_date: "2026-08-01", is_paid: false, paid_date: null }],
         fixed_assets: [],
-        computed: {},
+        computed: null,
         overview: { available: false }
       },
       categories: [],
@@ -44,7 +44,7 @@ describe("editor draft recovery store", () => {
         transactions: [],
         debts: [{ id: 7, description: "原草稿", counterparty: "", amount: 1, start_date: "2026-08-01", is_paid: false, paid_date: null }],
         fixed_assets: [],
-        computed: {},
+        computed: null,
         overview: { available: false }
       },
       categories: [],
@@ -68,7 +68,7 @@ describe("editor draft recovery store", () => {
         transactions: [],
         debts: [],
         fixed_assets: [],
-        computed: {},
+        computed: null,
         overview: { available: false }
       },
       categories: [],

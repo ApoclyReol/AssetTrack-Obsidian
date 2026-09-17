@@ -30,6 +30,7 @@ import { scalarText } from "./domain/text";
 import { confirmAction } from "./ui/ConfirmModal";
 import { displayError, t } from "./i18n";
 import { AssetTrackError } from "./application/errors";
+import type { BackupValidation } from "./types/backup";
 
 export const DEFAULT_SETTINGS: AssetTrackSettings = {
   dataDirectory: "",
@@ -269,50 +270,59 @@ export class AssetTrackSettingTab extends PluginSettingTab {
     }
 
     if (key === "baseCurrency") {
-      this.plugin.settings.baseCurrency = String(value).trim().toUpperCase();
-      await this.plugin.saveSettings();
+      await this.plugin.updateSettings((settings) => {
+        settings.baseCurrency = String(value).trim().toUpperCase();
+      });
       await this.plugin.refreshViews();
       return;
     }
 
     if (key === "currencyFormat") {
-      this.plugin.settings.currencyFormat = value === "accounting"
-        ? "accounting"
-        : "standard";
-      await this.plugin.saveSettings();
+      await this.plugin.updateSettings((settings) => {
+        settings.currencyFormat = value === "accounting"
+          ? "accounting"
+          : "standard";
+      });
       await this.plugin.refreshViews();
       return;
     }
 
     if (key === "reconciliationTolerance") {
-      this.plugin.settings.reconciliationTolerance = Number(value);
-      await this.plugin.saveSettings();
+      await this.plugin.updateSettings((settings) => {
+        settings.reconciliationTolerance = Number(value);
+      });
+      this.plugin.updateRuntimeSettings();
       await this.plugin.refreshViews();
       return;
     }
 
     if (key === "largeExpenseThreshold") {
-      this.plugin.settings.largeExpenseThreshold = Number(value);
-      await this.plugin.saveSettings();
+      await this.plugin.updateSettings((settings) => {
+        settings.largeExpenseThreshold = Number(value);
+      });
+      this.plugin.updateRuntimeSettings();
       await this.plugin.refreshViews();
       return;
     }
 
     if (key === "aiEndpoint") {
-      this.plugin.settings.aiEndpoint = String(value).trim();
-      await this.plugin.saveSettings();
+      await this.plugin.updateSettings((settings) => {
+        settings.aiEndpoint = String(value).trim();
+      });
       return;
     }
 
     if (key === "aiModel") {
-      this.plugin.settings.aiModel = String(value).trim();
-      await this.plugin.saveSettings();
+      await this.plugin.updateSettings((settings) => {
+        settings.aiModel = String(value).trim();
+      });
       return;
     }
 
     if (key === "aiTimeoutMs") {
-      this.plugin.settings.aiTimeoutMs = Number(value);
-      await this.plugin.saveSettings();
+      await this.plugin.updateSettings((settings) => {
+        settings.aiTimeoutMs = Number(value);
+      });
       return;
     }
 
@@ -624,9 +634,9 @@ export class AssetTrackSettingTab extends PluginSettingTab {
     let restoreButton:
       | { setDisabled(value: boolean): unknown }
       | undefined;
-    const validationSummary = (result: Record<string, unknown>): string => {
-      const rows = result.row_counts as Record<string, number> | undefined;
-      const manifest = result.manifest as Record<string, unknown> | undefined;
+    const validationSummary = (result: BackupValidation): string => {
+      const rows = result.row_counts;
+      const manifest = result.manifest;
       return [
         t("备份校验通过", "Backup validation passed"),
         t(

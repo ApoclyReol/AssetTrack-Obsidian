@@ -73,7 +73,7 @@ function monthWorkspace(revision: number): MonthWorkspace {
       paid_date: null
     }],
     fixed_assets: [],
-    computed: {},
+        computed: null,
     overview: { available: false }
   };
 }
@@ -133,7 +133,7 @@ function debtReconciliationWorkspace(): MonthWorkspace {
       paid_date: null
     }],
     fixed_assets: [],
-    computed: {},
+        computed: null,
     overview: {
       available: true,
       reconciliation: {

@@ -47,6 +47,7 @@ import type {
 import type {
   Transaction
 } from "../types/transactions";
+import type { AnalysisRuntimeSettings } from "../types/settings";
 import type {
   TransactionOperationPreviewRequest,
   OperationAuditContext,
@@ -54,10 +55,15 @@ import type {
 } from "../types/operations";
 import type {
   RuleCandidate,
+  SavedRule,
   RuleWorkspaceShell,
   RuleImpactPreview,
   RuleWorkspaceAnalytics
 } from "../types/rules";
+import type {
+  BackupRestoreResult,
+  BackupValidation
+} from "../types/backup";
 import { BackupService } from "./BackupService";
 import type { AssetTrackService } from "./AssetTrackService";
 import { AssetTrackError } from "../application/errors";
@@ -70,10 +76,10 @@ export class LocalAssetTrackService implements AssetTrackService {
     private readonly manager: DatabaseManager,
     private readonly workspaceRoot: string,
     private readonly pluginVersion: string,
-    options: {
-      reconciliationTolerance: number;
-      largeExpenseThreshold: number;
-    } = { reconciliationTolerance: 100, largeExpenseThreshold: 1000 }
+    options: AnalysisRuntimeSettings = {
+      reconciliationTolerance: 100,
+      largeExpenseThreshold: 1000
+    }
   ) {
     this.repository = new AssetTrackRepository(manager, options);
     this.backups = new BackupService(manager, pluginVersion);
@@ -81,6 +87,10 @@ export class LocalAssetTrackService implements AssetTrackService {
 
   private ready(): void {
     this.repository.initialize();
+  }
+
+  updateRuntimeSettings(settings: AnalysisRuntimeSettings): void {
+    this.repository.updateRuntimeSettings(settings);
   }
 
   async meta(): Promise<Record<string, unknown>> {
@@ -418,7 +428,7 @@ export class LocalAssetTrackService implements AssetTrackService {
     revision: number,
     rows: Array<Record<string, unknown>>,
     audit?: OperationAuditContext
-  ): Promise<{ revision: number; rows: Array<Record<string, unknown>> }> {
+  ): Promise<{ revision: number; rows: SavedRule[] }> {
     this.ready();
     return this.repository.saveRules(revision, rows, audit);
   }
@@ -462,7 +472,7 @@ export class LocalAssetTrackService implements AssetTrackService {
 
   async backup(directory?: string): Promise<{
     path: string;
-    validation: Record<string, unknown>;
+    validation: BackupValidation;
   }> {
     this.ready();
     if (!directory) {
@@ -474,18 +484,18 @@ export class LocalAssetTrackService implements AssetTrackService {
     const result = await this.backups.exportZip(directory);
     return {
       path: result.path,
-      validation: result.validation as unknown as Record<string, unknown>
+      validation: result.validation
     };
   }
 
-  async validateBackup(path: string): Promise<Record<string, unknown>> {
-    return this.backups.validate(path) as unknown as Record<string, unknown>;
+  async validateBackup(path: string): Promise<BackupValidation> {
+    return this.backups.validate(path);
   }
 
   async restoreBackup(
     path: string,
     beforeCommit?: () => void
-  ): Promise<Record<string, unknown>> {
+  ): Promise<BackupRestoreResult> {
     const result = await this.backups.restore(path, beforeCommit);
     this.ready();
     this.repository.invalidateCaches();

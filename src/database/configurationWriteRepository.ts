@@ -3,6 +3,7 @@ import type {
   AccountDefinition,
   CategoryDefinition
 } from "../types/configuration";
+import type { SavedRule } from "../types/rules";
 import {
   detectRewriteChains,
   findRuleConflicts,
@@ -90,7 +91,7 @@ export class ConfigurationWriteRepository {
     }
   }
 
-  saveRules(db: DatabaseSync, expectedRevision: number, input: Row[]): void {
+  saveRules(db: DatabaseSync, expectedRevision: number, input: Array<Row | SavedRule>): void {
     const current = this.context.rules(db);
     if (current.revision !== expectedRevision) {
       throw new RevisionConflictError(expectedRevision, current.revision);
@@ -212,7 +213,7 @@ export class ConfigurationWriteRepository {
     for (const month of renamedMonths) this.context.bumpMonthRevision(db, month);
   }
 
-  private writeRules(db: DatabaseSync, input: Row[]): void {
+  private writeRules(db: DatabaseSync, input: Array<Row | SavedRule>): void {
     const categories = this.context.categoryDefinitions(db);
     const byKey = new Map(categories.map((row) => [row.category_key, row]));
     const byName = new Map(categories.map((row) => [row.name, row]));

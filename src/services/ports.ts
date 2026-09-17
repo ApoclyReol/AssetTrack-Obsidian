@@ -41,13 +41,19 @@ import type {
 } from "../types/operations";
 import type {
   RuleImpactPreview,
+  SavedRule,
   RuleWorkspaceAnalytics,
   RuleWorkspaceShell
 } from "../types/rules";
 import type {
   Transaction
 } from "../types/transactions";
+import type { AnalysisRuntimeSettings } from "../types/settings";
 import type { RuleRow } from "../domain/rules";
+import type {
+  BackupRestoreResult,
+  BackupValidation
+} from "../types/backup";
 
 export interface MonthSaveRequest {
   expected_revision: number;
@@ -69,7 +75,7 @@ export interface RuleWritePort {
     revision: number,
     rows: Array<Record<string, unknown>>,
     audit?: OperationAuditContext
-  ): Promise<{ revision: number; rows: Array<Record<string, unknown>> }>;
+  ): Promise<{ revision: number; rows: SavedRule[] }>;
 }
 
 export interface MonthEditorPort extends RuleLookupPort, RuleWritePort {
@@ -146,13 +152,14 @@ export interface AnalysisPort {
 export interface BackupPort {
   backup(directory?: string): Promise<{
     path: string;
-    validation: Record<string, unknown>;
+    validation: BackupValidation;
   }>;
-  validateBackup(path: string): Promise<Record<string, unknown>>;
-  restoreBackup(path: string, beforeCommit?: () => void): Promise<Record<string, unknown>>;
+  validateBackup(path: string): Promise<BackupValidation>;
+  restoreBackup(path: string, beforeCommit?: () => void): Promise<BackupRestoreResult>;
 }
 
 export interface RuntimePort {
+  updateRuntimeSettings(settings: AnalysisRuntimeSettings): void;
   meta(): Promise<Record<string, unknown>>;
   months(): Promise<MonthCreationPolicy>;
   currentAsset(): Promise<CurrentAsset>;

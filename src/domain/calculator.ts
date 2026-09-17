@@ -1,5 +1,6 @@
 import type {
-  AnnualRow
+  AnnualRow,
+  MonthlyCalculation
 } from "../types/analysis";
 import type {
   CategoryDefinition
@@ -12,24 +13,6 @@ import type {
 } from "../types/transactions";
 import { previousMonth, shiftMonth } from "./dates";
 import { roundHalfEven, sum } from "./money";
-
-export interface MonthlyCalculation {
-  category_summary: Record<string, number>;
-  all_out: number;
-  total_daifu: number;
-  total_expense: number;
-  total_income: number;
-  total_deposit: number;
-  total_withdraw: number;
-  structure: {
-    necessary: number;
-    controlled: number;
-    periodic: number;
-    daily: number;
-    occasional: number;
-  };
-  big_tickets: Array<{ product: string; amount: number; category: string }>;
-}
 
 export const LEGACY_CATEGORY_ALIASES: Record<string, string> = {
   "基本饮食": "餐饮基础",

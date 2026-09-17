@@ -2,10 +2,14 @@
 
 > 文档角色：开发与维护。本文服务源码修改、测试、构建和代码评审，不承担用户使用说明。
 
-## v1.9.0 维护边界
+## 当前维护边界
+
+当前稳定版为 v1.9.0，工作区待发布补丁为 v1.9.1。本文件同时记录稳定版约束和待发布维护修复；待发布修复不得写入当前
+稳定版的发布声明。
 
 - 金额展示统一调用 `src/domain/moneyFormat.ts`。
-- 分析阈值来自 `AssetTrackSettings`，Repository 不复制界面常量。
+- 分析阈值来自 `AssetTrackSettings`；运行中修改后通过 `updateRuntimeSettings()` 同步到
+  Repository/分析模型，并触发分析缓存失效，不复制界面常量。
 - `cost_assets` 是对账稳定口径，`market_net_assets` 是财富趋势口径，
   `total_assets` 仅作为兼容别名。
 - 导入契约使用 `ArrayBuffer`，不得重新引入 Data URL/Base64 中间副本。
@@ -125,6 +129,8 @@ build/
 - `test` 中的 `tests/` 分层测试全部通过；
 - 项目不使用 `dist/` 或 `out/`，`build/` 根目录只保留标准三文件；
 - `release:check` 验证版本、许可证、标准三文件和生产 bundle。
+- `bash scripts/smoke_test_plugin.sh build` 验证标准三文件、桌面标记、无 sidecar 和
+  `node:sqlite` 最小读写链；CI 和 Release 均执行这项门禁。
 
 测试覆盖 schema 11、schema 10→11 与 schema 9→10→11 迁移链、中文路径、WAL、整体事务、revision、冻结 golden、
 CSV/XLSX/XLS、备份恢复、读取窗口边界、跨 10 年的 5 万笔流水和数据库锁释放。恢复和写入只能使用隔离
@@ -157,7 +163,7 @@ Vault 与合成数据库。
 | AI 分类建议 | `src/services/aiClassification.ts`、`src/settings.ts`、`src/ui/TransactionOperationModal.tsx` | `tests/services/aiClassification.test.ts`、SecretStorage 与真实 API 人工 smoke |
 | ItemView 草稿恢复 | `src/ui/editorDraft.ts`、`src/views/AssetTrackEditorView.ts`、`src/main.ts` | `tests/ui/draftStore.test.ts`、`tests/ui/draftRecovery.test.tsx`、`tests/ui/editorView.test.ts` |
 | 备份与恢复 | `src/services/BackupService.ts` | `tests/services/backup.test.ts` |
-| 数据目录生命周期 | `src/main.ts`、`src/services/workspacePath.ts` | `tests/services/settings.test.ts` |
+| 数据目录生命周期与设置持久化 | `src/main.ts`、`src/services/workspacePath.ts` | `tests/services/settings.test.ts`、`tests/ui/editorView.test.ts` |
 | 分析界面 | `src/ui/AnalysisView.tsx`、`analysisModel.ts` | `tests/ui/models.test.ts` |
 | 读取窗口与 SQLite 性能 | `src/domain/readWindows.ts`、`analysisReadModel.ts`、`productHistoryReadModel.ts`、`ruleReportReadModel.ts` | `tests/domain/financial.test.ts`、`tests/database/analysis.test.ts`、`tests/performance/sqlite.test.ts` |
 
@@ -183,5 +189,6 @@ Vault 与合成数据库。
 按交易 ID 的历史编辑读取只允许读取用户已选行。分类删除引用校验可以在写事务内按分类键执行全历史 COUNT；其他读取和写入依赖必须使用
 `categoryDefinitions()`，分类定义页的流水数由近 5 年规则统计结果提供。
 
-真实 Obsidian smoke 不能由单元测试代替；版本状态见
-`docs/logs/release-vN.N.N.md` 和 `docs/10-community-release-plan.md`。
+真实 Obsidian smoke 不能由单元测试代替。v1.9.0 已由项目维护者完成，原先只是漏记在文档中；
+以后每次正式发布仍须在 `docs/logs/release-vN.N.N.md` 和 `docs/10-community-release-plan.md`
+记录人工验收结果。

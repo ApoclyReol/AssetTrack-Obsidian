@@ -4,7 +4,9 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it } from "vitest";
 import {
   IssueList,
-  orderedIssues
+  orderedIssues,
+  transactionAmount,
+  transactionInputValue
 } from "../../src/ui/editorPrimitives";
 import { countAssignedCategories } from "../../src/ui/month/useTransactionOperations";
 import type { Transaction } from "../../src/types/transactions";
@@ -35,6 +37,14 @@ const rows: Transaction[] = Array.from({ length: 12 }, (_, index) => ({
 }));
 
 describe("editor issue presentation", () => {
+  it("keeps invalid transaction amounts as an explicit draft sentinel", () => {
+    expect(transactionAmount("")).toBeNaN();
+    expect(transactionAmount("not-a-number")).toBeNaN();
+    expect(transactionAmount("12.5")).toBe(12.5);
+    expect(transactionInputValue(Number.NaN)).toBe("");
+    expect(transactionInputValue(12.5)).toBe(12.5);
+  });
+
   it("shows at most ten issues and keeps blocking errors first", () => {
     const issues = [
       ...Array.from({ length: 10 }, (_, index) => ({
