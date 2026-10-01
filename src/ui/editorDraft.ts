@@ -5,7 +5,7 @@ import type {
   MonthWorkspace,
   MonthSection
 } from "../types/month";
-import type { RulesMode } from "../constants";
+import type { RulesDraftMode } from "../constants";
 import type {
   RuleWorkspace
 } from "../types/rules";
@@ -30,7 +30,7 @@ export interface RulesEditorDraftSnapshot {
   category_dirty: boolean;
   rule_dirty: boolean;
   analytics_ready: boolean;
-  active_section?: RulesMode;
+  active_section?: RulesDraftMode;
 }
 
 export type EditorDraftSnapshot =

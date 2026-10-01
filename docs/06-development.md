@@ -4,12 +4,13 @@
 
 ## 当前维护边界
 
-当前稳定版为 v1.9.0，工作区待发布补丁为 v1.9.1。本文件同时记录稳定版约束和待发布维护修复；待发布修复不得写入当前
-稳定版的发布声明。
+当前稳定版为 v1.9.0，工作区实现为待发布的 v2.0.0 重大版本；v1.9.1 的维护内容保留在历史日志中。
+本文件同时记录稳定版约束和当前工作区边界，不能把未发布实现写成已发布行为。
 
 - 金额展示统一调用 `src/domain/moneyFormat.ts`。
-- 分析阈值来自 `AssetTrackSettings`；运行中修改后通过 `updateRuntimeSettings()` 同步到
-  Repository/分析模型，并触发分析缓存失效，不复制界面常量。
+- 平账容差来自 `AssetTrackSettings`；运行中修改后通过 `updateRuntimeSettings()` 同步到
+  Repository/分析模型，并触发分析缓存失效，不复制界面常量。大额状态来自分类“大额”属性，
+  不再读取金额阈值。
 - `cost_assets` 是对账稳定口径，`market_net_assets` 是财富趋势口径，
   `total_assets` 仅作为兼容别名。
 - 导入契约使用 `ArrayBuffer`，不得重新引入 Data URL/Base64 中间副本。
@@ -57,7 +58,7 @@
 ```text
 src/domain/              财务计算、账单解析、规则和质检
 src/application/         跨层结构化错误协议
-src/database/            schema 11、DatabaseManager 和 Repository
+src/database/            schema 12、DatabaseManager 和 Repository
 src/services/            UI Service、备份恢复和原生对话框
 src/types/               按领域拆分的持久化、分析和操作协议
 src/ui/、src/views/      React、能力端口适配与 ItemView
@@ -132,15 +133,15 @@ build/
 - `bash scripts/smoke_test_plugin.sh build` 验证标准三文件、桌面标记、无 sidecar 和
   `node:sqlite` 最小读写链；CI 和 Release 均执行这项门禁。
 
-测试覆盖 schema 11、schema 10→11 与 schema 9→10→11 迁移链、中文路径、WAL、整体事务、revision、冻结 golden、
+测试覆盖 schema 12、schema 11→12 及 schema 10→11、schema 9→10→11→12 迁移链、中文路径、WAL、整体事务、revision、冻结 golden、
 CSV/XLSX/XLS、备份恢复、读取窗口边界、跨 10 年的 5 万笔流水和数据库锁释放。恢复和写入只能使用隔离
 Vault 与合成数据库。
 
 ## 数据库版本边界
 
-当前开发、测试、备份和恢复统一使用 schema 11。打开 schema 9 或 schema 10 时由
-`DatabaseManager` 创建经过校验的 `before-schema11-*.db` 保护备份，并按版本链执行
-9→10、10→11。schema 10 在 `transactions` 增加可空
+当前开发、测试、备份和恢复统一使用 schema 12。打开 schema 9、schema 10 或 schema 11 时先只读展示迁移影响；
+用户确认保留或清除后由 `DatabaseManager` 创建经过校验的 `before-schema12-*.db` 保护备份，并按版本链执行
+9→10、10→11、11→12。schema 10 在 `transactions` 增加可空
 `account_key`，并将既有加仓/提现流水无损回填到首个理财账户；schema 11 仅放宽
 `auto_rules.transaction_type` 以支持代付规则，非理财流水保持为空。迁移完成后
 比较保留表行数、规则行数、外键、完整性和保护备份可读性。schema 8 私有数据过渡已完成，仓库
@@ -158,7 +159,7 @@ Vault 与合成数据库。
 | 月份校验和保存 | `AssetTrackRepository.saveMonth()`、`saveMonthSection()`、`src/ui/MonthEditor.tsx`、`src/ui/month/` | `tests/database/month.test.ts`、`tests/database/monthDebtsAssets.test.ts`、`tests/ui/monthSpecialRows.test.tsx`、`tests/ui/draftRecovery.test.tsx` |
 | 账单解析与字段映射 | `src/domain/csv.ts` | `tests/import/csv.test.ts` |
 | 导入交互与草稿提交 | `CsvImportDialog.tsx`、`csvImportCommit.ts` | `tests/import/csvDialog.test.tsx`、`tests/import/csvCommit.test.ts` |
-| 规则工作台、商品统一与历史迁移 | `src/ui/RulesEditor.tsx`、`src/ui/rules/`、`src/ui/configuration/`、`RuleHistoryModal.tsx`、`RuleCreationModal.tsx`、`src/database/ruleReportReadModel.ts`、`productHistoryReadModel.ts`、`ruleHistoryReadModel.ts`、`AssetTrackRepository.ts`、`configurationWriteRepository.ts`、`historyWriteRepository.ts` | `tests/database/rules.test.ts`、`tests/database/history.test.ts`、`tests/ui/ruleHistory.test.tsx`、`tests/ui/primitives.test.tsx` |
+| 规则工作台、商品统一与历史迁移 | `src/ui/RulesEditor.tsx`、`src/ui/rules/`、`src/ui/configuration/`、`RuleCreationModal.tsx`、`src/database/ruleReportReadModel.ts`、`productHistoryReadModel.ts`、`ruleHistoryReadModel.ts`、`AssetTrackRepository.ts`、`configurationWriteRepository.ts`、`historyWriteRepository.ts` | `tests/database/rules.test.ts`、`tests/database/history.test.ts`、`tests/ui/ruleHistory.test.tsx`、`tests/ui/primitives.test.tsx` |
 | 流水 Tab、汇总、多选与批量操作 | `src/domain/transactionOperations.ts`、`src/ui/MonthEditor.tsx`、`src/ui/month/MonthEditorTransactionsSection.tsx`、`TransactionTables.tsx`、`TransactionOperationModal.tsx`、`TransactionBatchEditModal.tsx` | `tests/domain/transactionOperations.test.ts`、`tests/ui/primitives.test.tsx`、`tests/database/operations.test.ts` |
 | AI 分类建议 | `src/services/aiClassification.ts`、`src/settings.ts`、`src/ui/TransactionOperationModal.tsx` | `tests/services/aiClassification.test.ts`、SecretStorage 与真实 API 人工 smoke |
 | ItemView 草稿恢复 | `src/ui/editorDraft.ts`、`src/views/AssetTrackEditorView.ts`、`src/main.ts` | `tests/ui/draftStore.test.ts`、`tests/ui/draftRecovery.test.tsx`、`tests/ui/editorView.test.ts` |
@@ -178,17 +179,19 @@ Vault 与合成数据库。
 `data.json` 或 Obsidian workspace layout。
 
 分析查询必须先确定读取窗口，再读取流水事实：月度为当前月加前 11 个月，年度先读取月份索引并选择年度、
-滚动和趋势抽样月份；系统检查统一为近 5 年，商品总览默认近 1 年并接受用户指定起止日期。分析和历史统计只能
+滚动和趋势抽样月份；数据健康和历史冲突使用近 5 年，匹配规则与商品总览默认近 1 年并接受商品总览的用户指定起止日期。分析和历史统计只能
 使用轻量分类定义查询，不能为了分类元数据触发全量交易聚合；当前数据版本内允许复用同一查询结果，数据变更后必须失效。
 分析页必须由父级容器预加载年度/月度结果，并把带数据版本和查询键的缓存结果传给子组件；子组件不得在渲染或挂载时再次调用分析 Service。月度编辑器的完整月度工作区与月度分析的轻量概览是两个不同入口，不能为了复用类型而扩大读取范围。
 同一分析请求中的月度计算、异常、成本审计、周期消费和历史规则统计应共享已经加载的流水快照；新增派生指标优先在内存快照上计算，只有确实不属于该窗口的事实才允许追加一次带边界的查询。
 新增统计不得在默认路径直接枚举全库流水，测试应为窗口长度、实际起止日期和代表性月度读取提供断言。
 
-读取边界按入口执行：`getMonth()` 和月度写入只读当前月份；年度与月度分析只读选定月份集合；规则报告、规则候选、
-规则影响预览、数据健康、商品总览和历史回溯统一通过 `transactionWindowPredicate()` 携带月份与日期双重边界；
+读取边界按入口执行：`getMonth()` 和月度写入只读当前月份；年度与月度分析只读选定月份集合；匹配规则工作区和商品总览使用近 1 年，规则报告、规则候选、
+规则影响预览、数据健康和历史回溯统一通过 `transactionWindowPredicate()` 携带月份与日期双重边界；
 按交易 ID 的历史编辑读取只允许读取用户已选行。分类删除引用校验可以在写事务内按分类键执行全历史 COUNT；其他读取和写入依赖必须使用
-`categoryDefinitions()`，分类定义页的流水数由近 5 年规则统计结果提供。
+`categoryDefinitions()`，分类定义页不再回填历史统计。
 
 真实 Obsidian smoke 不能由单元测试代替。v1.9.0 已由项目维护者完成，原先只是漏记在文档中；
 以后每次正式发布仍须在 `docs/logs/release-vN.N.N.md` 和 `docs/10-community-release-plan.md`
-记录人工验收结果。
+记录人工验收结果。每次更新后的界面点击范围、场景编号、现场构建确认和失败交接格式统一见
+[界面回归测试协议](16-ui-regression-protocol.md)；只改 CSS、Modal 或表格布局也必须执行
+协议中的受影响场景，不能只依赖单元测试。

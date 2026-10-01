@@ -12,7 +12,8 @@ import {
   YAxis
 } from "recharts";
 import type {
-  AnnualOverview
+  AnnualOverview,
+  TransactionAnalysisDrilldown
 } from "../types/analysis";
 import { businessLabel, getLocale, t } from "../i18n";
 import { money } from "../domain/moneyFormat";
@@ -61,9 +62,6 @@ export function AnnualAnalysis({
   });
   return (
     <>
-      <div className="asset-track-analysis-heading">
-        <div><h2>{t(`${year} 年度总览`, `${year} annual overview`)}</h2><span>{t("自然年汇总与近 12 月滚动观察", "Calendar-year summary and rolling 12-month view")}</span></div>
-      </div>
       <Cards items={[
         { label: t("年度收入", "Annual income"), value: money(data.metrics.total_income), tone: "inflow" },
         { label: t("年度净支出", "Annual net expense"), value: money(data.metrics.total_expense), tone: "outflow" },
@@ -192,29 +190,27 @@ export function AnnualAnalysis({
             </ComposedChart>
           </ResponsiveContainer>
         </ChartPanel>
-        <ChartPanel title={t("消费频率", "Spending frequency")}>
-          <ResponsiveContainer width="100%" height={300}>
-            <ComposedChart data={data.cost_audit.patterns}>
-              <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-              <XAxis dataKey="pattern" />
-              <YAxis tickFormatter={axis} />
-              <Tooltip formatter={tooltipMoney} />
-              <Bar dataKey="total" name={t("年度金额", "Annual amount")} fill={GOLD} />
-            </ComposedChart>
-          </ResponsiveContainer>
-        </ChartPanel>
+        <DimensionPanel
+          title={t("年度属性成本", "Annual attribute costs")}
+          rows={(data.cost_audit.attributes ?? []).map((row) => ({
+            name: `${row.group} · ${row.attribute}`,
+            total: row.total,
+            drilldown: { dimension: "attribute", key: row.attribute_key, label: `${row.group} · ${row.attribute}`, months: row.months }
+          }))}
+        />
+        <DimensionPanel
+          title={t("年度标签成本", "Annual tag costs")}
+          rows={(data.cost_audit.tags ?? []).map((row) => ({
+            name: row.tag,
+            total: row.total,
+            count: row.transaction_count,
+            categories: row.categories,
+            trend: row.trend,
+            drilldown: { dimension: "tag", key: row.tag_key, label: row.tag, months: row.months }
+          }))}
+          note={t("同一笔流水可计入多个标签，标签金额不能相加。", "A transaction can appear in multiple tags; tag amounts must not be added together.")}
+        />
       </div>
-      <Cards items={[
-        { label: t("必要支出", "Essential expenses"), value: money(data.cost_audit.necessary_total) },
-        { label: t("可控支出", "Discretionary expenses"), value: money(data.cost_audit.controlled_total) },
-        { label: t("可控占比", "Discretionary share"), value: percent(data.cost_audit.controlled_percent) },
-        {
-          label: t("总资产支撑月", "Months supported by total assets"),
-          value: data.cost_audit.asset_support_months === null
-            ? t("不可计算", "Unavailable")
-            : t(`${data.cost_audit.asset_support_months.toFixed(1)} 个月`, `${data.cost_audit.asset_support_months.toFixed(1)} months`)
-        }
-      ]} />
       <ChartPanel title={t("全历史趋势", "All-time trend")} className="is-wide">
         <ResponsiveContainer width="100%" height={340}>
           <ComposedChart data={history}>
@@ -234,4 +230,31 @@ export function AnnualAnalysis({
       </ChartPanel>
     </>
   );
+}
+
+function DimensionPanel({
+  title,
+  rows,
+  note
+}: {
+  title: string;
+  rows: Array<{
+    name: string;
+    total: number;
+    count?: number;
+    categories?: Array<{ category: string; amount: number }>;
+    trend?: Array<{ month: string; amount: number }>;
+    drilldown?: TransactionAnalysisDrilldown;
+  }>;
+  note?: string;
+}) {
+  return <ChartPanel title={title}>
+    {note && <p className="asset-track-rule-history-message" role="note">{note}</p>}
+    {rows.length ? <div className="asset-track-analysis-list">
+      {rows.map((row) => <div key={row.name}>
+        <span>{row.name}{row.categories?.length ? <small>（{row.categories.map((category) => `${category.category} ${money(category.amount)}`).join("、")}）</small> : null}{row.trend?.length ? <small>（{row.trend.map((point) => `${point.month} ${money(point.amount)}`).join("、")}）</small> : null}</span>
+        <strong>{money(row.total)}{row.count === undefined ? null : <small>（{row.count}）</small>}</strong>
+      </div>)}
+    </div> : <Empty text={t("暂无数据。", "No data.")} />}
+  </ChartPanel>;
 }

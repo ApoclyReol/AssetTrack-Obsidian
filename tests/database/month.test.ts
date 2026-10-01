@@ -4,6 +4,76 @@ import { fixture } from "./databaseTestFixtures";
 
 describe("month repository", () => {
 
+  it("persists tags for every transaction type and rejects unknown tag keys", async () => {
+    const { repository } = fixture();
+    const saved = await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 100 }],
+      [{ account_key: "investment-default", principal: 0, market_value: 0, cash_balance: 0 }],
+      [
+        { transaction_date: "2026-01-01", type: "支出", category: "", product: "支出", amount: 10, tag_keys: ["tag-travel"] },
+        { transaction_date: "2026-01-02", type: "收入", category: "", product: "收入", amount: 20, tag_keys: ["tag-travel"] },
+        { transaction_date: "2026-01-03", type: "代付", category: "", product: "代付", amount: 5, tag_keys: ["tag-travel"] },
+        { transaction_date: "2026-01-04", type: "加仓", category: "", product: "加仓", amount: 30, account_key: "investment-default", tag_keys: ["tag-travel"] },
+        { transaction_date: "2026-01-05", type: "提现", category: "", product: "提现", amount: 2, account_key: "investment-default", tag_keys: ["tag-travel"] }
+      ],
+      []
+    );
+    expect(saved.transactions.every((row) => row.tag_keys?.includes("tag-travel"))).toBe(true);
+    const reloaded = await repository.getMonth("2026-01");
+    expect(reloaded.transactions.map((row) => row.tag_keys)).toEqual([
+      ["tag-travel"], ["tag-travel"], ["tag-travel"], ["tag-travel"], ["tag-travel"]
+    ]);
+    await expect(repository.saveMonthSection("2026-01", {
+      expected_revision: saved.revision,
+      section: "transactions",
+      transactions: [{ ...saved.transactions[0], tag_keys: ["tag-missing"] }]
+    })).rejects.toMatchObject({ code: "transaction.validation_failed" });
+  });
+
+  it("rejects attaching a tag that was deactivated after a draft was opened", async () => {
+    const { repository } = fixture();
+    const taxonomy = repository.taxonomy();
+    const withProject = await repository.saveTaxonomy(
+      taxonomy.attribute_revision,
+      taxonomy.groups,
+      taxonomy.options,
+      taxonomy.tag_revision,
+      [...taxonomy.tags, {
+        tag_key: "tag-project",
+        name: "项目",
+        description: "",
+        color: "#2563eb",
+        is_active: true,
+        sort_order: taxonomy.tags.length
+      }]
+    );
+    const saved = await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 100 }],
+      [{ account_key: "investment-default", principal: 0, market_value: 0, cash_balance: 0 }],
+      [{ transaction_date: "2026-01-01", type: "支出", category: "", product: "草稿", amount: 10 }],
+      []
+    );
+    await repository.saveTaxonomy(
+      withProject.attribute_revision,
+      withProject.groups,
+      withProject.options,
+      withProject.tag_revision,
+      withProject.tags.map((tag) => tag.tag_key === "tag-project"
+        ? { ...tag, is_active: false }
+        : tag)
+    );
+    await expect(repository.saveMonthSection("2026-01", {
+      expected_revision: saved.revision,
+      section: "transactions",
+      transactions: [{ ...saved.transactions[0], tag_keys: ["tag-project"] }]
+    })).rejects.toMatchObject({ code: "transaction.validation_failed" });
+    expect((await repository.getMonth("2026-01")).transactions[0].tag_keys).toEqual([]);
+  });
+
   it("rejects invalid month reads instead of returning an empty workspace", async () => {
     const { repository } = fixture();
     await expect(repository.getMonth("2026-1")).rejects.toMatchObject({

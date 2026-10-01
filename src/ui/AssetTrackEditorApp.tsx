@@ -26,6 +26,7 @@ import type {
 } from "../types/month";
 import type { MonthOverview } from "../types/month";
 import type { AnnualOverview } from "../types/analysis";
+import type { TransactionAnalysisDrilldown } from "../types/analysis";
 import type { AnalysisPort, EditorShellPort } from "../services/ports";
 import { AnalysisView } from "./AnalysisView";
 import { RulesEditor, type RulesEditorHandle } from "./RulesEditor";
@@ -127,11 +128,13 @@ export function AssetTrackEditorApp({
       ? recoveryDraft.current.active_section ?? "transactions"
       : "transactions"
   );
-  const [rulesMode, setRulesMode] = useState<RulesMode>(
-    recoveryDraft.current?.kind === "rules"
-      ? recoveryDraft.current.active_section ?? "health"
-      : "health"
-  );
+  const [rulesMode, setRulesMode] = useState<RulesMode>(() => {
+    if (recoveryDraft.current?.kind !== "rules") return "health";
+    const recovered = recoveryDraft.current.active_section;
+    // Older in-memory drafts used separate taxonomy pages. Keep those drafts
+    // recoverable, but present the unified taxonomy workspace now.
+    return recovered === "attributes" || recovered === "tags" ? "taxonomy" : recovered ?? "health";
+  });
   const [months, setMonths] = useState<string[]>([]);
   const [savedMonths, setSavedMonths] = useState<string[]>([]);
   const [monthPolicy, setMonthPolicy] = useState<MonthCreationPolicy | null>(null);
@@ -140,6 +143,7 @@ export function AssetTrackEditorApp({
       ? recoveryDraft.current.month
       : initialMonth ?? ""
   );
+  const [transactionDrilldown, setTransactionDrilldown] = useState<TransactionAnalysisDrilldown | null>(null);
   const transactionRecoveryDraft = recoveryDraft.current?.kind === "transactions"
     && recoveryDraft.current.month === month
     ? recoveryDraft.current
@@ -344,7 +348,7 @@ export function AssetTrackEditorApp({
     return settleCurrentPage(rulesEditorRef.current, t("配置子页面", "configuration subpage"));
   };
 
-  const switchMode = async (next: EditorMode): Promise<void> => {
+  const switchMode = async (next: EditorMode, requestedAnalysisMode?: AnalysisMode): Promise<void> => {
     const sequence = ++navigationSequence.current;
     if (next === mode) return;
     const pageSettled = mode === "transactions"
@@ -354,8 +358,10 @@ export function AssetTrackEditorApp({
         : true;
     if (!pageSettled) return;
     if (sequence !== navigationSequence.current) return;
+    if (next !== "transactions") setTransactionDrilldown(null);
     if (next === "analysis") {
-      if (analysisMode === "annual") {
+      const targetAnalysisMode = requestedAnalysisMode ?? analysisMode;
+      if (targetAnalysisMode === "annual") {
         void analysisApi.annual(analysisYear).catch(() => undefined);
       } else {
         const analysisMonth = savedMonths.includes(month) ? month : savedMonths.at(-1) ?? "";
@@ -365,12 +371,33 @@ export function AssetTrackEditorApp({
     }
     setMode(next);
   };
+  const openAnalysisTransactions = async (
+    drilldown?: TransactionAnalysisDrilldown
+  ): Promise<void> => {
+    const targetYear = analysisYear;
+    const candidates = drilldown?.months?.filter((value) => savedMonths.includes(value)) ?? [];
+    const targetMonth = candidates.at(-1)
+      ?? (savedMonths.includes(month) && month.startsWith(targetYear) ? month : undefined)
+      ?? savedMonths.filter((value) => value.startsWith(targetYear)).at(-1)
+      ?? savedMonths.at(-1)
+      ?? "";
+    if (!targetMonth) {
+      setTransactionDrilldown(null);
+      await switchMode("transactions");
+      return;
+    }
+    setTransactionDrilldown(drilldown ?? null);
+    if (targetMonth !== month) setMonth(targetMonth);
+    setMonthSection("transactions");
+    await switchMode("transactions");
+  };
   const selectMonth = async (next: string): Promise<void> => {
     const sequence = ++navigationSequence.current;
     if (next === month) return;
     if (mode === "transactions" && !await settleTransactionPage()) return;
     if (mode === "rules" && !await settleRulesPage()) return;
     if (sequence !== navigationSequence.current) return;
+    setTransactionDrilldown(null);
     if (mode === "analysis" && analysisMode === "monthly") {
       void analysisApi.monthOverview(next).catch(() => undefined);
     }
@@ -464,13 +491,15 @@ export function AssetTrackEditorApp({
       />
       {mode === "analysis" && (
         <AnalysisView
+          app={app}
+          api={api}
           month={month}
           mode={analysisMode}
           year={analysisYear}
           annualState={currentAnnualState}
           monthlyState={currentMonthlyState}
           reconciliationTolerance={settings.reconciliationTolerance}
-          onOpenTransactions={() => void switchMode("transactions")}
+          onOpenTransactions={(drilldown) => void openAnalysisTransactions(drilldown)}
         />
       )}
       {mode === "transactions" && month && (
@@ -483,6 +512,8 @@ export function AssetTrackEditorApp({
           hostWindow={hostWindow}
           month={month}
           months={months}
+          transactionDrilldown={transactionDrilldown}
+          onClearTransactionDrilldown={() => setTransactionDrilldown(null)}
           dataVersion={dataVersion}
           reconciliationTolerance={settings.reconciliationTolerance}
           activeSection={monthSection}
@@ -513,7 +544,10 @@ export function AssetTrackEditorApp({
             notifyDataChanged();
           }}
           onNavigateSection={switchMonthSection}
-          onNavigateAnalysis={() => switchMode("analysis")}
+          onNavigateAnalysis={() => {
+            setAnalysisMode("monthly");
+            return switchMode("analysis", "monthly");
+          }}
           onDataChanged={notifyDataChanged}
           initialDraft={transactionRecoveryDraft}
           onSessionChange={handleSessionChange}

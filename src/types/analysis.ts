@@ -1,5 +1,14 @@
 import type { AnnualFixedAsset } from "./month";
 
+/** A read-only analysis link that opens the transaction editor with a filter. */
+export interface TransactionAnalysisDrilldown {
+  dimension: "category" | "attribute" | "tag";
+  key: string;
+  label: string;
+  /** The months in which the dimension appears; annual views use the latest one. */
+  months?: string[];
+}
+
 export interface MonthlyCalculation {
   category_summary: Record<string, number>;
   all_out: number;
@@ -62,15 +71,20 @@ export interface AnnualCostAudit {
   necessary_total: number;
   controlled_total: number;
   controlled_percent: number;
+  /** @deprecated Legacy indicator retained for compatibility; no longer shown in the UI. */
   asset_support_months: number | null;
   categories: Array<{
     category: string;
+    /** @deprecated Use attribute summaries. */
     necessity: string;
+    /** @deprecated Use attribute summaries. */
     pattern: string;
     total: number;
     monthly_average: number;
     share_percent: number;
+    months?: string[];
   }>;
+  /** @deprecated Use attribute summaries. */
   patterns: Array<{
     pattern: string;
     total: number;
@@ -92,6 +106,25 @@ export interface AnnualCostAudit {
     product: string;
     total: number;
     monthly_average: number;
+  }>;
+  attributes?: Array<{
+    group_key: string;
+    group: string;
+    attribute_key: string;
+    attribute: string;
+    total: number;
+    share_percent: number;
+    months?: string[];
+  }>;
+  tags?: Array<{
+    tag_key: string;
+    tag: string;
+    total: number;
+    transaction_count: number;
+    share_percent: number;
+    categories?: Array<{ category: string; amount: number }>;
+    trend?: Array<{ month: string; amount: number }>;
+    months?: string[];
   }>;
 }
 

@@ -2,10 +2,15 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import type {
   AccountDefinition,
+  AttributeGroup,
+  AttributeOption,
   CashAccountBalance,
   CategoryDefinition,
   InvestmentAccountBalance,
-  MonthCreationPolicy
+  MonthCreationPolicy,
+  TagDefinition,
+  TaxonomyRemoval,
+  TaxonomyWorkspace
 } from "../types/configuration";
 import type {
   AnnualOverview
@@ -97,17 +102,18 @@ export class AssetTrackRepository {
   constructor(
     private readonly manager: DatabaseManager,
     options: AnalysisRuntimeSettings = {
-      reconciliationTolerance: 100,
-      largeExpenseThreshold: 1000
+      reconciliationTolerance: 100
     }
   ) {
     this.options = { ...options };
     this.analysis = new AnalysisReadModel({
-      largeExpenseThreshold: this.options.largeExpenseThreshold,
       reconciliationTolerance: this.options.reconciliationTolerance,
       getMonths: (db) => this.getMonths(db),
       savedMonths: (db) => this.savedMonths(db),
       categoryDefinitions: (db) => this.categoryDefinitions(db),
+      attributeGroups: (db) => this.attributeGroups(db),
+      attributeOptions: (db) => this.attributeOptions(db),
+      tagDefinitions: (db) => this.tagDefinitions(db),
       cashAccounts: (db, month) => this.cashAccounts(db, month),
       investmentAccounts: (db, month) => this.investmentAccounts(db, month)
     });
@@ -430,12 +436,19 @@ export class AssetTrackRepository {
       transaction_count: Number(row.transaction_count ?? 0),
       rule_count: Number(row.rule_count ?? 0),
       impact_months: text(row.impact_months).split(",").filter(Boolean).sort()
+      ,attribute_keys: text(row.attribute_keys).split(",").filter(Boolean).sort()
     }));
   }
 
   private categoryDefinitions(db = this.db()): CategoryDefinition[] {
     return this.mapCategoryRows(rows(db.prepare(`
-      SELECT d.*
+      SELECT d.*,
+        (SELECT GROUP_CONCAT(ca.attribute_key)
+         FROM category_attributes ca WHERE ca.category_key=d.category_key) AS attribute_keys,
+        (SELECT COUNT(*) FROM transactions t WHERE t.category_key=d.category_key) AS transaction_count,
+        (SELECT COUNT(*) FROM auto_rules r WHERE r.category_key=d.category_key) AS rule_count,
+        (SELECT GROUP_CONCAT(DISTINCT t.month)
+         FROM transactions t WHERE t.category_key=d.category_key) AS impact_months
       FROM category_definitions d
       ORDER BY d.sort_order,d.name
     `).all()));
@@ -443,7 +456,142 @@ export class AssetTrackRepository {
 
   categories(db = this.db()): { revision: number; rows: CategoryDefinition[] } {
     const result = this.categoryDefinitions(db);
-    return { revision: contentRevision(result), rows: result };
+    // Usage counters and affected months are read-only impact metadata.  They
+    // change whenever a month is saved and must not make a category draft
+    // stale; the editable category fields and attribute assignments do.
+    const revisionRows = result.map(({
+      transaction_count: _transactionCount,
+      rule_count: _ruleCount,
+      conflict_product_count: _conflictProductCount,
+      impact_months: _impactMonths,
+      ...editable
+    }) => editable);
+    return { revision: contentRevision(revisionRows), rows: result };
+  }
+
+  private attributeGroups(db = this.db()): AttributeGroup[] {
+    return rows(db.prepare(`
+      SELECT g.*,
+        (SELECT COUNT(*) FROM attribute_options o WHERE o.group_key=g.group_key) AS option_count,
+        (SELECT COUNT(DISTINCT ca.category_key)
+         FROM attribute_options o
+         JOIN category_attributes ca ON ca.attribute_key=o.attribute_key
+         WHERE o.group_key=g.group_key) AS usage_count,
+        (SELECT GROUP_CONCAT(DISTINCT t.month)
+         FROM attribute_options o
+         JOIN category_attributes ca ON ca.attribute_key=o.attribute_key
+         JOIN transactions t ON t.category_key=ca.category_key
+         WHERE o.group_key=g.group_key) AS impact_months
+      FROM attribute_groups g
+      ORDER BY g.sort_order,g.name
+    `).all()).map((row) => ({
+      group_key: text(row.group_key),
+      name: text(row.name),
+      selection_mode: "single",
+      is_active: boolean(row.is_active),
+      sort_order: Number(row.sort_order),
+      option_count: Number(row.option_count ?? 0),
+      usage_count: Number(row.usage_count ?? 0),
+      impact_months: text(row.impact_months).split(",").filter(Boolean).sort()
+    }));
+  }
+
+  private attributeOptions(db = this.db()): AttributeOption[] {
+    return rows(db.prepare(`
+      SELECT o.*,
+        (SELECT COUNT(*) FROM category_attributes ca WHERE ca.attribute_key=o.attribute_key) AS category_count,
+        (SELECT GROUP_CONCAT(DISTINCT t.month)
+         FROM category_attributes ca
+         JOIN transactions t ON t.category_key=ca.category_key
+         WHERE ca.attribute_key=o.attribute_key) AS impact_months
+      FROM attribute_options o
+      ORDER BY o.group_key,o.sort_order,o.name
+    `).all()).map((row) => ({
+      attribute_key: text(row.attribute_key),
+      group_key: text(row.group_key),
+      name: text(row.name),
+      is_active: boolean(row.is_active),
+      sort_order: Number(row.sort_order),
+      category_count: Number(row.category_count ?? 0),
+      impact_months: text(row.impact_months).split(",").filter(Boolean).sort()
+    }));
+  }
+
+  private tagDefinitions(db = this.db()): TagDefinition[] {
+    return rows(db.prepare(`
+      SELECT t.*,
+        (SELECT COUNT(*) FROM transaction_tags tt WHERE tt.tag_key=t.tag_key) AS transaction_count,
+        (SELECT GROUP_CONCAT(DISTINCT tr.month)
+         FROM transaction_tags tt JOIN transactions tr ON tr.id=tt.transaction_id
+         WHERE tt.tag_key=t.tag_key) AS impact_months
+      FROM tags t
+      ORDER BY t.sort_order,t.name
+    `).all()).map((row) => ({
+      tag_key: text(row.tag_key),
+      name: text(row.name),
+      description: text(row.description),
+      color: text(row.color),
+      is_active: boolean(row.is_active),
+      sort_order: Number(row.sort_order),
+      transaction_count: Number(row.transaction_count ?? 0),
+      impact_months: text(row.impact_months).split(",").filter(Boolean).sort()
+    }));
+  }
+
+  taxonomy(db = this.db()): TaxonomyWorkspace {
+    const groups = this.attributeGroups(db);
+    const options = this.attributeOptions(db);
+    const tags = this.tagDefinitions(db);
+    const categoryUses = rows(db.prepare(`SELECT ca.category_key,ca.attribute_key,o.group_key
+      FROM category_attributes ca JOIN attribute_options o ON o.attribute_key=ca.attribute_key
+      ORDER BY o.group_key,ca.attribute_key,ca.category_key`).all());
+    const tagUses = rows(db.prepare(`SELECT tag_key,transaction_id FROM transaction_tags
+      ORDER BY tag_key,transaction_id`).all());
+    const groupUses = new Map<string, unknown[]>();
+    const optionUses = new Map<string, unknown[]>();
+    const tagUseMap = new Map<string, unknown[]>();
+    categoryUses.forEach((row) => {
+      const groupKey = text(row.group_key);
+      const optionKey = text(row.attribute_key);
+      if (!groupUses.has(groupKey)) groupUses.set(groupKey, []);
+      if (!optionUses.has(optionKey)) optionUses.set(optionKey, []);
+      groupUses.get(groupKey)?.push([text(row.category_key), optionKey]);
+      optionUses.get(optionKey)?.push(text(row.category_key));
+    });
+    tagUses.forEach((row) => {
+      const key = text(row.tag_key);
+      if (!tagUseMap.has(key)) tagUseMap.set(key, []);
+      tagUseMap.get(key)?.push(Number(row.transaction_id));
+    });
+    groups.forEach((group) => {
+      group.usage_revision = contentRevision(groupUses.get(group.group_key) ?? []);
+    });
+    options.forEach((option) => {
+      option.usage_revision = contentRevision(optionUses.get(option.attribute_key) ?? []);
+    });
+    tags.forEach((tag) => {
+      tag.usage_revision = contentRevision(tagUseMap.get(tag.tag_key) ?? []);
+    });
+    // Revisions protect the editable definitions themselves.  Historical
+    // usage counts and affected months are read-only impact metadata; they
+    // change whenever a month is saved and must not make an unrelated
+    // taxonomy draft stale.
+    const attributeRevision = contentRevision([
+      groups.map(({ group_key, name, selection_mode, is_active, sort_order }) =>
+        ({ group_key, name, selection_mode, is_active, sort_order })),
+      options.map(({ attribute_key, group_key, name, is_active, sort_order }) =>
+        ({ attribute_key, group_key, name, is_active, sort_order }))
+    ]);
+    const tagRevision = contentRevision(tags.map(({
+      tag_key, name, description, color, is_active, sort_order
+    }) => ({ tag_key, name, description, color, is_active, sort_order })));
+    return {
+      attribute_revision: attributeRevision,
+      tag_revision: tagRevision,
+      groups,
+      options,
+      tags
+    };
   }
 
   async saveCategories(
@@ -457,7 +605,82 @@ export class AssetTrackRepository {
   }> {
     return this.manager.write((db) => {
       const before = rows(db.prepare("SELECT * FROM category_definitions ORDER BY category_key").all());
+      const beforeAttributes = new Map<string, string[]>();
+      rows(db.prepare(
+        "SELECT category_key,attribute_key FROM category_attributes ORDER BY category_key,attribute_key"
+      ).all()).forEach((row) => {
+        const categoryKey = text(row.category_key);
+        const keys = beforeAttributes.get(categoryKey) ?? [];
+        keys.push(text(row.attribute_key));
+        beforeAttributes.set(categoryKey, keys);
+      });
       this.configurationWrites.saveCategories(db, expectedRevision, input);
+      // Keep migrated/previously saved assignments when an older caller does
+      // not yet send the optional attribute_keys field. Newer callers can
+      // explicitly send [] to clear a category's attributes.
+      const categoryAttributeRows = input.filter((category) => category.attribute_keys !== undefined).map((category) => ({
+        category_key: category.category_key,
+        attribute_keys: [...new Set(category.attribute_keys ?? [])]
+      }));
+      const knownOptions = new Set(rows(db.prepare(
+        "SELECT attribute_key FROM attribute_options"
+      ).all()).map((row) => text(row.attribute_key)));
+      const optionActive = new Map(rows(db.prepare(
+        "SELECT attribute_key,is_active FROM attribute_options"
+      ).all()).map((row) => [text(row.attribute_key), boolean(row.is_active)] as const));
+      const groupsByOption = new Map(rows(db.prepare(
+        "SELECT attribute_key,group_key FROM attribute_options"
+      ).all()).map((row) => [text(row.attribute_key), text(row.group_key)] as const));
+      const groupActive = new Map(rows(db.prepare(
+        "SELECT group_key,is_active FROM attribute_groups"
+      ).all()).map((row) => [text(row.group_key), boolean(row.is_active)] as const));
+      categoryAttributeRows.forEach(({ category_key, attribute_keys }) => {
+        const selectedGroups = new Set<string>();
+        attribute_keys.forEach((attributeKey) => {
+          if (!knownOptions.has(attributeKey)) {
+            throw new RepositoryValidationError({
+              code: "category.attribute_invalid",
+              params: { category_key, attribute_key: attributeKey }
+            });
+          }
+          if (optionActive.get(attributeKey) !== true
+            && !(beforeAttributes.get(category_key) ?? []).includes(attributeKey)) {
+            throw new RepositoryValidationError({
+              code: "category.attribute_invalid",
+              params: { category_key, attribute_key: attributeKey }
+            });
+          }
+          const groupKey = groupsByOption.get(attributeKey);
+          if (groupKey && groupActive.get(groupKey) !== true
+            && !(beforeAttributes.get(category_key) ?? []).includes(attributeKey)) {
+            throw new RepositoryValidationError({
+              code: "category.attribute_invalid",
+              params: { category_key, attribute_key: attributeKey }
+            });
+          }
+          if (groupKey && selectedGroups.has(groupKey)) {
+            throw new RepositoryValidationError({
+              code: "category.attribute_group_duplicate",
+              params: { category_key, group_key: groupKey }
+            });
+          }
+          if (groupKey) selectedGroups.add(groupKey);
+        });
+        db.prepare("DELETE FROM category_attributes WHERE category_key=?").run(category_key);
+        const insert = db.prepare(
+          "INSERT INTO category_attributes(category_key,attribute_key) VALUES (?,?)"
+        );
+        attribute_keys.forEach((attributeKey) => insert.run(category_key, attributeKey));
+      });
+      const changedAttributeCategories = categoryAttributeRows.filter(({ category_key, attribute_keys }) =>
+        JSON.stringify([...(beforeAttributes.get(category_key) ?? [])].sort())
+          !== JSON.stringify([...attribute_keys].sort())
+      ).map(({ category_key }) => category_key);
+      const affectedMonths = new Set(rows(db.prepare(
+        `SELECT DISTINCT month FROM transactions
+         WHERE category_key IN (${changedAttributeCategories.length ? changedAttributeCategories.map(() => "?").join(",") : "''"})`
+      ).all(...changedAttributeCategories)).map((row) => text(row.month)).filter(Boolean));
+      affectedMonths.forEach((month) => this.bumpMonthRevision(db, month));
       const after = rows(db.prepare("SELECT * FROM category_definitions ORDER BY category_key").all());
       const operation = this.entityOperation(before, after, "category", "save-categories", audit);
       this.operations.write(
@@ -470,6 +693,308 @@ export class AssetTrackRepository {
         ...categories,
         rules_revision: this.rules(db).revision
       };
+    });
+  }
+
+  async saveTaxonomy(
+    expectedAttributeRevision: number,
+    groups: AttributeGroup[],
+    options: AttributeOption[],
+    expectedTagRevision: number,
+    tags: TagDefinition[],
+    removals: TaxonomyRemoval[] = []
+  ): Promise<TaxonomyWorkspace> {
+    return this.manager.write((db) => {
+      const current = this.taxonomy(db);
+      const currentGroups = new Map(current.groups.map((group) => [group.group_key, group]));
+      const currentOptions = new Map(current.options.map((option) => [option.attribute_key, option]));
+      const currentTags = new Map(current.tags.map((tag) => [tag.tag_key, tag]));
+      if (current.attribute_revision !== expectedAttributeRevision) {
+        throw new RevisionConflictError(expectedAttributeRevision, current.attribute_revision);
+      }
+      if (current.tag_revision !== expectedTagRevision) {
+        throw new RevisionConflictError(expectedTagRevision, current.tag_revision);
+      }
+      const changedAttributeKeys = new Set<string>();
+      const submittedGroupKeys = new Set(groups.map((group) => text(group.group_key)));
+      const submittedOptionKeys = new Set(options.map((option) => text(option.attribute_key)));
+      groups.forEach((group) => {
+        const key = text(group.group_key);
+        const before = currentGroups.get(key);
+        if (!before || before.name !== text(group.name)
+          || before.is_active !== Boolean(group.is_active)
+          || before.sort_order !== Number(group.sort_order)) {
+          current.options
+            .filter((option) => option.group_key === key)
+            .forEach((option) => changedAttributeKeys.add(option.attribute_key));
+        }
+      });
+      currentGroups.forEach((group, key) => {
+        if (!submittedGroupKeys.has(key)) {
+          current.options
+            .filter((option) => option.group_key === key)
+            .forEach((option) => changedAttributeKeys.add(option.attribute_key));
+        }
+      });
+      options.forEach((option) => {
+        const key = text(option.attribute_key);
+        const before = currentOptions.get(key);
+        if (!before || before.group_key !== text(option.group_key)
+          || before.name !== text(option.name)
+          || before.is_active !== Boolean(option.is_active)
+          || before.sort_order !== Number(option.sort_order)) {
+          changedAttributeKeys.add(key);
+          if (before) changedAttributeKeys.add(before.attribute_key);
+        }
+      });
+      currentOptions.forEach((option, key) => {
+        if (!submittedOptionKeys.has(key)) changedAttributeKeys.add(key);
+      });
+      const changedTagKeys = new Set<string>();
+      const submittedTagKeys = new Set(tags.map((tag) => text(tag.tag_key)));
+      tags.forEach((tag) => {
+        const key = text(tag.tag_key);
+        const before = currentTags.get(key);
+        if (!before || before.name !== text(tag.name)
+          || before.description !== text(tag.description)
+          || before.color !== text(tag.color)
+          || before.is_active !== Boolean(tag.is_active)
+          || before.sort_order !== Number(tag.sort_order)) {
+          changedTagKeys.add(key);
+        }
+      });
+      currentTags.forEach((_tag, key) => {
+        if (!submittedTagKeys.has(key)) changedTagKeys.add(key);
+      });
+      const groupKeys = new Set<string>();
+      const groupNames = new Set<string>();
+      groups.forEach((group, index) => {
+        const key = text(group.group_key);
+        const name = text(group.name);
+        if (!key || !name || groupNames.has(name)) {
+          throw new RepositoryValidationError({ code: "attribute.group_invalid", params: { row: index + 1 } });
+        }
+        groupKeys.add(key);
+        groupNames.add(name);
+        db.prepare(`
+          INSERT INTO attribute_groups(group_key,name,selection_mode,is_active,sort_order)
+          VALUES (?,?,'single',?,?)
+          ON CONFLICT(group_key) DO UPDATE SET
+            name=excluded.name,is_active=excluded.is_active,sort_order=excluded.sort_order
+        `).run(key, name, group.is_active ? 1 : 0, group.sort_order);
+      });
+      const optionKeys = new Set<string>();
+      const optionNames = new Set<string>();
+      options.forEach((option, index) => {
+        const key = text(option.attribute_key);
+        const groupKey = text(option.group_key);
+        const name = text(option.name);
+        const groupNameKey = `${groupKey}\u0000${name}`;
+        if (!key || !name || !groupKeys.has(groupKey) || optionKeys.has(key) || optionNames.has(groupNameKey)) {
+          throw new RepositoryValidationError({ code: "attribute.option_invalid", params: { row: index + 1 } });
+        }
+        optionKeys.add(key);
+        optionNames.add(groupNameKey);
+        db.prepare(`
+          INSERT INTO attribute_options(attribute_key,group_key,name,is_active,sort_order)
+          VALUES (?,?,?,?,?)
+          ON CONFLICT(attribute_key) DO UPDATE SET
+            group_key=excluded.group_key,name=excluded.name,
+            is_active=excluded.is_active,sort_order=excluded.sort_order
+        `).run(key, groupKey, name, option.is_active ? 1 : 0, option.sort_order);
+      });
+      const tagKeys = new Set<string>();
+      const tagNames = new Set<string>();
+      tags.forEach((tag, index) => {
+        const key = text(tag.tag_key);
+        const name = text(tag.name);
+        if (!key || !name || tagKeys.has(key) || tagNames.has(name)) {
+          throw new RepositoryValidationError({ code: "tag.invalid", params: { row: index + 1 } });
+        }
+        tagKeys.add(key);
+        tagNames.add(name);
+        db.prepare(`
+          INSERT INTO tags(tag_key,name,description,color,is_active,sort_order)
+          VALUES (?,?,?,?,?,?)
+          ON CONFLICT(tag_key) DO UPDATE SET
+            name=excluded.name,description=excluded.description,color=excluded.color,
+            is_active=excluded.is_active,sort_order=excluded.sort_order
+        `).run(key, name, text(tag.description), text(tag.color) || "#7c3aed", tag.is_active ? 1 : 0, tag.sort_order);
+      });
+      const affectedMonths = new Set<string>();
+      const removalKeys = new Set<string>();
+      removals.forEach((removal) => {
+        const identity = `${removal.kind}:${removal.key}`;
+        const source = removal.kind === "tag" ? currentTags.get(removal.key)
+          : removal.kind === "option" ? currentOptions.get(removal.key) : currentGroups.get(removal.key);
+        const stillSubmitted = removal.kind === "tag" ? submittedTagKeys.has(removal.key)
+          : removal.kind === "option" ? submittedOptionKeys.has(removal.key) : submittedGroupKeys.has(removal.key);
+        if (!source || stillSubmitted || removalKeys.has(identity) || !Number.isInteger(removal.expected_count)
+          || !Number.isInteger(removal.expected_usage_revision)) {
+          throw new RepositoryValidationError({ code: "taxonomy.removal_invalid" });
+        }
+        removalKeys.add(identity);
+        const actual = removal.kind === "tag" ? currentTags.get(removal.key)?.transaction_count ?? 0
+          : removal.kind === "option" ? currentOptions.get(removal.key)?.category_count ?? 0
+            : currentGroups.get(removal.key)?.usage_count ?? 0;
+        if (actual !== removal.expected_count) throw new RevisionConflictError(removal.expected_count, actual);
+        if (source.usage_revision !== removal.expected_usage_revision) {
+          throw new RevisionConflictError(removal.expected_usage_revision, source.usage_revision ?? 0);
+        }
+        if (removal.kind === "tag") {
+          rows(db.prepare(`SELECT DISTINCT t.month FROM transaction_tags tt
+            JOIN transactions t ON t.id=tt.transaction_id WHERE tt.tag_key=?`).all(removal.key))
+            .forEach((row) => affectedMonths.add(text(row.month)));
+          if (removal.action === "transfer") {
+            if (!removal.target_key || !submittedTagKeys.has(removal.target_key)
+              || removal.target_key === removal.key || !tags.find((tag) => tag.tag_key === removal.target_key)?.is_active) {
+              throw new RepositoryValidationError({ code: "taxonomy.removal_invalid" });
+            }
+            db.prepare(`INSERT OR IGNORE INTO transaction_tags(transaction_id,tag_key)
+              SELECT transaction_id,? FROM transaction_tags WHERE tag_key=?`)
+              .run(removal.target_key, removal.key);
+          } else if (removal.action !== "clear") throw new RepositoryValidationError({ code: "taxonomy.removal_invalid" });
+          db.prepare("DELETE FROM transaction_tags WHERE tag_key=?").run(removal.key);
+        } else if (removal.kind === "option") {
+          const option = currentOptions.get(removal.key);
+          if (!option) throw new RepositoryValidationError({ code: "taxonomy.removal_invalid" });
+          rows(db.prepare(`SELECT DISTINCT t.month FROM category_attributes ca
+            JOIN transactions t ON t.category_key=ca.category_key WHERE ca.attribute_key=?`).all(removal.key))
+            .forEach((row) => affectedMonths.add(text(row.month)));
+          if (removal.action === "transfer") {
+            const target = options.find((item) => item.attribute_key === removal.target_key);
+            if (!target || !target.is_active || target.group_key !== option.group_key
+              || target.attribute_key === removal.key) throw new RepositoryValidationError({ code: "taxonomy.removal_invalid" });
+            db.prepare("UPDATE category_attributes SET attribute_key=? WHERE attribute_key=?")
+              .run(target.attribute_key, removal.key);
+          } else if (removal.action === "clear") {
+            db.prepare("DELETE FROM category_attributes WHERE attribute_key=?").run(removal.key);
+          } else throw new RepositoryValidationError({ code: "taxonomy.removal_invalid" });
+        } else {
+          rows(db.prepare(`SELECT DISTINCT t.month FROM attribute_options o
+            JOIN category_attributes ca ON ca.attribute_key=o.attribute_key
+            JOIN transactions t ON t.category_key=ca.category_key WHERE o.group_key=?`).all(removal.key))
+            .forEach((row) => affectedMonths.add(text(row.month)));
+          if (removal.action === "transfer") {
+            const target = options.find((item) => item.attribute_key === removal.target_key);
+            const targetGroup = target && currentGroups.get(target.group_key);
+            if (!target || !target.is_active || target.group_key === removal.key
+              || !targetGroup || !groups.find((group) => group.group_key === target.group_key)?.is_active
+              || targetGroup.usage_revision !== removal.expected_target_group_usage_revision) {
+              throw new RepositoryValidationError({ code: "taxonomy.removal_invalid" });
+            }
+            const sourceCategories = rows(db.prepare(`SELECT DISTINCT ca.category_key
+              FROM category_attributes ca JOIN attribute_options o ON o.attribute_key=ca.attribute_key
+              WHERE o.group_key=?`).all(removal.key)).map((row) => text(row.category_key));
+            const deleteTarget = db.prepare(`DELETE FROM category_attributes WHERE category_key=?
+              AND attribute_key IN (SELECT attribute_key FROM attribute_options WHERE group_key=?)`);
+            const insertTarget = db.prepare("INSERT INTO category_attributes(category_key,attribute_key) VALUES (?,?)");
+            sourceCategories.forEach((categoryKey) => {
+              deleteTarget.run(categoryKey, target.group_key);
+              insertTarget.run(categoryKey, target.attribute_key);
+            });
+          } else if (removal.action !== "clear") {
+            throw new RepositoryValidationError({ code: "taxonomy.removal_invalid" });
+          }
+          db.prepare(`DELETE FROM category_attributes WHERE attribute_key IN
+            (SELECT attribute_key FROM attribute_options WHERE group_key=?)`).run(removal.key);
+        }
+      });
+      // An omitted, referenced definition requires an explicit historical rewrite.
+      rows(db.prepare("SELECT tag_key FROM tags").all()).forEach((row) => {
+        const key = text(row.tag_key);
+        if (submittedTagKeys.has(key)) return;
+        const used = Number((db.prepare(
+          "SELECT COUNT(*) AS count FROM transaction_tags WHERE tag_key=?"
+        ).get(key) as Row).count ?? 0);
+        if (used > 0) throw new RepositoryValidationError({ code: "taxonomy.removal_invalid" });
+        db.prepare("DELETE FROM tags WHERE tag_key=?").run(key);
+      });
+      rows(db.prepare("SELECT attribute_key FROM attribute_options").all()).forEach((row) => {
+        const key = text(row.attribute_key);
+        if (submittedOptionKeys.has(key)) return;
+        const used = Number((db.prepare(
+          "SELECT COUNT(*) AS count FROM category_attributes WHERE attribute_key=?"
+        ).get(key) as Row).count ?? 0);
+        if (used > 0) throw new RepositoryValidationError({ code: "taxonomy.removal_invalid" });
+        db.prepare("DELETE FROM attribute_options WHERE attribute_key=?").run(key);
+      });
+      rows(db.prepare("SELECT group_key FROM attribute_groups").all()).forEach((row) => {
+        const key = text(row.group_key);
+        if (submittedGroupKeys.has(key)) return;
+        const optionCount = Number((db.prepare(
+          "SELECT COUNT(*) AS count FROM attribute_options WHERE group_key=?"
+        ).get(key) as Row).count ?? 0);
+        const usage = Number((db.prepare(`
+          SELECT COUNT(DISTINCT ca.category_key) AS count
+          FROM attribute_options o
+          JOIN category_attributes ca ON ca.attribute_key=o.attribute_key
+          WHERE o.group_key=?
+        `).get(key) as Row).count ?? 0);
+        if (usage > 0 || optionCount > 0) throw new RepositoryValidationError({ code: "taxonomy.removal_invalid" });
+        db.prepare("DELETE FROM attribute_groups WHERE group_key=?").run(key);
+      });
+      const duplicateCategoryGroups = rows(db.prepare(`
+        SELECT ca.category_key,o.group_key,COUNT(*) AS count
+        FROM category_attributes ca
+        JOIN attribute_options o ON o.attribute_key=ca.attribute_key
+        GROUP BY ca.category_key,o.group_key
+        HAVING COUNT(*)>1
+        LIMIT 1
+      `).all());
+      if (duplicateCategoryGroups.length) {
+        throw new RepositoryValidationError({
+          code: "category.attribute_group_duplicate",
+          params: {
+            category_key: text(duplicateCategoryGroups[0].category_key),
+            group_key: text(duplicateCategoryGroups[0].group_key)
+          }
+        });
+      }
+      const saved = this.taxonomy(db);
+      if (changedAttributeKeys.size) {
+        const keys = [...changedAttributeKeys];
+        const placeholders = keys.map(() => "?").join(",");
+        rows(db.prepare(`
+          SELECT DISTINCT t.month
+          FROM category_attributes ca
+          JOIN transactions t ON t.category_key=ca.category_key
+          WHERE ca.attribute_key IN (${placeholders})
+        `).all(...keys)).forEach((row) => affectedMonths.add(text(row.month)));
+      }
+      if (changedTagKeys.size) {
+        const keys = [...changedTagKeys];
+        const placeholders = keys.map(() => "?").join(",");
+        rows(db.prepare(`
+          SELECT DISTINCT t.month
+          FROM transaction_tags tt
+          JOIN transactions t ON t.id=tt.transaction_id
+          WHERE tt.tag_key IN (${placeholders})
+        `).all(...keys)).forEach((row) => affectedMonths.add(text(row.month)));
+      }
+      affectedMonths.forEach((month) => this.bumpMonthRevision(db, month));
+      if (removals.length) {
+        this.operations.write(db, {
+          operation_id: randomUUID(),
+          actor: "local-user",
+          operation_type: "remove-taxonomy",
+          source_page: "配置/分类属性",
+          total_count: removals.length,
+          change_count: removals.length,
+          skipped_count: 0,
+          failure_count: 0,
+          changes: removals.map((removal) => ({
+            transaction_id: null,
+            transaction_key: `${removal.kind}:${removal.key}`,
+            month: "",
+            before: { kind: removal.kind, key: removal.key, usage_count: removal.expected_count },
+            after: { action: removal.action, target_key: removal.target_key ?? null },
+            status: "change" as const
+          })),
+          metadata: { affected_months: [...affectedMonths].sort() }
+        }, removals.map((removal) => `${removal.kind}:${removal.key}`));
+      }
+      return saved;
     });
   }
 
@@ -753,7 +1278,8 @@ export class AssetTrackRepository {
 
   private getMonthFromDb(month: string, db: DatabaseSync): MonthWorkspace {
     const transactions = rows(db.prepare(`
-      SELECT id,transaction_date,type,category_key,category,counterparty,product,source,account_key,amount
+      SELECT id,transaction_date,type,category_key,category,counterparty,product,source,account_key,amount,
+             COALESCE((SELECT json_group_array(tag_key) FROM transaction_tags tt WHERE tt.transaction_id=transactions.id),'[]') AS tag_keys
       FROM transactions WHERE month=? ORDER BY id
     `).all(month)).map(transactionFromRow);
     const categories = this.categoryDefinitions(db);
@@ -766,14 +1292,16 @@ export class AssetTrackRepository {
       cash_accounts: this.cashAccounts(db, month),
       investment_accounts: this.investmentAccounts(db, month),
       transactions,
+      attribute_groups: this.attributeGroups(db),
+      attribute_options: this.attributeOptions(db),
+      tags: this.tagDefinitions(db),
       debts: debts.rows,
       fixed_assets: rows(db.prepare(
         "SELECT * FROM fixed_assets WHERE month=? ORDER BY id"
       ).all(month)).map(fixedAssetFromRow),
       computed: calculateMonthly(
         transactions,
-        categories,
-        this.options.largeExpenseThreshold
+        categories
       ),
       overview: this.analysis.draftMonthOverview(db, month, transactions, categories)
     };
@@ -786,7 +1314,8 @@ export class AssetTrackRepository {
     const db = this.db();
     const transactions = rows(db.prepare(`
       SELECT id,transaction_date,type,category_key,category,counterparty,product,
-             source,account_key,amount
+             source,account_key,amount,
+             COALESCE((SELECT json_group_array(tag_key) FROM transaction_tags tt WHERE tt.transaction_id=transactions.id),'[]') AS tag_keys
       FROM transactions WHERE month=? ORDER BY id
     `).all(month)).map(transactionFromRow);
     const categories = this.categoryDefinitions(db);

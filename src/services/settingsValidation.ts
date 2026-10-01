@@ -116,10 +116,6 @@ export function parseAssetTrackSettings(value: unknown): SettingsParseResult {
     && Number.isFinite(source.reconciliationTolerance)
     && source.reconciliationTolerance >= 0
     ? source.reconciliationTolerance : 100;
-  const largeExpenseThreshold = typeof source.largeExpenseThreshold === "number"
-    && Number.isFinite(source.largeExpenseThreshold)
-    && source.largeExpenseThreshold > 0
-    ? source.largeExpenseThreshold : 1000;
   const aiEndpoint = typeof source.aiEndpoint === "string" ? source.aiEndpoint.trim() : "";
   const aiModel = typeof source.aiModel === "string" ? source.aiModel.trim() : "";
   const aiTimeoutMs = typeof source.aiTimeoutMs === "number"
@@ -136,7 +132,6 @@ export function parseAssetTrackSettings(value: unknown): SettingsParseResult {
       baseCurrency,
       currencyFormat,
       reconciliationTolerance,
-      largeExpenseThreshold,
       aiEndpoint,
       aiModel,
       aiTimeoutMs

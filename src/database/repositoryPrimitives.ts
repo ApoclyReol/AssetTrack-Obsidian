@@ -120,6 +120,17 @@ export function normalizeAsset(source: Partial<FixedAsset>, index: number): Requ
 }
 
 export function transactionFromRow(row: Row): Transaction {
+  let tagKeys: string[] = [];
+  if (Array.isArray(row.tag_keys)) {
+    tagKeys = row.tag_keys.map((value) => text(value)).filter(Boolean);
+  } else if (typeof row.tag_keys === "string" && row.tag_keys.trim()) {
+    try {
+      const parsed = JSON.parse(row.tag_keys) as unknown;
+      if (Array.isArray(parsed)) tagKeys = parsed.map((value) => text(value)).filter(Boolean);
+    } catch {
+      tagKeys = row.tag_keys.split(",").map((value) => text(value)).filter(Boolean);
+    }
+  }
   return {
     id: Number(row.id),
     transaction_date: text(row.transaction_date),
@@ -130,7 +141,8 @@ export function transactionFromRow(row: Row): Transaction {
     counterparty: text(row.counterparty),
     product: text(row.product),
     source: text(row.source),
-    amount: Number(row.amount ?? 0)
+    amount: Number(row.amount ?? 0),
+    tag_keys: [...new Set(tagKeys)]
   };
 }
 

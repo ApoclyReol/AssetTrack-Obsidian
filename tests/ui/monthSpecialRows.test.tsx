@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { useState } from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   CategoryDefinition
@@ -163,7 +163,7 @@ describe("month debt and special transaction rows", () => {
         month="2026-01"
         draft={draft}
         categories={[]}
-        issues={[{ row_index: 0, field: "分类", issue: "分类为空", severity: "警告", blocking: false }]}
+        issues={[{ row_index: 0, field: "金额", issue: "金额待核对", severity: "警告", blocking: false }]}
         summarySort={null}
         expandedGroup=""
         onSummarySort={vi.fn()}
@@ -182,6 +182,7 @@ describe("month debt and special transaction rows", () => {
     expect(document.querySelector(".asset-track-transaction-issues-notice")).toBeNull();
     expect(screen.queryByRole("button", { name: "展开问题列表" })).toBeNull();
     expect(screen.queryByRole("button", { name: "显示分类和交易对手" })).toBeNull();
+    expect(screen.getByLabelText("支出第 1 行交易对手")).toBeDefined();
   });
 
   it("offers the retained source row for an imported transaction", () => {
@@ -348,7 +349,7 @@ describe("month debt and special transaction rows", () => {
     expect(screen.queryByRole("combobox")).toBeNull();
   });
 
-  it("aligns summary details with the parent columns", () => {
+  it("renders summary details with explicit transaction columns", () => {
     const rows: Transaction[] = [{
       id: 1,
       transaction_date: "2026-01-01",
@@ -392,8 +393,18 @@ describe("month debt and special transaction rows", () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole("button", { name: "展开逐项" }));
 
-    expect(screen.getByRole("columnheader", { name: "行号" })).toBeDefined();
-    expect(screen.getByRole("columnheader", { name: "交易对手商品金额日期" })).toBeDefined();
+    const detailTable = document.querySelector(".asset-track-summary-detail-table--nested");
+    expect(detailTable).toBeTruthy();
+    const detail = within(detailTable as HTMLElement);
+    expect(detail.getByRole("columnheader", { name: "行号" })).toBeDefined();
+    expect(detail.getByRole("columnheader", { name: "日期" })).toBeDefined();
+    expect(detail.getByRole("columnheader", { name: "交易对手" })).toBeDefined();
+    expect(detail.getByRole("columnheader", { name: "商品" })).toBeDefined();
+    expect(detail.getByRole("columnheader", { name: "标签" })).toBeDefined();
+    expect(detail.getByRole("columnheader", { name: "分类" })).toBeDefined();
+    expect(detail.getByRole("columnheader", { name: "金额" })).toBeDefined();
+    expect(detail.getByRole("columnheader", { name: "规则" })).toBeDefined();
+    expect(detail.getByRole("columnheader", { name: "操作" })).toBeDefined();
     expect(screen.getByDisplayValue("2026-01-01")).toBeDefined();
     expect(screen.getByLabelText("选择支出第 1 行")).toBeDefined();
     expect(screen.getByText("新建规则")).toBeDefined();
@@ -410,9 +421,20 @@ describe("month debt and special transaction rows", () => {
       "asset-track-summary-col-count",
       "asset-track-summary-col-amount",
       "asset-track-summary-col-category",
+      "asset-track-summary-col-rule",
       "asset-track-summary-col-actions"
     ]);
-    expect(detailColumns).toEqual(parentColumns);
+    expect(detailColumns).toEqual([
+      "asset-track-summary-detail-col-index",
+      "asset-track-summary-detail-col-date",
+      "asset-track-summary-detail-col-counterparty",
+      "asset-track-summary-detail-col-product",
+      "asset-track-summary-detail-col-tags",
+      "asset-track-summary-detail-col-category",
+      "asset-track-summary-detail-col-amount",
+      "asset-track-summary-detail-col-rule",
+      "asset-track-summary-detail-col-actions"
+    ]);
     expect(document.querySelector(".asset-track-summary-detail-table--nested")).toBeTruthy();
   });
 });

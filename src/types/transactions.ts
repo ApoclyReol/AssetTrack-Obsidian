@@ -10,4 +10,6 @@ export interface Transaction {
   counterparty?: string;
   product: string;
   amount: number;
+  /** Many-to-many transaction tags. Empty is a valid, healthy state. */
+  tag_keys?: string[];
 }

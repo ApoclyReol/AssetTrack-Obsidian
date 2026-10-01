@@ -23,6 +23,7 @@ export function MonthEditorAssetsSection({
 }) {
   return (
     <>
+      <p className="asset-track-account-settings-hint">{t("资金账户请在设置中管理。", "Manage cash and investment accounts in settings.")}</p>
       <Section title={t("现金账户", "Cash accounts")}>
         <div className="asset-track-fields">
           {draft.cash_accounts.map((account, index) => (

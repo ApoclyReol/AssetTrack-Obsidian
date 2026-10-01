@@ -14,7 +14,10 @@ import type {
   CashAccountBalance,
   CategoryDefinition,
   InvestmentAccountAnalysis,
-  InvestmentAccountBalance
+  InvestmentAccountBalance,
+  AttributeOption,
+  AttributeGroup,
+  TagDefinition
 } from "../types/configuration";
 import type {
   Transaction
@@ -22,8 +25,10 @@ import type {
 import {
   buildAnnualRows,
   calculateMonthly,
+  categoryHasAttribute,
   explainReconciliation,
   LEGACY_CATEGORY_ALIASES,
+  TAXONOMY_ATTRIBUTE_KEYS,
   previousMonths,
   type ExtendedAnnualRow
 } from "../domain/calculator";
@@ -43,11 +48,13 @@ import type { AnalysisRuntimeSettings } from "../types/settings";
 import { RepositoryValidationError, type Row, rows, text, fixedAssetFromRow, transactionFromRow } from "./repositoryPrimitives";
 
 export interface AnalysisReadContext {
-  largeExpenseThreshold: number;
   reconciliationTolerance: number;
   getMonths(db: DatabaseSync): string[];
   savedMonths(db: DatabaseSync): string[];
   categoryDefinitions(db: DatabaseSync): CategoryDefinition[];
+  attributeGroups?(db: DatabaseSync): AttributeGroup[];
+  attributeOptions?(db: DatabaseSync): AttributeOption[];
+  tagDefinitions?(db: DatabaseSync): TagDefinition[];
   cashAccounts(db: DatabaseSync, month: string): CashAccountBalance[];
   investmentAccounts(db: DatabaseSync, month: string): InvestmentAccountBalance[];
 }
@@ -56,7 +63,6 @@ export class AnalysisReadModel {
   constructor(private readonly context: AnalysisReadContext) {}
 
   updateRuntimeSettings(settings: AnalysisRuntimeSettings): void {
-    this.context.largeExpenseThreshold = settings.largeExpenseThreshold;
     this.context.reconciliationTolerance = settings.reconciliationTolerance;
   }
 
@@ -75,13 +81,93 @@ export class AnalysisReadModel {
     const placeholders = missingMonths.map(() => "?").join(",");
     for (const row of rows(db.prepare(
       `SELECT id,month,transaction_date,type,category_key,category,counterparty,
-              product,source,account_key,amount
+              product,source,account_key,amount,
+              COALESCE((SELECT json_group_array(tag_key) FROM transaction_tags tt WHERE tt.transaction_id=transactions.id),'[]') AS tag_keys
        FROM transactions WHERE month IN (${placeholders}) ORDER BY month,id`
     ).all(...missingMonths))) {
       const month = text(row.month);
       grouped.get(month)?.push(transactionFromRow(row));
     }
     return grouped;
+  }
+
+  private dimensionSummary(
+    transactions: Transaction[],
+    categories: CategoryDefinition[],
+    groups: AttributeGroup[],
+    options: AttributeOption[],
+    tags: TagDefinition[]
+  ): Pick<NonNullable<MonthOverview["attribute_summary"]>, never> & {
+    attributes: NonNullable<MonthOverview["attribute_summary"]>;
+    tags: NonNullable<MonthOverview["tag_summary"]>;
+  } {
+    const categoryByKey = new Map(categories.map((row) => [row.category_key, row]));
+    const optionByKey = new Map(options.map((row) => [row.attribute_key, row]));
+    const groupByKey = new Map(groups.map((row) => [row.group_key, row]));
+    const tagByKey = new Map(tags.map((row) => [row.tag_key, row]));
+    const amountForAnalysis = (row: Transaction): number =>
+      row.type === "代付" ? -Number(row.amount || 0) : Number(row.amount || 0);
+    const attributes = new Map<string, { group_key: string; group: string; attribute_key: string; attribute: string; amount: number; transaction_count: number }>();
+    const tagValues = new Map<string, { tag_key: string; tag: string; amount: number; transaction_count: number; categories: Map<string, number> }>();
+    transactions
+      // The three structure views describe spending.  Income and investment
+      // rows can still carry tags and are persisted normally, but they do not
+      // enter the spending structure totals.
+      .filter((row) => row.type === "支出" || row.type === "代付")
+      .forEach((row) => {
+        const amount = amountForAnalysis(row);
+        const category = categoryByKey.get(row.category_key ?? "") ?? categories.find((item) => item.name === row.category);
+        (category?.attribute_keys ?? []).forEach((attributeKey) => {
+          const option = optionByKey.get(attributeKey);
+          if (!option) return;
+          const group = groupByKey.get(option.group_key);
+          const key = `${option.group_key}\u0000${attributeKey}`;
+          const current = attributes.get(key) ?? {
+            group_key: option.group_key,
+            group: group?.name ?? option.group_key,
+            attribute_key: attributeKey,
+            attribute: option.name,
+            amount: 0,
+            transaction_count: 0
+          };
+          current.amount += amount;
+          current.transaction_count += 1;
+          attributes.set(key, current);
+        });
+        (row.tag_keys ?? []).forEach((tagKey) => {
+          const tag = tagByKey.get(tagKey);
+          if (!tag) return;
+          const current = tagValues.get(tagKey) ?? {
+            tag_key: tagKey,
+            tag: tag.name,
+            amount: 0,
+            transaction_count: 0,
+            categories: new Map<string, number>()
+          };
+          current.amount += amount;
+          current.transaction_count += 1;
+          if (category?.name) {
+            current.categories.set(category.name, (current.categories.get(category.name) ?? 0) + amount);
+          }
+          tagValues.set(tagKey, current);
+        });
+      });
+    return {
+      attributes: [...attributes.values()]
+        .map((row) => ({ ...row, amount: roundHalfEven(row.amount) }))
+        .sort((left, right) => left.group.localeCompare(right.group) || left.attribute.localeCompare(right.attribute)),
+      tags: [...tagValues.values()]
+        .map((row) => ({
+          tag_key: row.tag_key,
+          tag: row.tag,
+          amount: roundHalfEven(row.amount),
+          transaction_count: row.transaction_count,
+          categories: [...row.categories]
+            .map(([category, amount]) => ({ category, amount: roundHalfEven(amount) }))
+            .sort((left, right) => Math.abs(right.amount) - Math.abs(left.amount))
+        }))
+        .sort((left, right) => Math.abs(right.amount) - Math.abs(left.amount))
+    };
   }
 
   private monthlyByMonth(
@@ -95,7 +181,7 @@ export class AnalysisReadModel {
     const grouped = this.transactionsByMonth(db, orderedMonths, knownTransactions);
     return new Map([...orderedMonths].map((month) => [
       month,
-      calculateMonthly(grouped.get(month) ?? [], categories, this.context.largeExpenseThreshold)
+      calculateMonthly(grouped.get(month) ?? [], categories)
     ]));
   }
 
@@ -157,7 +243,7 @@ export class AnalysisReadModel {
         market_value: Number(investment?.market_value ?? 0),
         investment_cash: Number(investment?.cash_balance ?? 0),
         monthly: monthly.get(month)
-          ?? calculateMonthly([], categories, this.context.largeExpenseThreshold)
+          ?? calculateMonthly([], categories)
       };
     }));
   }
@@ -186,10 +272,12 @@ export class AnalysisReadModel {
       );
     });
     const periodic = new Set(categories.filter(
-      (row) => row.transaction_type === "支出" && row.pattern === "周期"
+      (row) => row.transaction_type === "支出"
+        && categoryHasAttribute(row, TAXONOMY_ATTRIBUTE_KEYS.recurring)
     ).map((row) => row.name));
     const bigTicketCategories = new Set(categories.filter(
-      (row) => row.transaction_type === "支出" && row.is_big_ticket
+      (row) => row.transaction_type === "支出"
+        && categoryHasAttribute(row, TAXONOMY_ATTRIBUTE_KEYS.bigTicket)
     ).map((row) => row.name));
     const categoryChanges: Array<Record<string, string | number>> = [];
     const missingPeriodic: Array<Record<string, string | number>> = [];
@@ -270,8 +358,8 @@ export class AnalysisReadModel {
     const newBig = [...products]
       .filter(([productKey, value]) =>
         productKey
-        && value.amount >= this.context.largeExpenseThreshold
         && !historyProducts.has(productKey)
+        && bigTicketCategories.has(value.category)
       )
       .map(([, value]) => ({
         "商品": value.product,
@@ -331,8 +419,7 @@ export class AnalysisReadModel {
     const row = allRows[rowIndex];
     const monthly = calculateMonthly(
       transactions,
-      categories,
-      this.context.largeExpenseThreshold
+      categories
     );
     const cashAccounts = this.context.cashAccounts(db, month);
     const cashTotal = sum(cashAccounts.map((account) => account.balance));
@@ -357,8 +444,7 @@ export class AnalysisReadModel {
       : [];
     const previousMonthly = calculateMonthly(
       previousTransactions,
-      categories,
-      this.context.largeExpenseThreshold
+      categories
     );
     const previousInvestmentAccounts = previousValue && savedMonths.includes(previousValue)
       ? this.context.investmentAccounts(db, previousValue)
@@ -438,9 +524,10 @@ export class AnalysisReadModel {
     const comparison = [...new Set([
       ...Object.keys(monthly.category_summary),
       ...Object.keys(previousMonthly.category_summary)
-    ])].filter((category) =>
-      !categories.find((definition) => definition.name === category)?.is_big_ticket
-    ).sort().map((category) => ({
+    ])].filter((category) => {
+      const definition = categories.find((candidate) => candidate.name === category);
+      return !categoryHasAttribute(definition, TAXONOMY_ATTRIBUTE_KEYS.bigTicket);
+    }).sort().map((category) => ({
       category,
       current: monthly.category_summary[category] ?? 0,
       previous: previousMonthly.category_summary[category] ?? 0,
@@ -453,6 +540,13 @@ export class AnalysisReadModel {
     const controlled = monthly.structure.controlled;
     const structureTotal = necessary + controlled;
     const surplus = row.total_income - row.total_expense;
+    const dimensions = this.dimensionSummary(
+      transactions.filter((transaction) => transaction.type === "支出" || transaction.type === "代付"),
+      categories,
+      this.context.attributeGroups?.(db) ?? [],
+      this.context.attributeOptions?.(db) ?? [],
+      this.context.tagDefinitions?.(db) ?? []
+    );
     return {
       available: true,
       analysis_window: createMonthReadWindow("analysis", windowFrom, month),
@@ -538,28 +632,41 @@ export class AnalysisReadModel {
         daily: monthly.structure.daily,
         occasional: monthly.structure.occasional,
         necessary_categories: categories.filter(
-          (category) =>
-            category.transaction_type === "支出" && category.necessity === "必要"
+          (category) => category.transaction_type === "支出"
+            && categoryHasAttribute(category, TAXONOMY_ATTRIBUTE_KEYS.necessary)
         ).map((category) => category.name),
         controlled_categories: categories.filter(
-          (category) =>
-            category.transaction_type === "支出" && category.necessity === "可控"
+          (category) => category.transaction_type === "支出"
+            && categoryHasAttribute(category, TAXONOMY_ATTRIBUTE_KEYS.controlled)
         ).map((category) => category.name)
       },
       category_summary: Object.entries(monthly.category_summary)
         .filter(([, amount]) => amount !== 0)
         .sort((left, right) => right[1] - left[1])
         .map(([category, amount]) => ({ category, amount })),
+      income_transactions: transactions.filter((transaction) => transaction.type === "收入")
+        .map((transaction) => ({
+          id: transaction.id ?? null,
+          transaction_date: transaction.transaction_date,
+          product: transaction.product,
+          counterparty: transaction.counterparty ?? "",
+          category: transaction.category,
+          amount: transaction.amount
+        }))
+        .sort((left, right) => right.transaction_date.localeCompare(left.transaction_date)),
       category_comparison: {
         available: previousTransactions.length > 0,
         previous_month: previousValue,
         rows: comparison
       },
       big_tickets: monthly.big_tickets
+      ,attribute_summary: dimensions.attributes
+      ,tag_summary: dimensions.tags
     };
   }
 
   private annualCostAudit(
+    db: DatabaseSync,
     year: string,
     annualRows: ExtendedAnnualRow[],
     categories: CategoryDefinition[],
@@ -582,27 +689,78 @@ export class AnalysisReadModel {
         .map((row) => ({
           month,
           type: row.type,
+          category_key: row.category_key,
           category: categoryName(row),
           product: row.product,
           amount: row.type === "代付" ? -row.amount : row.amount
         })));
+    const yearTransactions = [...transactionsByMonth.entries()]
+      .filter(([month]) => month.startsWith(year))
+      .flatMap(([, rowsForMonth]) => rowsForMonth);
+    const dimensions = this.dimensionSummary(
+      yearTransactions.filter((row) => row.type === "支出" || row.type === "代付"),
+      categories,
+      this.context.attributeGroups?.(db) ?? [],
+      this.context.attributeOptions?.(db) ?? [],
+      this.context.tagDefinitions?.(db) ?? []
+    );
+    const attributeGroups = this.context.attributeGroups?.(db) ?? [];
+    const attributeOptions = this.context.attributeOptions?.(db) ?? [];
+    const tagDefinitions = this.context.tagDefinitions?.(db) ?? [];
+    const tagTrend = new Map<string, Map<string, number>>();
+    const attributeMonths = new Map<string, Set<string>>();
+    for (const [month, monthTransactions] of transactionsByMonth) {
+      if (!month.startsWith(year)) continue;
+      const monthDimensions = this.dimensionSummary(
+        monthTransactions.filter((row) => row.type === "支出" || row.type === "代付"),
+        categories,
+        attributeGroups,
+        attributeOptions,
+        tagDefinitions
+      );
+      monthDimensions.attributes.forEach((row) => {
+        const months = attributeMonths.get(row.attribute_key) ?? new Set<string>();
+        months.add(month);
+        attributeMonths.set(row.attribute_key, months);
+      });
+      monthDimensions.tags.forEach((row) => {
+        const values = tagTrend.get(row.tag_key) ?? new Map<string, number>();
+        values.set(month, row.amount);
+        tagTrend.set(row.tag_key, values);
+      });
+    }
     const monthsCount = Math.max(1, new Set(annualRows.map((row) => row.month)).size);
     const total = sum(expenses.map((row) => row.amount));
     const byCategory = new Map<string, number>();
+    const categoryMonths = new Map<string, Set<string>>();
     const byPattern = new Map<string, number>();
     expenses.forEach((row) => {
       const category = row.category;
       if (!category) return;
       const amount = row.amount;
       byCategory.set(category, (byCategory.get(category) ?? 0) + amount);
-      const pattern = metadata.get(category)?.pattern ?? "偶尔";
+      const months = categoryMonths.get(category) ?? new Set<string>();
+      months.add(row.month);
+      categoryMonths.set(category, months);
+      const definition = row.category_key
+        ? metadataByKey.get(row.category_key)
+        : metadata.get(category);
+      const pattern = categoryHasAttribute(definition, TAXONOMY_ATTRIBUTE_KEYS.recurring)
+        ? "周期"
+        : categoryHasAttribute(definition, TAXONOMY_ATTRIBUTE_KEYS.daily)
+          ? "日常"
+          : categoryHasAttribute(definition, TAXONOMY_ATTRIBUTE_KEYS.occasional)
+            ? "偶尔"
+            : "未设置";
       byPattern.set(pattern, (byPattern.get(pattern) ?? 0) + amount);
     });
+    const categoryDefinition = (row: typeof expenses[number]): CategoryDefinition | undefined =>
+      row.category_key ? metadataByKey.get(row.category_key) : metadata.get(row.category);
     const necessaryTotal = sum(expenses.filter(
-      (row) => metadata.get(row.category)?.necessity === "必要"
+      (row) => categoryHasAttribute(categoryDefinition(row), TAXONOMY_ATTRIBUTE_KEYS.necessary)
     ).map((row) => row.amount));
     const controlledTotal = sum(expenses.filter(
-      (row) => metadata.get(row.category)?.necessity === "可控"
+      (row) => categoryHasAttribute(categoryDefinition(row), TAXONOMY_ATTRIBUTE_KEYS.controlled)
     ).map((row) => row.amount));
     const productSummary = (category: string, divisor: number) => {
       const grouped = new Map<string, number>();
@@ -631,11 +789,20 @@ export class AnalysisReadModel {
       categories: [...byCategory].sort((left, right) => right[1] - left[1])
         .map(([category, amount]) => ({
           category,
-          necessity: metadata.get(category)?.necessity ?? "必要",
-          pattern: metadata.get(category)?.pattern ?? "偶尔",
+          necessity: categoryHasAttribute(metadata.get(category), TAXONOMY_ATTRIBUTE_KEYS.necessary)
+            ? "必要"
+            : categoryHasAttribute(metadata.get(category), TAXONOMY_ATTRIBUTE_KEYS.controlled)
+              ? "可控" : "不适用",
+          pattern: categoryHasAttribute(metadata.get(category), TAXONOMY_ATTRIBUTE_KEYS.recurring)
+            ? "周期"
+            : categoryHasAttribute(metadata.get(category), TAXONOMY_ATTRIBUTE_KEYS.daily)
+              ? "日常"
+              : categoryHasAttribute(metadata.get(category), TAXONOMY_ATTRIBUTE_KEYS.occasional)
+                ? "偶尔" : "不适用",
           total: roundHalfEven(amount),
           monthly_average: roundHalfEven(amount / monthsCount),
-          share_percent: total > 0 ? roundHalfEven(amount / total * 100, 1) : 0
+          share_percent: total > 0 ? roundHalfEven(amount / total * 100, 1) : 0,
+          months: [...(categoryMonths.get(category) ?? new Set<string>())].sort()
         })),
       patterns: ["周期", "日常", "偶尔"].filter((pattern) => byPattern.has(pattern))
         .map((pattern) => {
@@ -648,11 +815,9 @@ export class AnalysisReadModel {
           };
         }),
       big_tickets: expenses.filter((row) => {
-        const category = row.category;
-        return row.type === "支出" && (
-          Boolean(metadata.get(category)?.is_big_ticket)
-          || row.amount >= this.context.largeExpenseThreshold
-        );
+        const definition = categoryDefinition(row);
+        return row.type === "支出"
+          && categoryHasAttribute(definition, TAXONOMY_ATTRIBUTE_KEYS.bigTicket);
       }).map((row) => ({
         month: row.month,
         product: row.product,
@@ -660,7 +825,28 @@ export class AnalysisReadModel {
         amount: roundHalfEven(row.amount)
       })).sort((left, right) => right.amount - left.amount),
       subscriptions: productSummary("订阅服务", 12),
-      daily_essentials: productSummary("日常必需", monthsCount)
+      daily_essentials: productSummary("日常必需", monthsCount),
+      attributes: dimensions.attributes.map((row) => ({
+        group_key: row.group_key,
+        group: row.group,
+        attribute_key: row.attribute_key,
+        attribute: row.attribute,
+        total: row.amount,
+        share_percent: total > 0 ? roundHalfEven(row.amount / total * 100, 1) : 0,
+        months: [...(attributeMonths.get(row.attribute_key) ?? new Set<string>())].sort()
+      })),
+      tags: dimensions.tags.map((row) => ({
+        tag_key: row.tag_key,
+        tag: row.tag,
+        total: row.amount,
+        transaction_count: row.transaction_count,
+        categories: row.categories,
+        trend: [...(tagTrend.get(row.tag_key) ?? new Map<string, number>())]
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([month, amount]) => ({ month, amount: roundHalfEven(amount) })),
+        months: [...(tagTrend.get(row.tag_key)?.keys() ?? [])].sort(),
+        share_percent: total > 0 ? roundHalfEven(row.amount / total * 100, 1) : 0
+      }))
     };
   }
 
@@ -773,6 +959,7 @@ export class AnalysisReadModel {
       ),
       all_trend_rows: full.filter((row) => trendMonths.includes(row.month)),
       cost_audit: this.annualCostAudit(
+        db,
         year,
         annual,
         categories,
@@ -836,7 +1023,7 @@ export class AnalysisReadModel {
     if (!selected.size) return [];
     const periodicCategories = new Map(
       categories
-        .filter((category) => category.pattern === "周期")
+        .filter((category) => categoryHasAttribute(category, TAXONOMY_ATTRIBUTE_KEYS.recurring))
         .map((category) => [category.category_key, category.name])
     );
     const result = new Map<string, {

@@ -22,9 +22,10 @@ interface MonthEditorStatusBarProps {
   onSaveImport: () => Promise<boolean>;
   onDismissImport: () => void;
   onViewTransactions?: () => void;
+  compact?: boolean;
 }
 
-type StatusTone = "pending" | "error" | "warning" | "success";
+export type StatusTone = "pending" | "error" | "warning" | "success";
 
 function issueSummary(
   issues: Array<Record<string, unknown>>,
@@ -42,7 +43,7 @@ function issueSummary(
     );
 }
 
-function draftStatus(
+export function draftStatus(
   state: OperationState,
   issueCount: number,
   blockingCount: number,
@@ -75,7 +76,8 @@ export function MonthEditorStatusBar({
   onRetryImport,
   onSaveImport,
   onDismissImport,
-  onViewTransactions
+  onViewTransactions,
+  compact = false
 }: MonthEditorStatusBarProps) {
   const [saving, setSaving] = useState(false);
   const blockingCount = issues.filter(issueIsBlocking).length;
@@ -83,6 +85,11 @@ export function MonthEditorStatusBar({
   const issuesMessage = issueSummary(issues, blockingCount);
   const hasFeedback = feedback !== null;
   const isSuccessFeedback = feedback?.kind === "success";
+  const compactHeadline = feedback
+    ? importMessage(feedback)
+    : state.kind === "pending" || state.kind === "error"
+      ? state.message
+      : issuesMessage ?? (state.kind === "success" ? state.message : "");
   const headline = feedback
     ? importMessage(feedback)
     : state.kind === "pending" || state.kind === "error"
@@ -108,8 +115,8 @@ export function MonthEditorStatusBar({
 
   return (
     <section
-      className={`asset-track-month-status is-${status.tone}`}
-      aria-label={t("本月状态", "Monthly status")}
+     className={"asset-track-month-status is-" + status.tone + (compact ? " is-compact" : "")}
+     aria-label={t("本月状态", "Monthly status")}
       role={status.tone === "error" ? "alert" : "status"}
       aria-live={status.tone === "error" ? "assertive" : "polite"}
       aria-atomic="true"
@@ -117,7 +124,7 @@ export function MonthEditorStatusBar({
       <span className={`asset-track-month-status-state is-${status.tone}`}>
         {status.label}
       </span>
-      <div className="asset-track-month-status-content">
+      {!compact && <div className="asset-track-month-status-content">
         <strong>{headline}</strong>
         {feedback?.kind !== "success" && state.kind !== "pending" && state.kind !== "error"
           && !issuesMessage && workflow.dirtySectionLabels.length > 0 && (
@@ -131,8 +138,9 @@ export function MonthEditorStatusBar({
         {lastSavedAt && !feedback && state.kind !== "pending" && (
           <small>{t(`最近保存：${lastSavedAt}`, `Last saved: ${lastSavedAt}`)}</small>
         )}
-      </div>
-      <div className="asset-track-month-status-actions">
+      </div>}
+      {compact && compactHeadline && <strong className="asset-track-month-status-compact-headline">{compactHeadline}</strong>}
+     <div className="asset-track-month-status-actions">
         {isSuccessFeedback && (
           <button
             type="button"

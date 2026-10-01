@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { App } from "obsidian";
 import type {
-  CategoryDefinition
+  CategoryDefinition,
+  TagDefinition
 } from "../../types/configuration";
 import type {
   MonthWorkspace
@@ -11,6 +13,7 @@ import type {
 import type {
   Transaction
 } from "../../types/transactions";
+import type { TransactionAnalysisDrilldown } from "../../types/analysis";
 import type {
   CsvRawRow
 } from "../../types/csv";
@@ -19,9 +22,7 @@ import type {
   TransactionViewMode
 } from "../../types/operations";
 import { t } from "../../i18n";
-import { scalarText } from "../../domain/text";
 import { transactionTypesForTab } from "../../domain/transactionOperations";
-import { transactionIndexes } from "../analysisModel";
 import {
   TransactionSummaryTable,
   TransactionTable,
@@ -72,9 +73,14 @@ export type MonthEditorTransactionActions = (
 ) => ReactNode;
 
 export interface MonthEditorTransactionsSectionProps {
+  app?: App;
   month: string;
   draft: MonthWorkspace;
   categories: CategoryDefinition[];
+  tags?: TagDefinition[];
+  loadTags?: () => Promise<TagDefinition[]>;
+  transactionDrilldown?: TransactionAnalysisDrilldown | null;
+  onClearTransactionDrilldown?: () => void;
   issues?: Array<Record<string, unknown>>;
   rules?: SavedRule[];
   summarySort: SortState;
@@ -101,9 +107,14 @@ export interface MonthEditorTransactionsSectionProps {
 }
 
 export function MonthEditorTransactionsSection({
+  app,
   month,
   draft,
   categories,
+  tags = [],
+  loadTags,
+  transactionDrilldown,
+  onClearTransactionDrilldown,
   issues = [],
   rules = [],
   summarySort,
@@ -156,8 +167,21 @@ export function MonthEditorTransactionsSection({
   );
   const activeTypeSet = useMemo(() => new Set(activeTypes), [activeTypes]);
   const activeIndexes = useMemo(
-    () => draft.transactions.flatMap((row, index) => activeTypeSet.has(row.type) ? [index] : []),
-    [activeTypeSet, draft.transactions]
+    () => draft.transactions.flatMap((row, index) => {
+      if (!activeTypeSet.has(row.type)) return [];
+      if (!transactionDrilldown) return [index];
+      if (transactionDrilldown.dimension === "tag") {
+        return row.tag_keys?.includes(transactionDrilldown.key) ? [index] : [];
+      }
+      if (transactionDrilldown.dimension === "category") {
+        return row.category_key === transactionDrilldown.key || row.category === transactionDrilldown.key
+          ? [index] : [];
+      }
+      const category = categories.find((item) => item.category_key === row.category_key)
+        ?? categories.find((item) => item.name === row.category);
+      return category?.attribute_keys?.includes(transactionDrilldown.key) ? [index] : [];
+    }),
+    [activeTypeSet, categories, draft.transactions, transactionDrilldown]
   );
   const groupBy: TransactionGroupBy = activeViewMode === "counterparty"
     ? "counterparty"
@@ -182,16 +206,7 @@ export function MonthEditorTransactionsSection({
   const selectedCount = currentViewTransactionKeys.filter((key) => effectiveSelectedKeys.has(key)).length;
   const allCurrentViewSelected = currentViewTransactionKeys.length > 0
     && selectedCount === currentViewTransactionKeys.length;
-  const secondaryIssueCount = issues.filter((issue) => {
-    const field = scalarText(issue.field);
-    return field === "对方"
-      || field === "交易对手"
-      || field === "counterparty"
-      || field === "分类"
-      || field === "category"
-      || field === "category_key";
-  }).length;
-  const effectiveShowSecondaryFields = secondaryIssueCount > 0;
+  const effectiveShowSecondaryFields = true;
 
   const commitSelection = (next: Set<TransactionKey>): void => {
     if (selectedTransactionKeys === undefined) setLocalSelectedTransactionKeys(next);
@@ -239,10 +254,17 @@ export function MonthEditorTransactionsSection({
 
   return (
     <>
-      {(!isInvestmentTab || showBusinessTabs) && <section className="asset-track-view-switcher" aria-label={t("流水展示", "Transaction display")}>
-        <div className="asset-track-transaction-toolbar-row asset-track-transaction-toolbar-row--primary">
+      <section className="asset-track-view-switcher" aria-label={t("流水展示", "Transaction display")}>
+        {(showBusinessTabs || transactionDrilldown) && <div className="asset-track-transaction-toolbar-row asset-track-transaction-toolbar-row--primary">
           <div className="asset-track-transaction-display">
-            <strong>{t("流水展示", "Transaction display")}</strong>
+            {transactionDrilldown && <span className="asset-track-transaction-filter" role="status">
+              {t(`已筛选：${transactionDrilldown.label}`, `Filtered: ${transactionDrilldown.label}`)}
+              {onClearTransactionDrilldown && <button
+                type="button"
+                className="asset-track-analysis-drilldown"
+                onClick={onClearTransactionDrilldown}
+              >{t("清除", "Clear")}</button>}
+            </span>}
             {showBusinessTabs && <div
               className="asset-track-transaction-business-tabs"
               role="tablist"
@@ -264,31 +286,16 @@ export function MonthEditorTransactionsSection({
             {showBusinessTabs && (
               <span className="asset-track-transaction-tab-description">
                 {activeBusinessTab === "outgoing"
-                  ? t("支出和需要分类整理的出账流水。", "Expenses and outgoing transactions that need categories.")
+                  ? t("出账及分类", "Outgoing and categories")
                   : activeBusinessTab === "incoming"
-                    ? t("收入、代付回款及其方向核对。", "Income, paid-on-behalf repayments, and direction checks.")
-                    : t("加仓和提现等不参与消费分类的理财流水。", "Investment deposits and withdrawals, outside spending categories.")}
+                    ? t("入账及代付", "Incoming and paid-on-behalf")
+                    : t("理财流水", "Investment flows")}
               </span>
             )}
           </div>
-          {!isInvestmentTab && <div className="asset-track-transaction-batch-actions asset-track-transaction-batch-actions--primary">
-              <button
-                type="button"
-                disabled={currentViewTransactionKeys.length === 0}
-                aria-pressed={allCurrentViewSelected}
-                onClick={() => toggleTransactionKeys(currentViewTransactionKeys)}
-              >
-                {allCurrentViewSelected
-                  ? t("全不选当前视图", "Deselect all in current view")
-                  : t("全选当前视图", "Select all in current view")}
-              </button>
-              <span role="status">
-                {t(`已选择 ${selectedCount} 条流水`, `${selectedCount} transactions selected`)}
-              </span>
-            </div>}
-        </div>
-        {!isInvestmentTab && <div className="asset-track-transaction-toolbar-row asset-track-transaction-toolbar-row--secondary">
-          <div className="asset-track-transaction-view-tabs" role="tablist" aria-label={t("流水视图", "Transaction view")}>
+        </div>}
+        <div className="asset-track-transaction-toolbar-row asset-track-transaction-toolbar-row--secondary">
+          {!isInvestmentTab && <div className="asset-track-transaction-view-tabs" role="tablist" aria-label={t("流水视图", "Transaction view")}>
           <button
             type="button"
             role="tab"
@@ -316,15 +323,21 @@ export function MonthEditorTransactionsSection({
           >
             {t("按交易对手汇总", "Group by counterparty")}
           </button>
-          </div>
-          <span className="asset-track-transaction-view-description">
-            {activeViewMode === "detail"
-              ? t("适合逐笔修改和处理问题。", "Best for correcting individual rows and issues.")
-              : activeViewMode === "product"
-                ? t("适合按商品检查重复、合并或批量修改。", "Best for checking duplicates and batch-editing by item.")
-                : t("适合核对同一交易对手的流水。", "Best for checking transactions by counterparty.")}
-          </span>
+          </div>}
           <div className="asset-track-transaction-batch-actions asset-track-transaction-batch-actions--secondary">
+            <button
+              type="button"
+              disabled={currentViewTransactionKeys.length === 0}
+              aria-pressed={allCurrentViewSelected}
+              onClick={() => toggleTransactionKeys(currentViewTransactionKeys)}
+            >
+              {allCurrentViewSelected
+                ? t("全不选当前视图", "Deselect all in current view")
+                : t("全选当前视图", "Select all in current view")}
+            </button>
+            <span role="status">
+              {t(`已选择 ${selectedCount} 条流水`, `${selectedCount} transactions selected`)}
+            </span>
             {renderBatchActions?.({
               businessTab: activeBusinessTab,
               viewMode: activeViewMode,
@@ -332,29 +345,26 @@ export function MonthEditorTransactionsSection({
               currentViewTransactionKeys
             })}
           </div>
-        </div>}
-        {!isInvestmentTab && <span className="asset-track-transaction-toolbar-hint">
-          {t(
-            "汇总只影响查看和选择，保存时仍保留每笔流水。",
-            "Grouping only changes viewing and selection. Every transaction is preserved when saved."
-          )}
-        </span>}
-      </section>}
+        </div>
+      </section>
       {(isInvestmentTab || activeViewMode === "detail") && <div className={isInvestmentTab ? "asset-track-investment-tables" : undefined}>
         {activeTypes.map((type) => (
           <TransactionTable
+            app={app}
             key={type}
             title={type}
             rows={draft.transactions}
-            visibleIndexes={transactionIndexes(draft.transactions, type)}
+            visibleIndexes={activeIndexes.filter((index) => draft.transactions[index]?.type === type)}
             categories={categories}
+            tags={tags}
+            loadTags={loadTags}
             issues={issues}
             showSecondaryFields={effectiveShowSecondaryFields}
             sourceRows={sourceRows}
             onViewSourceRow={onViewSourceRow}
             investmentAccounts={draft.investment_accounts}
-            selectedTransactionKeys={isInvestmentTab ? undefined : effectiveSelectedKeys}
-            onToggleTransaction={isInvestmentTab ? undefined : toggleTransaction}
+            selectedTransactionKeys={effectiveSelectedKeys}
+            onToggleTransaction={toggleTransaction}
             renderRuleControls={tableRuleControls}
             renderTransactionActions={tableTransactionActions}
             onUpdate={onUpdate}
@@ -365,11 +375,14 @@ export function MonthEditorTransactionsSection({
       </div>}
       {!isInvestmentTab && activeViewMode !== "detail" && (
         <TransactionSummaryTable
+          app={app}
           rows={draft.transactions}
           visibleIndexes={activeIndexes}
           groups={summaryGroups}
           businessTab={activeBusinessTab}
           categories={categories}
+          tags={tags}
+          loadTags={loadTags}
           issues={issues}
           rules={rules}
           groupBy={groupBy}

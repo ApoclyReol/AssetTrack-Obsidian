@@ -6,9 +6,10 @@ import { AssetTrackError } from "../application/errors";
 
 export const SCHEMA9_VERSION = 9;
 export const SCHEMA10_VERSION = 10;
+export const SCHEMA11_VERSION = 11;
 export const PREVIOUS_SCHEMA_VERSION = SCHEMA9_VERSION;
-export const CURRENT_SCHEMA_VERSION = 11;
-export const BACKUP_FORMAT_VERSION = 8;
+export const CURRENT_SCHEMA_VERSION = 12;
+export const BACKUP_FORMAT_VERSION = 9;
 
 const NORMALIZE_MATCH_KEY_FUNCTION = "asset_track_normalize_match_key";
 
@@ -48,13 +49,18 @@ const MIGRATION_PRESERVED_TABLES = [
   "investment_account_balances",
   "fixed_assets",
   "debt_manager",
-  "month_status"
+  "month_status",
+  "auto_rules",
+  "operation_logs"
 ] as const;
 
 function migrationRowCounts(db: DatabaseSync): Record<string, number> {
+  const tables = new Set(tableNames(db));
   return Object.fromEntries(MIGRATION_PRESERVED_TABLES.map((table) => [
     table,
-    Number((db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count)
+    tables.has(table)
+      ? Number((db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count)
+      : 0
   ]));
 }
 
@@ -115,6 +121,25 @@ export const CATEGORY_METADATA = {
 } as const;
 
 export const REQUIRED_TABLES = [
+  "transactions",
+  "category_definitions",
+  "account_definitions",
+  "cash_account_balances",
+  "investment_account_balances",
+  "fixed_assets",
+  "debt_manager",
+  "auto_rules",
+  "month_status",
+  "operation_logs",
+  "attribute_groups",
+  "attribute_options",
+  "category_attributes",
+  "tags",
+  "transaction_tags"
+] as const;
+
+/** Tables present before the taxonomy migration. */
+const PRE_SCHEMA12_TABLES = [
   "transactions",
   "category_definitions",
   "account_definitions",
@@ -226,7 +251,12 @@ export const REQUIRED_COLUMNS: Record<
     "skipped_count",
     "failure_count",
     "details_json"
-  ]
+  ],
+  attribute_groups: ["group_key", "name", "selection_mode", "is_active", "sort_order"],
+  attribute_options: ["attribute_key", "group_key", "name", "is_active", "sort_order"],
+  category_attributes: ["category_key", "attribute_key"],
+  tags: ["tag_key", "name", "description", "color", "is_active", "sort_order"],
+  transaction_tags: ["transaction_id", "tag_key"]
 };
 
 export const REQUIRED_INDEXES = [
@@ -242,6 +272,10 @@ export const REQUIRED_INDEXES = [
   "idx_debt_paid",
   "idx_auto_rules_match",
   "idx_operation_logs_created"
+  ,"idx_attribute_options_group"
+  ,"idx_category_attributes_attribute"
+  ,"idx_transaction_tags_tag"
+  ,"idx_transaction_tags_transaction"
 ] as const;
 
 export interface RequiredIndexDefinition {
@@ -293,7 +327,11 @@ export const REQUIRED_INDEX_DEFINITIONS: readonly RequiredIndexDefinition[] = [
     table: "operation_logs",
     columns: ["created_at", "id"],
     unique: false
-  }
+  },
+  { name: "idx_attribute_options_group", table: "attribute_options", columns: ["group_key", "sort_order"], unique: false },
+  { name: "idx_category_attributes_attribute", table: "category_attributes", columns: ["attribute_key"], unique: false },
+  { name: "idx_transaction_tags_tag", table: "transaction_tags", columns: ["tag_key"], unique: false },
+  { name: "idx_transaction_tags_transaction", table: "transaction_tags", columns: ["transaction_id"], unique: false }
 ] as const;
 
 export const REQUIRED_GENERATED_COLUMNS: Record<string, readonly string[]> = {
@@ -305,6 +343,8 @@ export interface RequiredForeignKey {
   from: string;
   targetTable: typeof REQUIRED_TABLES[number];
   targetColumn: string;
+  onDelete?: string;
+  onUpdate?: string;
 }
 
 export const REQUIRED_FOREIGN_KEYS: readonly RequiredForeignKey[] = [
@@ -337,7 +377,41 @@ export const REQUIRED_FOREIGN_KEYS: readonly RequiredForeignKey[] = [
     from: "category_key",
     targetTable: "category_definitions",
     targetColumn: "category_key"
-  }
+  },
+  {
+    table: "attribute_options",
+    from: "group_key",
+    targetTable: "attribute_groups",
+    targetColumn: "group_key"
+  },
+  {
+    table: "category_attributes",
+    from: "category_key",
+    targetTable: "category_definitions",
+    targetColumn: "category_key",
+    onDelete: "CASCADE"
+  },
+  {
+    table: "category_attributes",
+    from: "attribute_key",
+    targetTable: "attribute_options",
+    targetColumn: "attribute_key",
+    onDelete: "CASCADE"
+  },
+  {
+    table: "transaction_tags",
+    from: "transaction_id",
+    targetTable: "transactions",
+    targetColumn: "id",
+    onDelete: "CASCADE"
+  },
+  {
+    table: "transaction_tags",
+    from: "tag_key",
+    targetTable: "tags",
+    targetColumn: "tag_key",
+    onDelete: "RESTRICT"
+  },
 ];
 
 export interface RequiredUniqueConstraint {
@@ -362,6 +436,11 @@ export const REQUIRED_PRIMARY_KEYS: readonly RequiredUniqueConstraint[] = [
   { table: "auto_rules", columns: ["id"] },
   { table: "month_status", columns: ["month"] },
   { table: "operation_logs", columns: ["id"] }
+  ,{ table: "attribute_groups", columns: ["group_key"] }
+  ,{ table: "attribute_options", columns: ["attribute_key"] }
+  ,{ table: "category_attributes", columns: ["category_key", "attribute_key"] }
+  ,{ table: "tags", columns: ["tag_key"] }
+  ,{ table: "transaction_tags", columns: ["transaction_id", "tag_key"] }
 ] as const;
 
 export const REQUIRED_UNIQUE_CONSTRAINTS: readonly RequiredUniqueConstraint[] = [
@@ -369,6 +448,9 @@ export const REQUIRED_UNIQUE_CONSTRAINTS: readonly RequiredUniqueConstraint[] = 
   { table: "account_definitions", columns: ["account_type", "name"] },
   { table: "fixed_assets", columns: ["month", "asset_key"] },
   { table: "operation_logs", columns: ["operation_id"] }
+  ,{ table: "attribute_groups", columns: ["name"] }
+  ,{ table: "attribute_options", columns: ["group_key", "name"] }
+  ,{ table: "tags", columns: ["name"] }
 ] as const;
 
 export interface RequiredCheckConstraint {
@@ -408,6 +490,10 @@ export const REQUIRED_CHECK_CONSTRAINTS: readonly RequiredCheckConstraint[] = [
   {
     table: "auto_rules",
     expression: "CHECK((match_scope='product' AND match_counterparty_key='' AND match_product_key<>'') OR (match_scope='merchant' AND match_counterparty_key<>'' AND match_product_key='') OR (match_scope='merchant_product' AND match_counterparty_key<>'' AND match_product_key<>''))"
+  },
+  {
+    table: "attribute_groups",
+    expression: "CHECK(selection_mode IN ('single'))"
   }
 ] as const;
 
@@ -456,7 +542,7 @@ function legacySchemaIssues(db: DatabaseSync): SchemaMigrationIssue[] {
   };
   const tables = tableNames(db);
   const issues: SchemaMigrationIssue[] = [];
-  const missingTables = REQUIRED_TABLES.filter(
+  const missingTables = PRE_SCHEMA12_TABLES.filter(
     (table) => table !== "operation_logs" && !tables.includes(table)
   );
   const missingColumns = Object.entries(legacyColumns).flatMap(([table, columns]) => {
@@ -491,7 +577,7 @@ export function canMigrateSchema9(db: DatabaseSync): boolean {
 function schema10Issues(db: DatabaseSync): SchemaMigrationIssue[] {
   const tables = tableNames(db);
   const issues: SchemaMigrationIssue[] = [];
-  const missingTables = REQUIRED_TABLES.filter((table) => !tables.includes(table));
+  const missingTables = PRE_SCHEMA12_TABLES.filter((table) => !tables.includes(table));
   const missingColumns = Object.entries(REQUIRED_COLUMNS).flatMap(([table, columns]) => {
     if (!tables.includes(table)) return [];
     const actual = tableColumns(db, table);
@@ -515,8 +601,34 @@ export function canMigrateSchema10(db: DatabaseSync): boolean {
   return version === SCHEMA10_VERSION && schema10Issues(db).length === 0;
 }
 
+function schema11Issues(db: DatabaseSync): SchemaMigrationIssue[] {
+  const tables = tableNames(db);
+  const missingTables = PRE_SCHEMA12_TABLES.filter((table) => !tables.includes(table));
+  const missingColumns = PRE_SCHEMA12_TABLES.flatMap((table) => {
+    const actual = tableColumns(db, table);
+    const required = REQUIRED_COLUMNS[table];
+    const missing = required.filter((column) => !actual.includes(column));
+    return missing.length ? [`${table}(${missing.join(",")})`] : [];
+  });
+  if (missingTables.length || missingColumns.length) {
+    return [{
+      code: "legacy_schema_invalid",
+      message: `schema ${SCHEMA11_VERSION} 结构不完整：缺少表=${missingTables.join(",") || "无"}，缺少字段=${missingColumns.join(";") || "无"}`,
+      rule_ids: []
+    }];
+  }
+  return [];
+}
+
+export function canMigrateSchema11(db: DatabaseSync): boolean {
+  const version = Number(
+    (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version
+  );
+  return version === SCHEMA11_VERSION && schema11Issues(db).length === 0;
+}
+
 export function canMigrateSchema(db: DatabaseSync): boolean {
-  return canMigrateSchema9(db) || canMigrateSchema10(db);
+  return canMigrateSchema9(db) || canMigrateSchema10(db) || canMigrateSchema11(db);
 }
 
 interface LegacyRuleRow {
@@ -663,9 +775,12 @@ function schema10RuleIssues(
   const issues: SchemaMigrationIssue[] = [];
   const categories = new Map(
     (db.prepare(
-      "SELECT category_key, transaction_type FROM category_definitions"
-    ).all() as Array<{ category_key: string; transaction_type: string }>)
-      .map((row) => [String(row.category_key), String(row.transaction_type)] as const)
+      "SELECT category_key, transaction_type, is_active FROM category_definitions"
+    ).all() as Array<{ category_key: string; transaction_type: string; is_active: number }>)
+      .map((row) => [String(row.category_key), {
+        transaction_type: String(row.transaction_type),
+        is_active: Number(row.is_active) === 1
+      }] as const)
   );
   const byCondition = new Map<string, Schema10RuleRow[]>();
   for (const row of rows) {
@@ -679,15 +794,23 @@ function schema10RuleIssues(
       });
       continue;
     }
-    const categoryTransactionType = categories.get(String(row.category_key ?? ""));
-    if (!categoryTransactionType || categoryTransactionType !== categoryType) {
+    const category = categories.get(String(row.category_key ?? ""));
+    if (!category || category.transaction_type !== categoryType || !category.is_active) {
       issues.push({
         code: "invalid_category_reference",
-        message: `规则 ${row.id} 的分类引用与规则类型不匹配：category_key=${row.category_key || "空"}`,
+        message: `规则 ${row.id} 的分类引用无效、已停用或与规则类型不匹配：category_key=${row.category_key || "空"}`,
         rule_ids: [Number(row.id)]
       });
     }
     const matchScope = String(row.match_scope ?? "");
+    if (!["product", "merchant", "merchant_product"].includes(matchScope)) {
+      issues.push({
+        code: "ambiguous_rule_scope",
+        message: `规则 ${row.id} 的匹配范围无效：${matchScope || "空"}`,
+        rule_ids: [Number(row.id)]
+      });
+      continue;
+    }
     const counterpartyKey = matchScope === "merchant" || matchScope === "merchant_product"
       ? normalizeMatchKey(row.counterparty)
       : "";
@@ -964,10 +1087,209 @@ export function migrateSchema9To10(db: DatabaseSync): SchemaMigrationReport {
   }
 }
 
+function createTaxonomyTables(db: DatabaseSync): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS attribute_groups (
+      group_key TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      selection_mode TEXT NOT NULL DEFAULT 'single'
+        CHECK(selection_mode IN ('single')),
+      is_active INTEGER NOT NULL DEFAULT 1,
+      sort_order INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS attribute_options (
+      attribute_key TEXT PRIMARY KEY,
+      group_key TEXT NOT NULL,
+      name TEXT NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(group_key, name),
+      FOREIGN KEY(group_key) REFERENCES attribute_groups(group_key)
+    );
+    CREATE TABLE IF NOT EXISTS category_attributes (
+      category_key TEXT NOT NULL,
+      attribute_key TEXT NOT NULL,
+      PRIMARY KEY(category_key, attribute_key),
+      FOREIGN KEY(category_key) REFERENCES category_definitions(category_key) ON DELETE CASCADE,
+      FOREIGN KEY(attribute_key) REFERENCES attribute_options(attribute_key) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS tags (
+      tag_key TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT NOT NULL DEFAULT '',
+      color TEXT NOT NULL DEFAULT '#7c3aed',
+      is_active INTEGER NOT NULL DEFAULT 1,
+      sort_order INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS transaction_tags (
+      transaction_id INTEGER NOT NULL,
+      tag_key TEXT NOT NULL,
+      PRIMARY KEY(transaction_id, tag_key),
+      FOREIGN KEY(transaction_id) REFERENCES transactions(id) ON DELETE CASCADE,
+      FOREIGN KEY(tag_key) REFERENCES tags(tag_key) ON DELETE RESTRICT
+    );
+    CREATE INDEX IF NOT EXISTS idx_attribute_options_group
+      ON attribute_options(group_key, sort_order);
+    CREATE INDEX IF NOT EXISTS idx_category_attributes_attribute
+      ON category_attributes(attribute_key);
+    CREATE INDEX IF NOT EXISTS idx_transaction_tags_tag
+      ON transaction_tags(tag_key);
+    CREATE INDEX IF NOT EXISTS idx_transaction_tags_transaction
+      ON transaction_tags(transaction_id);
+  `);
+}
+
+function seedTaxonomy(db: DatabaseSync, preserveLegacyAttributes = true): void {
+  const groups = [
+    ["attr-group-necessity", "必要性", 0],
+    ["attr-group-pattern", "消费频率", 1],
+    ["attr-group-scale", "支出规模", 2]
+  ] as const;
+  const groupInsert = db.prepare(`
+    INSERT OR IGNORE INTO attribute_groups
+      (group_key,name,selection_mode,is_active,sort_order)
+    VALUES (?,?,'single',1,?)
+  `);
+  groups.forEach(([key, name, order]) => groupInsert.run(key, name, order));
+  const options = [
+    ["attr-necessity-required", "attr-group-necessity", "必要", 0],
+    ["attr-necessity-controlled", "attr-group-necessity", "可控", 1],
+    ["attr-necessity-not-applicable", "attr-group-necessity", "不适用", 2],
+    ["attr-pattern-recurring", "attr-group-pattern", "周期", 0],
+    ["attr-pattern-daily", "attr-group-pattern", "日常", 1],
+    ["attr-pattern-occasional", "attr-group-pattern", "偶尔", 2],
+    ["attr-pattern-not-applicable", "attr-group-pattern", "不适用", 3],
+    ["attr-scale-large", "attr-group-scale", "大额", 0]
+  ] as const;
+  const optionInsert = db.prepare(`
+    INSERT OR IGNORE INTO attribute_options
+      (attribute_key,group_key,name,is_active,sort_order)
+    VALUES (?,?,?,1,?)
+  `);
+  options.forEach((row) => optionInsert.run(...row));
+  const categoryRows = preserveLegacyAttributes
+    ? db.prepare(
+      "SELECT category_key,necessity,pattern,is_big_ticket FROM category_definitions"
+    ).all() as Array<Record<string, unknown>>
+    : [];
+  const relationInsert = db.prepare(
+    "INSERT OR IGNORE INTO category_attributes(category_key,attribute_key) VALUES (?,?)"
+  );
+  const necessityKeys: Record<string, string> = {
+    必要: "attr-necessity-required",
+    可控: "attr-necessity-controlled",
+    不适用: "attr-necessity-not-applicable"
+  };
+  const patternKeys: Record<string, string> = {
+    周期: "attr-pattern-recurring",
+    日常: "attr-pattern-daily",
+    偶尔: "attr-pattern-occasional",
+    不适用: "attr-pattern-not-applicable"
+  };
+  categoryRows.forEach((row) => {
+    const categoryKey = scalarText(row.category_key);
+    const necessity = necessityKeys[scalarText(row.necessity)];
+    const pattern = patternKeys[scalarText(row.pattern)];
+    if (necessity) relationInsert.run(categoryKey, necessity);
+    if (pattern) relationInsert.run(categoryKey, pattern);
+    if (Number(row.is_big_ticket ?? 0) === 1) relationInsert.run(categoryKey, "attr-scale-large");
+  });
+  if (!preserveLegacyAttributes) {
+    // Schema 12 keeps the old columns only as a compatibility bridge for
+    // older callers and backups.  A user who chose "clear" must not retain
+    // the old semantic values in that bridge after migration.
+    db.exec(`
+      UPDATE category_definitions
+      SET necessity='不适用', pattern='不适用', is_big_ticket=0
+    `);
+  }
+  db.prepare(`
+    INSERT OR IGNORE INTO tags(tag_key,name,description,color,is_active,sort_order)
+    VALUES ('tag-travel','旅行','跨分类记录一次旅行的相关支出。','#7c3aed',1,0)
+  `).run();
+}
+
+function migrateSchema11To12InTransaction(db: DatabaseSync, preserveLegacyAttributes = true): SchemaMigrationReport {
+  const report: SchemaMigrationReport = {
+    from_version: SCHEMA11_VERSION,
+    to_version: CURRENT_SCHEMA_VERSION,
+    category_count: Number((db.prepare("SELECT COUNT(*) AS count FROM category_definitions").get() as { count: number }).count),
+    rule_count: Number((db.prepare("SELECT COUNT(*) AS count FROM auto_rules").get() as { count: number }).count),
+    preserved_row_counts: migrationRowCounts(db),
+    issues: []
+  };
+  const version = Number((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version);
+  if (version !== SCHEMA11_VERSION) {
+    report.issues.push({
+      code: "legacy_schema_invalid",
+      message: `只支持从 schema ${SCHEMA11_VERSION} 迁移到 schema ${CURRENT_SCHEMA_VERSION}，当前版本为 ${version}`,
+      rule_ids: []
+    });
+    throw new SchemaMigrationError(report);
+  }
+  const shapeIssues = schema11Issues(db);
+  if (shapeIssues.length) {
+    report.issues = shapeIssues;
+    throw new SchemaMigrationError(report);
+  }
+  createTaxonomyTables(db);
+  seedTaxonomy(db, preserveLegacyAttributes);
+  db.exec(`PRAGMA user_version=${CURRENT_SCHEMA_VERSION}`);
+  const migratedRowCounts = migrationRowCounts(db);
+  const rowCountMismatch = Object.entries(report.preserved_row_counts).find(
+    ([table, count]) => migratedRowCounts[table] !== count
+  );
+  const foreignKeyViolations = db.prepare("PRAGMA foreign_key_check").all().length;
+  const integrity = String((db.prepare("PRAGMA integrity_check").get() as { integrity_check: string }).integrity_check);
+  if (rowCountMismatch || foreignKeyViolations !== 0 || integrity !== "ok") {
+    throw new AssetTrackError({
+      code: "database.migration_validation_failed",
+      status: 422,
+      params: {
+        rowCountMismatch: rowCountMismatch?.[0] ?? "",
+        foreignKeyViolations,
+        integrity
+      }
+    });
+  }
+  return report;
+}
+
+export function migrateSchema11To12(
+  db: DatabaseSync,
+  options: { preserveLegacyAttributes?: boolean } = {}
+): SchemaMigrationReport {
+  registerSchemaFunctions(db);
+  const version = Number((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version);
+  if (version !== SCHEMA11_VERSION) {
+    throw new SchemaMigrationError({
+      from_version: SCHEMA11_VERSION,
+      to_version: CURRENT_SCHEMA_VERSION,
+      category_count: 0,
+      rule_count: 0,
+      preserved_row_counts: {},
+      issues: [{
+        code: "legacy_schema_invalid",
+        message: `只支持从 schema ${SCHEMA11_VERSION} 迁移到 schema ${CURRENT_SCHEMA_VERSION}，当前版本为 ${version}`,
+        rule_ids: []
+      }]
+    });
+  }
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const report = migrateSchema11To12InTransaction(db, options.preserveLegacyAttributes ?? true);
+    db.exec("COMMIT");
+    return report;
+  } catch (error) {
+    try { db.exec("ROLLBACK"); } catch { /* preserve original error */ }
+    throw error;
+  }
+}
+
 function migrateSchema10To11InTransaction(db: DatabaseSync): SchemaMigrationReport {
   const report: SchemaMigrationReport = {
     from_version: SCHEMA10_VERSION,
-    to_version: CURRENT_SCHEMA_VERSION,
+    to_version: SCHEMA11_VERSION,
     category_count: 0,
     rule_count: 0,
     preserved_row_counts: migrationRowCounts(db),
@@ -1047,7 +1369,7 @@ function migrateSchema10To11InTransaction(db: DatabaseSync): SchemaMigrationRepo
     DROP TABLE auto_rules_schema10;
     CREATE UNIQUE INDEX idx_auto_rules_match
       ON auto_rules(transaction_type, match_scope, match_counterparty_key, match_product_key);
-    PRAGMA user_version=${CURRENT_SCHEMA_VERSION};
+    PRAGMA user_version=${SCHEMA11_VERSION};
   `);
 
   const migratedRuleCount = Number(
@@ -1090,13 +1412,13 @@ export function migrateSchema10To11(db: DatabaseSync): SchemaMigrationReport {
   if (version !== SCHEMA10_VERSION) {
     const report: SchemaMigrationReport = {
       from_version: SCHEMA10_VERSION,
-      to_version: CURRENT_SCHEMA_VERSION,
+      to_version: SCHEMA11_VERSION,
       category_count: 0,
       rule_count: 0,
       preserved_row_counts: {},
       issues: [{
         code: "legacy_schema_invalid",
-        message: `只支持从 schema ${SCHEMA10_VERSION} 迁移到 schema ${CURRENT_SCHEMA_VERSION}，当前版本为 ${version}`,
+        message: `只支持从 schema ${SCHEMA10_VERSION} 迁移到 schema ${SCHEMA11_VERSION}，当前版本为 ${version}`,
         rule_ids: []
       }]
     };
@@ -1133,7 +1455,10 @@ function combineMigrationReports(
   };
 }
 
-export function migrateSchemaToCurrent(db: DatabaseSync): SchemaMigrationReport {
+export function migrateSchemaToCurrent(
+  db: DatabaseSync,
+  options: { preserveLegacyAttributes?: boolean } = {}
+): SchemaMigrationReport {
   registerSchemaFunctions(db);
   const initialVersion = Number(
     (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version
@@ -1157,6 +1482,9 @@ export function migrateSchemaToCurrent(db: DatabaseSync): SchemaMigrationReport 
           break;
         case SCHEMA10_VERSION:
           reports.push(migrateSchema10To11InTransaction(db));
+          break;
+        case SCHEMA11_VERSION:
+          reports.push(migrateSchema11To12InTransaction(db, options.preserveLegacyAttributes ?? true));
           break;
         default: {
           const report: SchemaMigrationReport = {
@@ -1341,6 +1669,7 @@ export function createSchema(db: DatabaseSync): void {
       ON auto_rules(transaction_type, match_scope, match_counterparty_key, match_product_key);
     CREATE INDEX idx_operation_logs_created ON operation_logs(created_at, id);
   `);
+  createTaxonomyTables(db);
   const insert = db.prepare(`
     INSERT INTO category_definitions
       (category_key, name, transaction_type, necessity, pattern,
@@ -1371,5 +1700,6 @@ export function createSchema(db: DatabaseSync): void {
   `);
   account.run("cash-default", "默认现金账户", "cash", 0);
   account.run("investment-default", "默认理财账户", "investment", 1);
+  seedTaxonomy(db);
   db.exec(`PRAGMA user_version=${CURRENT_SCHEMA_VERSION}`);
 }

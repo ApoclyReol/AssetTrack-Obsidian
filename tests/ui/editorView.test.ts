@@ -371,8 +371,7 @@ describe("AssetTrackPlugin view-open database initialization", () => {
     plugin.updateRuntimeSettings();
 
     expect(updateRuntimeSettings).toHaveBeenCalledWith({
-      reconciliationTolerance: 10,
-      largeExpenseThreshold: 50
+      reconciliationTolerance: 10
     });
     expect(listener).toHaveBeenCalledTimes(1);
   });

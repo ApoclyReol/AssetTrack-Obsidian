@@ -50,6 +50,9 @@ const PREVIEW_OPERATION_TYPES = new Set<TransactionOperationRequest["operation_t
   "bulk-edit-counterparty",
   "bulk-edit-product",
   "bulk-edit-category",
+  "bulk-add-tag",
+  "bulk-remove-tag",
+  "bulk-replace-tags",
   "income-to-daifu",
   "daifu-to-income"
 ]);
@@ -157,6 +160,18 @@ export function validateTransactionOperationRequest(
     }
   }
 
+  if (request.operation_type === "bulk-add-tag" || request.operation_type === "bulk-remove-tag") {
+    if (!request.target_tag_key?.trim()) {
+      issues.push({ code: "transaction.tag.invalid_target", params: {} });
+    }
+  }
+  if (request.operation_type === "bulk-replace-tags") {
+    const tagKeys = request.target_tag_keys ?? [];
+    if (tagKeys.some((key) => !key.trim()) || tagKeys.length !== new Set(tagKeys.map((key) => key.trim())).size) {
+      issues.push({ code: "transaction.tag.invalid_target", params: {} });
+    }
+  }
+
   if (request.operation_type === "income-to-daifu") {
     const invalid = selected.rows.filter((row) => row.type !== "收入");
     if (invalid.length) {
@@ -192,7 +207,11 @@ function beforeFields(row: Transaction): Record<string, unknown> {
     source: row.source ?? "",
     category_key: row.category_key ?? null,
     category: row.category,
-    amount: row.amount
+    amount: row.amount,
+    // Tags are a set semantically.  Canonicalize their order in the preview
+    // payload so a database read or a later draft edit cannot turn the same
+    // tag set into a false preview conflict.
+    tag_keys: [...new Set(row.tag_keys ?? [])].sort()
   };
 }
 
@@ -296,6 +315,20 @@ export function previewTransactionOperation(
       changes.push(previewChange(row, next, request.month, changed ? "change" : "skip", undefined, undefined, rowIndex));
       return next;
     }
+    if (request.operation_type === "bulk-add-tag" || request.operation_type === "bulk-remove-tag" || request.operation_type === "bulk-replace-tags") {
+      const currentTags = [...new Set(row.tag_keys ?? [])];
+      const targetTag = request.target_tag_key?.trim() ?? "";
+      const replacementTags = [...new Set((request.target_tag_keys ?? []).map((key) => key.trim()).filter(Boolean))];
+      const nextTags = request.operation_type === "bulk-add-tag"
+        ? (targetTag && !currentTags.includes(targetTag) ? [...currentTags, targetTag] : currentTags)
+        : request.operation_type === "bulk-remove-tag"
+          ? currentTags.filter((key) => key !== targetTag)
+          : replacementTags;
+      const next = { ...row, tag_keys: nextTags };
+      const changed = JSON.stringify(currentTags) !== JSON.stringify(nextTags);
+      changes.push(previewChange(row, next, request.month, changed ? "change" : "skip", undefined, undefined, rowIndex));
+      return next;
+    }
     if (request.operation_type === "income-to-daifu" || request.operation_type === "daifu-to-income") {
       const expected = request.operation_type === "income-to-daifu" ? "收入" : "代付";
       const target = request.operation_type === "income-to-daifu" ? "代付" : "收入";
@@ -323,6 +356,10 @@ export function previewTransactionOperation(
       ? "product"
       : request.operation_type === "bulk-edit-category"
         ? "category"
+        : request.operation_type === "bulk-add-tag"
+          || request.operation_type === "bulk-remove-tag"
+          || request.operation_type === "bulk-replace-tags"
+          ? "tag_keys"
         : request.operation_type === "income-to-daifu"
           || request.operation_type === "daifu-to-income"
           ? "type"
@@ -360,6 +397,8 @@ export function previewTransactionOperation(
       include_protected: request.include_protected ?? false,
       target_value: request.target_value ?? null,
       target_category_key: request.target_category_key ?? null,
+      target_tag_key: request.target_tag_key ?? null,
+      target_tag_keys: request.target_tag_keys ?? [],
       target_type: request.target_type ?? null,
       selected_tab_counts: tabCounts,
       original_value_counts: originalValueCounts ?? null

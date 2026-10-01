@@ -232,7 +232,7 @@ export class TransactionOperationModal extends Modal {
 
   onOpen(): void {
     this.setTitle(t("流水操作预览", "Transaction operation preview"));
-    this.modalEl.addClass("asset-track-operation-preview-modal");
+    this.modalEl.addClass("asset-track-native-modal", "asset-track-operation-preview-modal");
     this.root = createRoot(this.contentEl);
     this.root.render(createElement(OperationPreviewContent, {
       preview: this.options.preview,

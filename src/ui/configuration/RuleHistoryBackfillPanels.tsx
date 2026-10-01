@@ -20,7 +20,6 @@ import type { HistorySort } from "./ruleHistoryTypes";
 
 export interface CategoryHistoryMigrationPanelProps {
   groups: HistoricalProductStat[];
-  sourceCategoryName: string;
   sort: HistorySort;
   targetCategoryKey: string;
   targetCategories: CategoryDefinition[];
@@ -35,12 +34,10 @@ export interface CategoryHistoryMigrationPanelProps {
   onTargetCategoryChange: (categoryKey: string) => void;
   onPreview: () => void;
   onApply: () => void;
-  onClose?: () => void;
 }
 
 export function CategoryHistoryMigrationPanel({
   groups,
-  sourceCategoryName,
   sort,
   targetCategoryKey,
   targetCategories,
@@ -54,19 +51,11 @@ export function CategoryHistoryMigrationPanel({
   onToggleGroup,
   onTargetCategoryChange,
   onPreview,
-  onApply,
-  onClose
+  onApply
 }: CategoryHistoryMigrationPanelProps) {
   const selectedGroupCount = groups.filter((group) => categoryGroupSelected(group)).length;
 
   return <div className="asset-track-rule-history-category-migration">
-    <div className="asset-track-rule-history-detail-header">
-      <div>
-        <h3>{t(`分类“${sourceCategoryName}”的历史商品`, `Historical items in “${sourceCategoryName}”`)}</h3>
-        <p>{t("直接选择需要迁移的商品，再指定统一的目标分类。不会按多数分类自动迁移。", "Select the items to migrate and choose one target category. No majority-based migration is automatic.")}</p>
-      </div>
-      {onClose && <button type="button" onClick={onClose}>{t("关闭", "Close")}</button>}
-    </div>
     <div className="asset-track-rule-history-category-actions">
       <button type="button" disabled={loading || !groups.length} onClick={onToggleAll}>
         {allCategoryGroupsSelected ? t("取消全选商品", "Deselect all items") : t("全选商品", "Select all items")}
@@ -113,7 +102,6 @@ export function CategoryHistoryMigrationPanel({
       <strong>{t("迁移预览", "Migration preview")}</strong>
       <p>{t(`将 ${preview.transaction_count} 条流水迁移到“${preview.target_category}”，涉及 ${preview.month_count} 个月份。`, `Move ${preview.transaction_count} transactions to “${preview.target_category}” across ${preview.month_count} months.`)}</p>
       <p>{t("原分类：", "Old categories: ")}{categorySummary(preview.old_categories)}</p>
-      <p>{preview.months.map((month) => `${month.month} revision ${month.revision} (${month.count})`).join(" · ")}</p>
       <button type="button" className="mod-cta" disabled={loading} onClick={onApply}>{t("确认写入", "Apply changes")}</button>
     </div>}
   </div>;

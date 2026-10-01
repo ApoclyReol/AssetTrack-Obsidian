@@ -1,5 +1,38 @@
 # Changelog
 
+## 2.0.0（发布候选）
+
+### 中文更新
+
+- 新增“分类属性”和“流水标签”：属性用于描述分类，标签用于给出账/入账流水添加跨分类标记；支持单条和批量编辑。
+- 分类、分析、规则、数据健康和商品总览页面重新整理，已有标签会在编辑时自动带出，分类名称、说明、收支和颜色可直接修改。
+- 加强草稿、规则、备份和恢复保护，修复手工修改后应用规则时的匹配和 revision 问题，并简化移除确认提示。
+- 导入字段未完成时会明确提示并阻止预览；表格操作列、配置保存和迁移提示进一步优化。
+
+### 升级提示
+
+- 本版本使用 schema 12。已有 schema 9/10/11 数据库，首次载入时可能需要升级。
+- 插件会先检测并显示迁移影响，不会静默修改数据库。请在“设置 → Asset Track”选择“保留并迁移”或“清除并迁移”；确认后才创建保护备份并执行升级，取消不会修改原文件。
+- 最低支持 Obsidian 1.13.0。
+
+### English updates
+
+- Added category attributes and transaction tags, with single-item and bulk editing for outgoing and incoming transactions.
+- Refined categories, analysis, rules, data health, and item overview. Existing tags are loaded when editing; category name, description, type, and color can be edited directly.
+- Strengthened draft, rule, backup, and restore protection; fixed rule matching and revision handling after manual edits; simplified removal confirmations.
+- Incomplete import mappings now explain what is missing and keep preview disabled. Table alignment, configuration saves, and migration prompts were refined.
+
+### Upgrade notice
+
+- This release uses schema 12. Existing schema 9/10/11 databases may require an upgrade on first load.
+- The plugin detects legacy databases and waits for confirmation; it does not silently modify them. In “Settings → Asset Track”, choose “Preserve and migrate” or “Clear and migrate”. A protection backup is created only after confirmation; canceling leaves the original file unchanged.
+- Minimum Obsidian version: 1.13.0.
+
+### Compatibility and validation
+
+- Backup format 9 contains the schema 12 taxonomy tables; the standard release contains only `main.js`, `manifest.json`, and `styles.css`.
+- Automated validation passed: typecheck, lint, 37 Vitest files / 314 tests, 50,000-transaction performance baseline, production build, release check, standard bundle smoke, and `git diff --check`.
+
 ## 1.9.1
 
 ### 中文更新

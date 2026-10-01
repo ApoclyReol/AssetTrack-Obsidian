@@ -32,7 +32,10 @@ hash、schema、行数和 SQLite `integrity_check`；验证通过后才创建恢
 
 ## 本地运行边界
 
-- 插件不联网、不含遥测，不启动 HTTP 服务、子进程或监听端口。
+- 插件默认不联网、不含遥测，不启动 HTTP 服务、子进程或监听端口。只有用户主动配置
+  并调用可选的 AI 分类建议时，才会通过 Obsidian `requestUrl` 访问用户指定的端点；
+  请求只携带用户选择的流水与必要分类定义，不上传整个 Vault，API Key 保存在
+  Obsidian SecretStorage 中。
 - CSV、XLSX 和 XLS 的读取、字段映射与解析全部在当前设备本地完成。
 - 插件不枚举 Vault 全部文件，也不读取或写入系统剪贴板。
 - `node:fs` 只用于用户明确选择且校验为 Vault 内部的数据目录、SQLite 文件、

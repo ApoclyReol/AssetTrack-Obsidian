@@ -15,6 +15,7 @@ import type {
 import type {
   MonthOverview
 } from "../types/month";
+import type { TransactionAnalysisDrilldown } from "../types/analysis";
 import {
   buildAnomalyDisplayRows,
   changeTone,
@@ -47,7 +48,7 @@ export function MonthlyAnalysis({
   month: string;
   state: LoadState<MonthOverview>;
   reconciliationTolerance: number;
-  onOpenTransactions?: () => void;
+  onOpenTransactions?: (drilldown?: TransactionAnalysisDrilldown) => void;
 }) {
   if (state.kind === "loading") return <Empty text={t(`正在加载 ${month} 月度分析…`, `Loading ${month} monthly analysis…`)} />;
   if (state.kind === "error") return <Empty text={state.message} />;
@@ -56,23 +57,9 @@ export function MonthlyAnalysis({
     <section className="asset-track-analysis-integrity is-warning" role="status">
       <h2>{t(`${month} 暂无完整分析数据`, `Incomplete analysis data for ${month}`)}</h2>
       <p>{t("分析需要已保存的流水和资产快照。请先回到流水页完成导入、整理并保存。", "Analysis needs saved transactions and asset snapshots. Return to the transactions page to import, organize, and save first.")}</p>
-      {onOpenTransactions && <button type="button" onClick={onOpenTransactions}>{t("返回当前月流水", "Return to this month's transactions")}</button>}
+      {onOpenTransactions && <button type="button" onClick={() => onOpenTransactions()}>{t("返回当前月流水", "Return to this month's transactions")}</button>}
     </section>
   );
-  const structure = overview.structure;
-  const necessity = structure
-    ? [
-        { name: t("必要", "Essential"), value: structure.necessary },
-        { name: t("可控", "Discretionary"), value: structure.controlled }
-      ].filter((item) => item.value > 0)
-    : [];
-  const pattern = structure
-    ? [
-        { name: t("周期", "Recurring"), value: structure.periodic },
-        { name: t("日常", "Everyday"), value: structure.daily },
-        { name: t("偶尔", "Occasional"), value: structure.occasional }
-      ].filter((item) => item.value > 0)
-    : [];
   const categories = overview.category_summary ?? [];
   const comparison = overview.category_comparison;
   const comparisonRows = comparison?.rows ?? [];
@@ -102,18 +89,11 @@ export function MonthlyAnalysis({
     || overview.reconciliation.theoretical.previous_cash === null;
   return (
     <>
-      <div className="asset-track-analysis-heading">
-        <div>
-          <h2>{t(`${month} 月度分析`, `${month} monthly analysis`)}</h2>
-          <span>{t("固定资产不参与资产、对账和消费计算", "Fixed assets are excluded from assets, reconciliation, and spending calculations")}</span>
-        </div>
-        {onOpenTransactions && <button type="button" onClick={onOpenTransactions}>{t("返回当前月流水", "Return to transactions")}</button>}
-      </div>
       {reconciliationIncomplete && (
         <section className="asset-track-analysis-integrity is-warning" role="status">
           <strong>{t("数据完整性提示", "Data integrity check")}</strong>
           <p>{t("当前月度指标可以查看，但缺少上月现金或资产快照，因此对账差额和部分环比结果不可比较。下一步请补充资产账户或创建前置月份。", "Monthly metrics are available, but the previous cash or asset snapshot is missing. Reconciliation and some comparisons cannot be computed. Complete asset accounts or create the preceding month next.")}</p>
-          {onOpenTransactions && <button type="button" onClick={onOpenTransactions}>{t("去补充资产和流水", "Complete assets and transactions")}</button>}
+          {onOpenTransactions && <button type="button" onClick={() => onOpenTransactions()}>{t("去补充资产和流水", "Complete assets and transactions")}</button>}
         </section>
       )}
       <Cards items={[
@@ -172,8 +152,8 @@ export function MonthlyAnalysis({
               account.deposit > 0 ? `${t("加仓", "Added")} ${money(account.deposit)}` : "",
               account.withdraw > 0 ? `${t("提现", "Withdrawn")} ${money(account.withdraw)}` : ""
             ].filter(Boolean).join("，");
-            return <div className="asset-track-investment-account" key={account.account_key}>
-              <h4>{account.name}</h4>
+            return <section className="asset-track-investment-account" key={account.account_key}>
+              <h3 className="asset-track-investment-account-heading">{account.name}</h3>
               <div className="asset-track-analysis-list">
                 <div><span>{t("本金", "Principal")}</span><strong>{money(account.principal)}{flow ? <small>（{flow}）</small> : null}</strong></div>
                 <div><span>{t("市值", "Market value")}</span><strong>{money(account.market_value)}</strong></div>
@@ -192,17 +172,29 @@ export function MonthlyAnalysis({
                   </strong>
                 </div>
               </div>
-            </div>;
+            </section>;
           }) : <Empty text={t("暂无理财账户。", "No investment accounts.")} />}
         </ChartPanel>
       </div>
       <div className="asset-track-analysis-grid is-three">
-        <PiePanel title={t("必要 / 可控", "Essential / discretionary")} data={necessity} />
-        <PiePanel title={t("周期 / 日常 / 偶尔", "Recurring / everyday / occasional")} data={pattern} />
         <PiePanel
           title={t("具体分类", "Categories")}
-          data={categories.map((row) => ({ name: row.category, value: row.amount }))}
+          data={categories.map((row) => ({ name: row.category, value: row.amount, months: [month] }))}
+          onOpenTransactions={onOpenTransactions}
         />
+        <MonthlyDimensionPanel title={t("属性", "Attributes")} rows={(overview.attribute_summary ?? []).map((row) => ({
+          name: `${row.group} · ${row.attribute}`,
+          amount: row.amount,
+          count: row.transaction_count,
+          drilldown: { dimension: "attribute", key: row.attribute_key, label: `${row.group} · ${row.attribute}`, months: [month] }
+        }))} onOpenTransactions={onOpenTransactions} />
+        <MonthlyDimensionPanel title={t("标签", "Tags")} rows={(overview.tag_summary ?? []).map((row) => ({
+          name: row.tag,
+          amount: row.amount,
+          count: row.transaction_count,
+          categories: row.categories,
+          drilldown: { dimension: "tag", key: row.tag_key, label: row.tag, months: [month] }
+        }))} note={t("同一笔流水可计入多个标签，标签金额不能相加。", "A transaction can appear in multiple tags; tag amounts must not be added together.")} onOpenTransactions={onOpenTransactions} />
       </div>
       <ChartPanel title={t(`分类与上月对比${comparison?.previous_month ? `（${comparison.previous_month}）` : ""}`, `Category comparison with previous month${comparison?.previous_month ? ` (${comparison.previous_month})` : ""}`)}>
         {comparison?.available && comparisonRows.length ? (
@@ -248,7 +240,8 @@ export function MonthlyAnalysis({
       </ChartPanel>
       <div className="asset-track-analysis-grid asset-track-anomaly-grid">
         <BigTicketPanel rows={overview.big_tickets ?? []} />
-        <AnomalyPanel anomalies={overview.anomalies} onOpenTransactions={onOpenTransactions} />
+        <AnomalyPanel anomalies={overview.anomalies} />
+        <IncomePanel rows={overview.income_transactions ?? []} />
       </div>
     </>
   );
@@ -256,10 +249,12 @@ export function MonthlyAnalysis({
 
 function PiePanel({
   title,
-  data
+  data,
+  onOpenTransactions
 }: {
   title: string;
-  data: Array<{ name: string; value: number }>;
+  data: Array<{ name: string; value: number; months?: string[] }>;
+  onOpenTransactions?: (drilldown?: TransactionAnalysisDrilldown) => void;
 }) {
   const coloredData = data.map((item, index) => ({
     ...item,
@@ -276,8 +271,57 @@ function PiePanel({
           </PieChart>
         </ResponsiveContainer>
       ) : <Empty text={t("暂无数据。", "No data.")} />}
+      {onOpenTransactions && data.length > 0 && <div className="asset-track-analysis-drilldown-list">
+        {data.map((item) => <button
+          key={item.name}
+          type="button"
+          className="asset-track-analysis-drilldown"
+          onClick={() => onOpenTransactions({
+            dimension: "category",
+            key: item.name,
+            label: item.name,
+            months: item.months
+          })}
+        >{t("查看", "View")} {item.name} {t("流水", "transactions")}</button>)}
+      </div>}
     </ChartPanel>
   );
+}
+
+function MonthlyDimensionPanel({
+  title,
+  rows,
+  note,
+  onOpenTransactions
+}: {
+  title: string;
+  rows: Array<{
+    name: string;
+    amount: number;
+    count: number;
+    categories?: Array<{ category: string; amount: number }>;
+    drilldown?: TransactionAnalysisDrilldown;
+  }>;
+  note?: string;
+  onOpenTransactions?: (drilldown?: TransactionAnalysisDrilldown) => void;
+}) {
+  return <ChartPanel title={title}>
+    {note && <p className="asset-track-rule-history-message" role="note">{note}</p>}
+    {rows.length ? <div className="asset-track-analysis-list">
+      {rows.map((row) => <div key={row.name}>
+        <span>{row.name}
+          {row.categories?.length ? <small>（{row.categories.map((category) => `${category.category} ${money(category.amount)}`).join("、")}）</small> : null}
+        </span>
+        <strong>{money(row.amount)} <small>（{row.count}）</small>
+          {onOpenTransactions && row.drilldown && <button
+            type="button"
+            className="asset-track-analysis-drilldown"
+            onClick={() => onOpenTransactions(row.drilldown)}
+          >{t("查看流水", "View transactions")}</button>}
+        </strong>
+      </div>)}
+    </div> : <Empty text={t("暂无数据。", "No data.")} />}
+  </ChartPanel>;
 }
 
 function BigTicketPanel({
@@ -309,11 +353,9 @@ function BigTicketPanel({
 }
 
 function AnomalyPanel({
-  anomalies,
-  onOpenTransactions
+  anomalies
 }: {
   anomalies: MonthOverview["anomalies"];
-  onOpenTransactions?: () => void;
 }) {
   const rows = buildAnomalyDisplayRows(anomalies);
   return (
@@ -325,7 +367,6 @@ function AnomalyPanel({
             <thead>
               <tr>
                 <StaticTableHeader label={t("分类", "Category")} />
-                <StaticTableHeader label={t("金额", "Amount")} className="asset-track-amount-column" />
                 <StaticTableHeader label={t("异常情况", "Anomaly")} />
               </tr>
             </thead>
@@ -333,16 +374,42 @@ function AnomalyPanel({
               {rows.map((row) => (
                 <tr key={row.category}>
                   <td>{row.category}</td>
-                  <td className="asset-track-amount-cell">{money(row.amount)}</td>
                   <td>{displayError(row.situation)}</td>
                 </tr>
               ))}
             </tbody>
             </table>
           </div>
-          {onOpenTransactions && <button type="button" onClick={onOpenTransactions}>{t("查看相关流水", "View related transactions")}</button>}
         </>
       ) : <Empty text={t("暂无达到阈值的异常变化。", "No anomalous changes reached the threshold.")} />}
     </ChartPanel>
   );
+}
+
+function IncomePanel({ rows }: { rows: NonNullable<MonthOverview["income_transactions"]> }) {
+  return <ChartPanel title={t("收入分析", "Income analysis")} className="asset-track-income-panel">
+    {rows.length ? <>
+      <div className="asset-track-table-scroll">
+        <table className="asset-track-analysis-income-table">
+          <thead><tr>
+            <StaticTableHeader label={t("日期", "Date")} className="asset-track-date-column" />
+            <StaticTableHeader label={t("商品", "Item")} />
+            <StaticTableHeader label={t("交易对手", "Counterparty")} />
+            <StaticTableHeader label={t("分类", "Category")} />
+            <StaticTableHeader label={t("金额", "Amount")} className="asset-track-amount-column" />
+          </tr></thead>
+          <tbody>{rows.map((row, index) => <tr key={row.id ?? `${row.transaction_date}-${index}`}>
+            <td className="asset-track-date-cell">{row.transaction_date}</td>
+            <td>{row.product || t("未填写商品", "Item not specified")}</td>
+            <td>{row.counterparty || t("未填写交易对手", "Counterparty not specified")}</td>
+            <td>{row.category || t("未分类", "Uncategorized")}</td>
+            <td className="asset-track-amount-cell">{money(row.amount)}</td>
+          </tr>)}</tbody>
+          <tfoot><tr><th scope="row" colSpan={4}>{t("合计", "Total")}</th>
+            <td className="asset-track-amount-cell">{money(rows.reduce((sum, row) => sum + row.amount, 0))}</td>
+          </tr></tfoot>
+        </table>
+      </div>
+    </> : <Empty text={t("本月没有收入流水。", "No income transactions this month.")} />}
+  </ChartPanel>;
 }

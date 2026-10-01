@@ -141,6 +141,9 @@ export function AssetTrackEditorToolbar({
               </button>
             ))}
           </nav>
+          <strong className="asset-track-context-title">{analysisMode === "annual"
+            ? t(`${analysisYear} 年度总览`, `${analysisYear} annual overview`)
+            : t(`${month} 月度分析`, `${month} monthly analysis`)}</strong>
           <div className="asset-track-context-period">
             {analysisMode === "annual" && analysisYears.length > 0 && (
               <select
@@ -232,7 +235,13 @@ export function AssetTrackEditorToolbar({
                 className={rulesMode === item ? "is-active" : ""}
                 onClick={() => void onSwitchRulesMode(item)}
               >
-                {{ health: t("数据健康", "Data health"), categories: t("分类定义", "Categories"), matching: t("匹配规则", "Matching rules"), products: t("商品总览", "Item overview") }[item]}
+                {{
+                  health: t("数据健康", "Data health"),
+                  categories: t("分类定义", "Category definitions"),
+                  matching: t("匹配规则", "Matching rules"),
+                  products: t("商品总览", "Item overview"),
+                  taxonomy: t("分类属性", "Category attributes")
+                }[item]}
               </button>
             ))}
           </nav>

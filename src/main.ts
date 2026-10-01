@@ -87,6 +87,7 @@ function restoreSettings(
 
 export type DatabaseState = "unconfigured" | "initializing" | "ready" | "error";
 export type DirectorySwitchMode = "migrate" | "load";
+export type LegacyAttributeMigrationChoice = "preserve" | "clear";
 
 function canLoadDatabase(inspection: DatabaseInspection): boolean {
   return inspection.valid
@@ -109,6 +110,7 @@ export default class AssetTrackPlugin extends Plugin {
   private readonly dataListeners = new Set<() => void>();
   private readonly draftRecoveries = new DraftRecoveryStore();
   private settingsWriteTail: Promise<void> = Promise.resolve();
+  private databaseOperationTail: Promise<unknown> = Promise.resolve();
   private viewOpenDatabaseInitialization: Promise<void> | null = null;
 
   async onload(): Promise<void> {
@@ -135,6 +137,13 @@ export default class AssetTrackPlugin extends Plugin {
     const previous = this.settingsWriteTail ?? Promise.resolve();
     const next = previous.then(operation, operation);
     this.settingsWriteTail = next.then(() => undefined, () => undefined);
+    return next;
+  }
+
+  private enqueueDatabaseOperation<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.databaseOperationTail ?? Promise.resolve();
+    const next = previous.then(operation, operation);
+    this.databaseOperationTail = next.then(() => undefined, () => undefined);
     return next;
   }
 
@@ -237,7 +246,26 @@ export default class AssetTrackPlugin extends Plugin {
     if (!this.viewOpenDatabaseInitialization) {
       if (this.databaseState === "initializing") return;
       const dataDirectory = this.settings.dataDirectory;
-      this.viewOpenDatabaseInitialization = this.loadDatabase(dataDirectory)
+      const inspectBeforeOpen = async (): Promise<void> => {
+        // View opening is automatic, so a legacy file must stop here and let
+        // the settings page show its read-only impact summary and choice.
+        // The app guard keeps lightweight test doubles on the old loader path.
+        if (this.app && typeof this.inspectDataDirectory === "function") {
+          const inspection = await this.inspectDataDirectory(dataDirectory);
+          if (inspection.migration_required) {
+            this.databaseState = "error";
+            this.databaseError = new AssetTrackError({
+              code: "database.migration_confirmation_required",
+              status: 409,
+              params: { ...(inspection.migration_impact ?? {}) }
+            });
+            await this.refreshViews();
+            return;
+          }
+        }
+        await this.loadDatabase(dataDirectory);
+      };
+      this.viewOpenDatabaseInitialization = inspectBeforeOpen()
         .catch((error) => {
           this.databaseState = "error";
           this.databaseError = error;
@@ -251,6 +279,10 @@ export default class AssetTrackPlugin extends Plugin {
   }
 
   async createDatabase(value: string): Promise<void> {
+    return this.enqueueDatabaseOperation(() => this.createDatabaseUnlocked(value));
+  }
+
+  private async createDatabaseUnlocked(value: string): Promise<void> {
     if (this.isDatabaseReady()) {
       throw new AssetTrackError({ code: "database.already_open", status: 409 });
     }
@@ -263,7 +295,17 @@ export default class AssetTrackPlugin extends Plugin {
     await this.activateInitialDatabase(dataDirectory, true);
   }
 
-  async loadDatabase(value: string): Promise<void> {
+  async loadDatabase(
+    value: string,
+    migrationChoice: LegacyAttributeMigrationChoice = "preserve"
+  ): Promise<void> {
+    return this.enqueueDatabaseOperation(() => this.loadDatabaseUnlocked(value, migrationChoice));
+  }
+
+  private async loadDatabaseUnlocked(
+    value: string,
+    migrationChoice: LegacyAttributeMigrationChoice = "preserve"
+  ): Promise<void> {
     const dataDirectory = normalizeDataDirectory(value);
     if (!dataDirectory) throw new AssetTrackError({ code: "workspace.data_directory_required", status: 422 });
     if (this.isDatabaseReady()) {
@@ -284,12 +326,53 @@ export default class AssetTrackPlugin extends Plugin {
       await this.refreshViews();
       throw error;
     }
-    await this.activateInitialDatabase(dataDirectory, false);
+    await this.activateInitialDatabase(dataDirectory, false, {
+      preserveLegacyAttributes: migrationChoice === "preserve"
+    });
   }
 
   async switchDataDirectory(
     value: string,
-    mode: DirectorySwitchMode
+    mode: DirectorySwitchMode,
+    migrationChoice: LegacyAttributeMigrationChoice = "preserve"
+  ): Promise<void> {
+    return this.enqueueDatabaseOperation(() => this.switchDataDirectoryUnlocked(value, mode, migrationChoice));
+  }
+
+  async backup(directory?: string): ReturnType<AssetTrackService["backup"]> {
+    return this.enqueueDatabaseOperation(() => {
+      if (!this.isDatabaseReady()) {
+        return Promise.reject(new AssetTrackError({ code: "database.not_ready", status: 409 }));
+      }
+      return this.api.backup(directory);
+    });
+  }
+
+  async validateBackup(path: string): ReturnType<AssetTrackService["validateBackup"]> {
+    return this.enqueueDatabaseOperation(() => {
+      if (!this.isDatabaseReady()) {
+        return Promise.reject(new AssetTrackError({ code: "database.not_ready", status: 409 }));
+      }
+      return this.api.validateBackup(path);
+    });
+  }
+
+  async restoreBackup(
+    path: string,
+    beforeCommit?: () => void
+  ): ReturnType<AssetTrackService["restoreBackup"]> {
+    return this.enqueueDatabaseOperation(() => {
+      if (!this.isDatabaseReady()) {
+        return Promise.reject(new AssetTrackError({ code: "database.not_ready", status: 409 }));
+      }
+      return this.api.restoreBackup(path, beforeCommit);
+    });
+  }
+
+  private async switchDataDirectoryUnlocked(
+    value: string,
+    mode: DirectorySwitchMode,
+    migrationChoice: LegacyAttributeMigrationChoice = "preserve"
   ): Promise<void> {
     const currentManager = this.databaseManager;
     if (!currentManager || !this.isDatabaseReady()) {
@@ -317,48 +400,65 @@ export default class AssetTrackPlugin extends Plugin {
           })
         : new AssetTrackError({ code: "database.file_missing", status: 404 });
     }
-    await this.createProtectionBackup("before-switch");
-    const targetPath = this.fullDatabasePath(dataDirectory);
-    if (mode === "migrate") {
-      mkdirSync(dirname(targetPath), { recursive: true });
-      const incomingPath = `${targetPath}.incoming`;
-      let incomingCreated = true;
-      try {
-        await currentManager.snapshot(incomingPath);
-        const copied = DatabaseManager.inspect(incomingPath);
-        if (!copied.valid) {
-          throw new AssetTrackError({
-            code: "database.migration_validation_failed",
-            status: 422,
-            params: { details: copied.error ?? "" }
-          });
+    const controlManager = currentManager as unknown as {
+      withExclusiveControl?: <T>(operation: () => Promise<T>) => Promise<T>;
+      snapshotWithinControlLock?: (targetPath: string) => Promise<void>;
+    };
+    const hasControlLock = Boolean(
+      controlManager.withExclusiveControl && controlManager.snapshotWithinControlLock
+    );
+    const runExclusive = controlManager.withExclusiveControl
+      ? (operation: () => Promise<void>) => controlManager.withExclusiveControl!(operation)
+      : (operation: () => Promise<void>) => operation();
+    await runExclusive(async () => {
+      await this.createProtectionBackup("before-switch", currentManager, hasControlLock);
+      const targetPath = this.fullDatabasePath(dataDirectory);
+      if (mode === "migrate") {
+        mkdirSync(dirname(targetPath), { recursive: true });
+        const incomingPath = `${targetPath}.incoming`;
+        let incomingCreated = true;
+        try {
+          if (hasControlLock) await controlManager.snapshotWithinControlLock!(incomingPath);
+          else await currentManager.snapshot(incomingPath);
+          const copied = DatabaseManager.inspect(incomingPath);
+          if (!copied.valid) {
+            throw new AssetTrackError({
+              code: "database.migration_validation_failed",
+              status: 422,
+              params: { details: copied.error ?? "" }
+            });
+          }
+          if (existsSync(targetPath)) {
+            throw new AssetTrackError({
+              code: "database.migration_target_exists",
+              status: 409
+            });
+          }
+          renameSync(incomingPath, targetPath);
+          incomingCreated = false;
+        } finally {
+          if (incomingCreated) rmSync(incomingPath, { force: true });
         }
-        if (existsSync(targetPath)) {
-          throw new AssetTrackError({
-            code: "database.migration_target_exists",
-            status: 409
-          });
-        }
-        renameSync(incomingPath, targetPath);
-        incomingCreated = false;
-      } finally {
-        if (incomingCreated) rmSync(incomingPath, { force: true });
       }
-    }
-    const next = this.buildService(dataDirectory);
-    try {
-      await next.api.meta();
-      await this.persistDataDirectorySettings(dataDirectory);
-    } catch (error) {
-      await next.api.close();
-      throw error;
-    }
-    const previousApi = this.api;
-    this.databaseManager = next.manager;
-    this.api = next.api;
-    this.databaseState = "ready";
-    this.databaseError = null;
-    await previousApi.close();
+      const next = this.buildService(dataDirectory, {
+        preserveLegacyAttributes: migrationChoice === "preserve"
+      });
+      try {
+        await next.api.meta();
+        await this.persistDataDirectorySettings(dataDirectory);
+        // Keep the old manager quiescent until the replacement has opened and
+        // its settings are durable. Publishing the new API after this close
+        // prevents a stale service from committing after the switch.
+        if (typeof currentManager.close === "function") currentManager.close();
+        this.databaseManager = next.manager;
+        this.api = next.api;
+        this.databaseState = "ready";
+        this.databaseError = null;
+      } catch (error) {
+        await next.api.close();
+        throw error;
+      }
+    });
     this.notifyDataChanged();
     await this.refreshViews();
   }
@@ -377,11 +477,15 @@ export default class AssetTrackPlugin extends Plugin {
     return adapter;
   }
 
-  private buildService(dataDirectory: string): ServiceContext {
+  private buildService(
+    dataDirectory: string,
+    migrationOptions: { preserveLegacyAttributes?: boolean } = {}
+  ): ServiceContext {
     const adapter = this.filesystemAdapter();
     const workspaceRoot = adapter.getFullPath(dataDirectory);
     assertPathInsideVault(adapter.getBasePath(), workspaceRoot);
     const manager = new DatabaseManager(this.fullDatabasePath(dataDirectory));
+    manager.setMigrationOptions(migrationOptions);
     return {
       manager,
       api: new LocalAssetTrackService(
@@ -395,7 +499,8 @@ export default class AssetTrackPlugin extends Plugin {
 
   private async activateInitialDatabase(
     dataDirectory: string,
-    createIfMissing: boolean
+    createIfMissing: boolean,
+    migrationOptions: { preserveLegacyAttributes?: boolean } = {}
   ): Promise<void> {
     this.databaseState = "initializing";
     this.databaseError = null;
@@ -412,7 +517,7 @@ export default class AssetTrackPlugin extends Plugin {
             })
           : new AssetTrackError({ code: "database.file_missing", status: 404 });
       }
-      next = this.buildService(dataDirectory);
+      next = this.buildService(dataDirectory, migrationOptions);
       await next.api.meta();
       await this.persistDataDirectorySettings(dataDirectory);
       this.databaseManager = next.manager;
@@ -435,8 +540,13 @@ export default class AssetTrackPlugin extends Plugin {
     return databasePath;
   }
 
-  private async createProtectionBackup(prefix: string): Promise<string> {
-    if (!this.databaseManager) throw new AssetTrackError({ code: "database.not_ready", status: 409 });
+  private async createProtectionBackup(
+    prefix: string,
+    manager?: DatabaseManager,
+    controlLockHeld = false
+  ): Promise<string> {
+    const activeManager = manager ?? this.databaseManager;
+    if (!activeManager) throw new AssetTrackError({ code: "database.not_ready", status: 409 });
     const adapter = this.filesystemAdapter();
     const directory = adapter.getFullPath(
       backupsVaultPath(this.settings.dataDirectory)
@@ -451,7 +561,8 @@ export default class AssetTrackPlugin extends Plugin {
       target = `${base}-${sequence}`;
       sequence += 1;
     }
-    await this.databaseManager.snapshot(target);
+    if (controlLockHeld) await activeManager.snapshotWithinControlLock(target);
+    else await activeManager.snapshot(target);
     const validation = DatabaseManager.inspect(target);
     if (!validation.valid) {
       throw new AssetTrackError({
@@ -472,8 +583,7 @@ export default class AssetTrackPlugin extends Plugin {
   updateRuntimeSettings(): void {
     if (!this.isDatabaseReady()) return;
     const settings: AnalysisRuntimeSettings = {
-      reconciliationTolerance: this.settings.reconciliationTolerance,
-      largeExpenseThreshold: this.settings.largeExpenseThreshold
+      reconciliationTolerance: this.settings.reconciliationTolerance
     };
     this.api.updateRuntimeSettings(settings);
     this.notifyDataChanged();
@@ -533,7 +643,12 @@ export default class AssetTrackPlugin extends Plugin {
   }
 
   async reopenDatabase(): Promise<void> {
-    await this.api.reopen();
+    await this.enqueueDatabaseOperation(async () => {
+      if (!this.isDatabaseReady()) {
+        throw new AssetTrackError({ code: "database.not_ready", status: 409 });
+      }
+      await this.api.reopen();
+    });
   }
 
   onunload(): void {

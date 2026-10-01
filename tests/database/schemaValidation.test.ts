@@ -106,6 +106,19 @@ function createSchema10Database(path: string): DatabaseSync {
   return db;
 }
 
+function createSchema11Database(path: string): DatabaseSync {
+  const db = createDatabase(path);
+  db.exec(`
+    DROP TABLE transaction_tags;
+    DROP TABLE category_attributes;
+    DROP TABLE tags;
+    DROP TABLE attribute_options;
+    DROP TABLE attribute_groups;
+    PRAGMA user_version=11;
+  `);
+  return db;
+}
+
 function insertLegacyRule(
   db: DatabaseSync,
   values: {
@@ -130,7 +143,7 @@ function insertLegacyRule(
 }
 
 describe("schema validation", () => {
-  it("accepts a complete schema 11 database", () => {
+  it("accepts a complete schema 12 database", () => {
     const path = databasePath();
     createDatabase(path).close();
     expect(DatabaseManager.inspect(path)).toMatchObject({
@@ -146,7 +159,7 @@ describe("schema validation", () => {
         foreign_key_violations: 0
       }
     });
-    expect(DatabaseManager.inspect(path).validation?.schema_version).toBe(11);
+    expect(DatabaseManager.inspect(path).validation?.schema_version).toBe(12);
   });
 
   it("marks a structurally valid schema 9 database for automatic migration without writing during inspection", () => {
@@ -294,7 +307,110 @@ describe("schema validation", () => {
     unchanged.close();
   });
 
-  it("migrates schema 10 to 11 and allows paid-on-behalf rules", () => {
+  it("blocks schema 10 migration when a rule targets an inactive category", () => {
+    const path = databasePath();
+    const db = createSchema10Database(path);
+    const food = categoryKey("餐饮基础");
+    db.prepare("UPDATE category_definitions SET is_active=0 WHERE category_key=?").run(food);
+    db.prepare(`
+      INSERT INTO auto_rules
+        (transaction_type,match_scope,counterparty,product,category_key,category)
+      VALUES (?,?,?,?,?,?)
+    `).run("支出", "product", "", "咖啡", food, "餐饮基础");
+    db.close();
+
+    const manager = new DatabaseManager(path);
+    let caught: unknown;
+    try {
+      manager.open();
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(SchemaMigrationError);
+    expect((caught as SchemaMigrationError).report.issues).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "invalid_category_reference" })])
+    );
+    const unchanged = new DatabaseSync(path, { readOnly: true });
+    expect((unchanged.prepare("PRAGMA user_version").get() as { user_version: number }).user_version)
+      .toBe(10);
+    unchanged.close();
+  });
+
+  it("reports schema 11 taxonomy impact without changing the legacy file", () => {
+    const path = databasePath();
+    const db = createSchema11Database(path);
+    db.prepare("UPDATE category_definitions SET is_big_ticket=1 WHERE category_key=?")
+      .run(categoryKey("大件大额"));
+    db.close();
+
+    expect(DatabaseManager.inspect(path)).toMatchObject({
+      migration_required: true,
+      migration_impact: {
+        from_schema: 11,
+        category_count: 15,
+        transaction_count: 0,
+        legacy_necessity_count: 15,
+        legacy_pattern_count: 15,
+        legacy_big_ticket_count: 1
+      }
+    });
+    const unchanged = new DatabaseSync(path, { readOnly: true });
+    expect((unchanged.prepare("PRAGMA user_version").get() as { user_version: number }).user_version)
+      .toBe(11);
+    expect(unchanged.prepare("SELECT name FROM sqlite_master WHERE name='tags'").get()).toBeUndefined();
+    unchanged.close();
+  });
+
+  it("supports explicit schema 11 migration choices for preserving or clearing attributes", () => {
+    const preservedPath = databasePath();
+    createSchema11Database(preservedPath).close();
+    const preserveManager = new DatabaseManager(preservedPath);
+    const preserveDb = preserveManager.open({ preserveLegacyAttributes: true });
+    expect(preserveDb.prepare("SELECT COUNT(*) AS count FROM category_attributes").get()).toMatchObject({ count: 31 });
+    expect(preserveDb.prepare("SELECT COUNT(*) AS count FROM tags").get()).toMatchObject({ count: 1 });
+    preserveManager.close();
+
+    const clearedPath = databasePath();
+    createSchema11Database(clearedPath).close();
+    const clearManager = new DatabaseManager(clearedPath);
+    const clearDb = clearManager.open({ preserveLegacyAttributes: false });
+    expect(clearDb.prepare("SELECT COUNT(*) AS count FROM category_attributes").get()).toMatchObject({ count: 0 });
+    expect(clearDb.prepare("SELECT COUNT(*) AS count FROM tags").get()).toMatchObject({ count: 1 });
+    expect(clearDb.prepare(
+      "SELECT COUNT(*) AS count FROM category_definitions WHERE necessity<>'不适用' OR pattern<>'不适用' OR is_big_ticket<>0"
+    ).get()).toMatchObject({ count: 0 });
+    clearManager.close();
+  });
+
+  it("preserves operation logs while schema 11 is upgraded", () => {
+    const path = databasePath();
+    const db = createSchema11Database(path);
+    db.prepare(`
+      INSERT INTO operation_logs
+        (operation_id,created_at,actor,operation_type,source_page,selection_json,
+         total_count,success_count,skipped_count,failure_count,details_json)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      "legacy-operation", "2026-01-31T00:00:00.000Z", "local-user",
+      "bulk-edit-product", "记录/流水", "[\"id:1\"]", 1, 1, 0, 0, "{\"product\":\"旧商品\"}"
+    );
+    db.close();
+
+    const manager = new DatabaseManager(path);
+    const migrated = manager.open();
+    expect(migrated.prepare(`
+      SELECT operation_id,operation_type,selection_json,details_json
+      FROM operation_logs
+    `).all()).toEqual([{
+      operation_id: "legacy-operation",
+      operation_type: "bulk-edit-product",
+      selection_json: "[\"id:1\"]",
+      details_json: "{\"product\":\"旧商品\"}"
+    }]);
+    manager.close();
+  });
+
+  it("migrates schema 10 through 12 and allows paid-on-behalf rules", () => {
     const path = databasePath();
     const db = createSchema10Database(path);
     const food = categoryKey("餐饮基础");
@@ -304,14 +420,14 @@ describe("schema validation", () => {
     const migrated = manager.open();
     expect(manager.validate(true).valid).toBe(true);
     expect((migrated.prepare("PRAGMA user_version").get() as { user_version: number }).user_version)
-      .toBe(11);
+      .toBe(12);
     expect(() => migrated.prepare(`
       INSERT INTO auto_rules
         (transaction_type,match_scope,counterparty,product,category_key,category)
       VALUES (?,?,?,?,?,?)
     `).run("代付", "product", "", "AA 回款", food, "餐饮基础")).not.toThrow();
     const backups = readdirSync(join(dirname(path), "backups"))
-      .filter((name) => name.startsWith("before-schema11-") && name.endsWith(".db"));
+      .filter((name) => name.startsWith("before-schema12-") && name.endsWith(".db"));
     expect(backups).toHaveLength(1);
     const protection = new DatabaseSync(join(dirname(path), "backups", backups[0]), {
       readOnly: true
@@ -322,7 +438,7 @@ describe("schema validation", () => {
     manager.close();
   });
 
-  it("migrates schema 9 through the version chain and retains a validated protection backup", () => {
+  it("migrates schema 9 through schema 12 and retains a validated protection backup", () => {
     const path = databasePath();
     const db = createSchema9Database(path);
     insertLegacyRule(db, { product: "  Coffee   Beans " });
@@ -361,7 +477,7 @@ describe("schema validation", () => {
     const migrated = manager.open();
     expect(manager.validate(true).valid).toBe(true);
     expect((migrated.prepare("PRAGMA user_version").get() as { user_version: number }).user_version)
-      .toBe(11);
+      .toBe(12);
     expect(migrated.prepare(
       "SELECT description FROM category_definitions WHERE category_key=?"
     ).get(categoryKey("餐饮基础"))).toMatchObject({ description: "" });
@@ -432,7 +548,7 @@ describe("schema validation", () => {
       revision: 4
     }]);
     const backups = readdirSync(join(dirname(path), "backups"))
-      .filter((name) => name.startsWith("before-schema11-") && name.endsWith(".db"));
+      .filter((name) => name.startsWith("before-schema12-") && name.endsWith(".db"));
     expect(backups).toHaveLength(1);
     const protection = new DatabaseSync(join(dirname(path), "backups", backups[0]), {
       readOnly: true

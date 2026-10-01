@@ -20,10 +20,25 @@ export const LEGACY_CATEGORY_ALIASES: Record<string, string> = {
   "生活品质提升": "生活品质"
 };
 
+export const TAXONOMY_ATTRIBUTE_KEYS = {
+  necessary: "attr-necessity-required",
+  controlled: "attr-necessity-controlled",
+  recurring: "attr-pattern-recurring",
+  daily: "attr-pattern-daily",
+  occasional: "attr-pattern-occasional",
+  bigTicket: "attr-scale-large"
+} as const;
+
+export function categoryHasAttribute(
+  category: CategoryDefinition | undefined,
+  key: string
+): boolean {
+  return Boolean(category?.attribute_keys?.includes(key));
+}
+
 export function calculateMonthly(
   rows: Transaction[],
-  categories: CategoryDefinition[],
-  largeExpenseThreshold = 1000
+  categories: CategoryDefinition[]
 ): MonthlyCalculation {
   const metadata = new Map(categories.map((row) => [row.name, row]));
   const metadataByKey = new Map(categories.map((row) => [row.category_key, row]));
@@ -49,16 +64,19 @@ export function calculateMonthly(
     if (category) {
       categorySummary[category] = (categorySummary[category] ?? 0) + signedAmount;
     }
-    if (definition?.is_big_ticket || amount >= largeExpenseThreshold) {
+    if (categoryHasAttribute(definition, TAXONOMY_ATTRIBUTE_KEYS.bigTicket)) {
       if (row.type === "支出") bigTickets.push({ product: row.product, amount, category });
     }
-    const necessity = definition?.necessity ?? "必要";
-    const pattern = definition?.pattern ?? "偶尔";
-    if (necessity === "必要") structure.necessary += signedAmount;
-    if (necessity === "可控") structure.controlled += signedAmount;
-    if (pattern === "周期") structure.periodic += signedAmount;
-    if (pattern === "日常") structure.daily += signedAmount;
-    if (pattern === "偶尔") structure.occasional += signedAmount;
+    const necessary = categoryHasAttribute(definition, TAXONOMY_ATTRIBUTE_KEYS.necessary);
+    const controlled = categoryHasAttribute(definition, TAXONOMY_ATTRIBUTE_KEYS.controlled);
+    const recurring = categoryHasAttribute(definition, TAXONOMY_ATTRIBUTE_KEYS.recurring);
+    const daily = categoryHasAttribute(definition, TAXONOMY_ATTRIBUTE_KEYS.daily);
+    const occasional = categoryHasAttribute(definition, TAXONOMY_ATTRIBUTE_KEYS.occasional);
+    if (necessary) structure.necessary += signedAmount;
+    if (controlled) structure.controlled += signedAmount;
+    if (recurring) structure.periodic += signedAmount;
+    if (daily) structure.daily += signedAmount;
+    if (occasional) structure.occasional += signedAmount;
   }
   const allOut = sum(rows.filter((row) => row.type === "支出").map((row) => row.amount));
   const daifu = sum(rows.filter((row) => row.type === "代付").map((row) => row.amount));

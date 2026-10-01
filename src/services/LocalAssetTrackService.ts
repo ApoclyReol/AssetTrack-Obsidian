@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AssetTrackRepository } from "../database/AssetTrackRepository";
 import { DatabaseManager } from "../database/DatabaseManager";
@@ -11,8 +11,13 @@ import {
 } from "../domain/transactionOperations";
 import type {
   AccountDefinition,
+  AttributeGroup,
+  AttributeOption,
+  TaxonomyRemoval,
   CategoryDefinition,
-  MonthCreationPolicy
+  MonthCreationPolicy,
+  TagDefinition,
+  TaxonomyWorkspace
 } from "../types/configuration";
 import type {
   AnnualOverview
@@ -77,8 +82,7 @@ export class LocalAssetTrackService implements AssetTrackService {
     private readonly workspaceRoot: string,
     private readonly pluginVersion: string,
     options: AnalysisRuntimeSettings = {
-      reconciliationTolerance: 100,
-      largeExpenseThreshold: 1000
+      reconciliationTolerance: 100
     }
   ) {
     this.repository = new AssetTrackRepository(manager, options);
@@ -261,6 +265,25 @@ export class LocalAssetTrackService implements AssetTrackService {
         });
       }
     }
+    if (request.operation_type === "bulk-add-tag"
+      || request.operation_type === "bulk-remove-tag"
+      || request.operation_type === "bulk-replace-tags") {
+      const taxonomy = this.repository.taxonomy();
+      const definitions = new Map(taxonomy.tags.map((tag) => [tag.tag_key, tag] as const));
+      const targetKeys = request.operation_type === "bulk-replace-tags"
+        ? [...new Set((request.target_tag_keys ?? []).map((key) => key.trim()).filter(Boolean))]
+        : [request.target_tag_key?.trim() ?? ""];
+      for (const targetKey of targetKeys) {
+        const definition = definitions.get(targetKey);
+        if (!definition || (request.operation_type !== "bulk-remove-tag" && !definition.is_active)) {
+          throw new AssetTrackError({
+            code: "transaction.tag.invalid_target",
+            status: 422,
+            params: { tag_key: targetKey }
+          });
+        }
+      }
+    }
     const normalizedRequest = request.operation_type === "bulk-edit-category"
       && request.target_category_key?.trim()
       ? {
@@ -441,6 +464,57 @@ export class LocalAssetTrackService implements AssetTrackService {
     return this.repository.categories();
   }
 
+  async taxonomy(): Promise<TaxonomyWorkspace> {
+    this.ready();
+    return this.repository.taxonomy();
+  }
+
+  async saveTaxonomy(
+    attributeRevision: number,
+    groups: AttributeGroup[],
+    options: AttributeOption[],
+    tagRevision: number,
+    tags: TagDefinition[],
+    removals: TaxonomyRemoval[] = []
+  ): Promise<TaxonomyWorkspace> {
+    this.ready();
+    if (removals.some((item) => item.expected_count > 0)) {
+      await this.createProtectionBackup("before-taxonomy-removal");
+    }
+    return this.repository.saveTaxonomy(
+      attributeRevision,
+      groups,
+      options,
+      tagRevision,
+      tags,
+      removals
+    );
+  }
+
+  async createProtectionBackup(prefix = "before-taxonomy-delete"): Promise<string> {
+    this.ready();
+    const directory = join(this.workspaceRoot, "backups");
+    mkdirSync(directory, { recursive: true });
+    const safePrefix = prefix.replace(/[^a-zA-Z0-9_-]/g, "-") || "before-taxonomy-delete";
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    let target = join(directory, `${safePrefix}-${stamp}.db`);
+    let sequence = 1;
+    while (existsSync(target)) {
+      target = join(directory, `${safePrefix}-${stamp}-${sequence}.db`);
+      sequence += 1;
+    }
+    await this.manager.snapshot(target);
+    const inspection = DatabaseManager.inspect(target);
+    if (!inspection.valid) {
+      throw new AssetTrackError({
+        code: "database.protection_backup_invalid",
+        status: 422,
+        params: { details: inspection.error ?? "" }
+      });
+    }
+    return target;
+  }
+
   async saveCategories(
     revision: number,
     rows: CategoryDefinition[],
@@ -545,8 +619,7 @@ export class LocalAssetTrackService implements AssetTrackService {
   }
 
   async close(): Promise<void> {
-    await this.manager.drain();
-    this.manager.close();
+    await this.manager.closeWhenIdle();
   }
 
   private sourceRevision(): string {

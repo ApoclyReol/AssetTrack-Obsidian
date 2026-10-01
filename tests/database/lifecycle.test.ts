@@ -36,11 +36,11 @@ it("inspects missing and damaged database files without creating or replacing th
     expect(readFileSync(missing)).toEqual(before);
   });
 
-it("creates and reopens a schema 11 database at a Chinese path", async () => {
+it("creates and reopens a schema 12 database at a Chinese path", async () => {
     const { manager, repository, path } = fixture();
     expect(manager.validate(true)).toMatchObject({
       valid: true,
-      schema_version: 11,
+      schema_version: 12,
       integrity_check: "ok"
     });
     expect(repository.accounts().rows.map((row) => row.account_key)).toEqual([
@@ -83,7 +83,7 @@ it("recovers a valid rollback and removes stale restore sidecars", () => {
     trackManager(reopened);
     expect(reopened.validate(true)).toMatchObject({
       valid: true,
-      schema_version: 11,
+      schema_version: 12,
       integrity_check: "ok"
     });
     expect(existsSync(rollback)).toBe(false);
@@ -120,7 +120,7 @@ it("keeps a valid incoming restore candidate when both target and rollback are d
 
     const reopened = new DatabaseManager(path);
     trackManager(reopened);
-    expect(reopened.validate(true)).toMatchObject({ valid: true, schema_version: 11 });
+    expect(reopened.validate(true)).toMatchObject({ valid: true, schema_version: 12 });
     expect(existsSync(incoming)).toBe(false);
     expect(existsSync(rollback)).toBe(false);
     reopened.close();

@@ -106,8 +106,38 @@ const CONFIG = [
       "business_tab", "selection_json", "total_count", "success_count",
       "skipped_count", "failure_count", "details_json"
     ]
+  },
+  {
+    name: "attribute_groups",
+    filename: "attribute_groups_backup.csv",
+    columns: ["group_key", "name", "selection_mode", "is_active", "sort_order"]
+  },
+  {
+    name: "attribute_options",
+    filename: "attribute_options_backup.csv",
+    columns: ["attribute_key", "group_key", "name", "is_active", "sort_order"]
+  },
+  {
+    name: "category_attributes",
+    filename: "category_attributes_backup.csv",
+    columns: ["category_key", "attribute_key"]
+  },
+  {
+    name: "tags",
+    filename: "tags_backup.csv",
+    columns: ["tag_key", "name", "description", "color", "is_active", "sort_order"]
+  },
+  {
+    name: "transaction_tags",
+    filename: "transaction_tags_backup.csv",
+    columns: ["transaction_id", "tag_key"]
   }
 ] as const;
+
+// Schema 11 complete backups contain the first ten tables. They remain
+// readable so a user can verify and restore an old backup through the same
+// protected migration path as an old live database.
+const LEGACY_CONFIG = CONFIG.slice(0, 10);
 
 type Manifest = BackupManifest;
 
@@ -146,6 +176,37 @@ function sha256Buffer(value: Buffer): string {
 
 function sha256File(path: string): string {
   return sha256Buffer(readFileSync(path));
+}
+
+interface FileFingerprint {
+  size: number;
+  mtimeMs: number;
+  sha256: string;
+}
+
+function fingerprintFile(path: string): FileFingerprint {
+  let stats;
+  try {
+    stats = statSync(path);
+  } catch (error) {
+    fail("backup.source_changed", { path, cause: String(error) });
+  }
+  if (!stats.isFile()) fail("backup.source_changed", { path });
+  try {
+    return {
+      size: stats.size,
+      mtimeMs: stats.mtimeMs,
+      sha256: sha256File(path)
+    };
+  } catch (error) {
+    fail("backup.source_changed", { path, cause: String(error) });
+  }
+}
+
+function sameFingerprint(left: FileFingerprint, right: FileFingerprint): boolean {
+  return left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.sha256 === right.sha256;
 }
 
 function csvCell(value: unknown): string {
@@ -290,48 +351,123 @@ function zipFiles(files: Array<{ name: string; data: Buffer }>): Buffer {
 }
 
 function unzip(buffer: Buffer, destination: string): void {
+  const ensureRange = (offset: number, length: number, code: string): void => {
+    if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length)
+      || offset < 0 || length < 0 || offset > buffer.length - length) {
+      fail(code);
+    }
+  };
   let endOffset = -1;
-  for (let index = buffer.length - 22; index >= Math.max(0, buffer.length - 65557); index -= 1) {
+  const endSearchStart = Math.max(0, buffer.length - 22);
+  const endSearchStop = Math.max(0, buffer.length - 65557);
+  for (let index = endSearchStart; index >= endSearchStop; index -= 1) {
+    if (index + 22 > buffer.length) continue;
     if (buffer.readUInt32LE(index) === 0x06054b50) {
       endOffset = index;
       break;
     }
   }
   if (endOffset < 0) fail("backup.zip.directory_invalid");
+  ensureRange(endOffset, 22, "backup.zip.directory_invalid");
+  const commentLength = buffer.readUInt16LE(endOffset + 20);
+  ensureRange(endOffset + 22, commentLength, "backup.zip.directory_invalid");
   const count = buffer.readUInt16LE(endOffset + 10);
+  if (buffer.readUInt16LE(endOffset + 8) !== count) {
+    fail("backup.zip.directory_invalid");
+  }
+  const centralSize = buffer.readUInt32LE(endOffset + 12);
   const centralOffset = buffer.readUInt32LE(endOffset + 16);
   if (count > MAX_MEMBERS) fail("backup.zip.member_limit", { limit: MAX_MEMBERS });
+  ensureRange(centralOffset, centralSize, "backup.zip.central_directory_invalid");
+  if (centralOffset + centralSize > endOffset) {
+    fail("backup.zip.central_directory_invalid");
+  }
   let cursor = centralOffset;
   let total = 0;
+  const names = new Set<string>();
+  const outputs = new Set<string>();
+  const localOffsets = new Set<number>();
   const root = resolve(destination);
   for (let index = 0; index < count; index += 1) {
+    ensureRange(cursor, 46, "backup.zip.central_directory_invalid");
     if (buffer.readUInt32LE(cursor) !== 0x02014b50) fail("backup.zip.central_directory_invalid");
     const method = buffer.readUInt16LE(cursor + 10);
+    const flags = buffer.readUInt16LE(cursor + 8);
+    const crc = buffer.readUInt32LE(cursor + 16);
     const compressedSize = buffer.readUInt32LE(cursor + 20);
     const size = buffer.readUInt32LE(cursor + 24);
     const nameLength = buffer.readUInt16LE(cursor + 28);
     const extraLength = buffer.readUInt16LE(cursor + 30);
     const commentLength = buffer.readUInt16LE(cursor + 32);
     const localOffset = buffer.readUInt32LE(cursor + 42);
+    const centralEntryLength = 46 + nameLength + extraLength + commentLength;
+    ensureRange(cursor, centralEntryLength, "backup.zip.central_directory_invalid");
     const name = buffer.subarray(cursor + 46, cursor + 46 + nameLength).toString("utf8");
-    total += size;
-    if (total > MAX_UNCOMPRESSED) fail("backup.zip.uncompressed_limit", { limit: MAX_UNCOMPRESSED });
-    const output = resolve(destination, name);
-    if (output !== root && !output.startsWith(`${root}${sep}`)) {
+    if (!name || name.endsWith("/") || names.has(name)) {
+      fail("backup.zip.duplicate_member", { path: name });
+    }
+    if (name.includes("\\") || name.includes("\0")) {
       fail("backup.zip.unsafe_path", { path: name });
     }
+    names.add(name);
+    if (size > MAX_UNCOMPRESSED - total) {
+      fail("backup.zip.uncompressed_limit", { limit: MAX_UNCOMPRESSED });
+    }
+    total += size;
+    const output = resolve(destination, name);
+    if (output === root || !output.startsWith(`${root}${sep}`) || outputs.has(output)) {
+      fail("backup.zip.unsafe_path", { path: name });
+    }
+    outputs.add(output);
+    ensureRange(localOffset, 30, "backup.zip.local_directory_invalid");
+    if (localOffsets.has(localOffset)) {
+      fail("backup.zip.duplicate_member", { path: name });
+    }
+    localOffsets.add(localOffset);
     if (buffer.readUInt32LE(localOffset) !== 0x04034b50) fail("backup.zip.local_directory_invalid");
+    const localFlags = buffer.readUInt16LE(localOffset + 6);
+    const localMethod = buffer.readUInt16LE(localOffset + 8);
+    const localCrc = buffer.readUInt32LE(localOffset + 14);
+    const localCompressedSize = buffer.readUInt32LE(localOffset + 18);
+    const localSize = buffer.readUInt32LE(localOffset + 22);
     const localNameLength = buffer.readUInt16LE(localOffset + 26);
     const localExtraLength = buffer.readUInt16LE(localOffset + 28);
     const start = localOffset + 30 + localNameLength + localExtraLength;
+    ensureRange(localOffset, 30 + localNameLength + localExtraLength, "backup.zip.local_directory_invalid");
+    if (localOffset >= centralOffset || start > centralOffset
+      || compressedSize > centralOffset - start) {
+      fail("backup.zip.local_data_invalid", { path: name });
+    }
+    ensureRange(start, compressedSize, "backup.zip.local_data_invalid");
+    const localName = buffer.subarray(
+      localOffset + 30,
+      localOffset + 30 + localNameLength
+    ).toString("utf8");
+    if (localName !== name || localMethod !== method) {
+      fail("backup.zip.local_directory_invalid", { path: name });
+    }
+    // Backups produced by zipFiles do not use data descriptors. Accepting a
+    // descriptor here would make the central directory the only trustworthy
+    // size source, so reject mismatched local metadata unless the flags
+    // explicitly opt into that format.
+    if ((flags & 0x0008) === 0
+      && (localFlags !== flags || localCrc !== crc
+        || localCompressedSize !== compressedSize || localSize !== size)) {
+      fail("backup.zip.local_directory_invalid", { path: name });
+    }
     const compressed = buffer.subarray(start, start + compressedSize);
     const data = method === 8
       ? inflateRawSync(compressed)
       : method === 0 ? compressed : fail("backup.zip.compression_unsupported", { method });
-    if (data.length !== size) fail("backup.zip.size_mismatch", { path: name });
+    if (data.length !== size || crc32(data) !== crc) {
+      fail("backup.zip.size_mismatch", { path: name });
+    }
     mkdirSync(dirname(output), { recursive: true });
     writeFileSync(output, data);
-    cursor += 46 + nameLength + extraLength + commentLength;
+    cursor += centralEntryLength;
+  }
+  if (cursor !== centralOffset + centralSize) {
+    fail("backup.zip.central_directory_invalid");
   }
 }
 
@@ -345,6 +481,40 @@ function validateSqlite(path: string): BackupValidation["schema"] {
     integrity_check: "ok",
     missing_tables: inspection.validation.missing_tables,
     schema_version: inspection.validation.schema_version
+  };
+}
+
+async function stageCurrentDatabase(path: string): Promise<{
+  path: string;
+  cleanup: () => void;
+}> {
+  const inspection = DatabaseManager.inspect(path);
+  if (inspection.valid) return { path, cleanup: () => undefined };
+  if (!inspection.migration_required) {
+    fail("backup.schema_invalid", { reason: inspection.error ?? null });
+  }
+  const temporary = mkdtempSync(join(tmpdir(), "asset-track-backup-migration-"));
+  const staged = join(temporary, DATABASE_NAME);
+  const runtime = loadSqliteModule();
+  const sourceDb = new runtime.DatabaseSync(path, { readOnly: true });
+  try {
+    await runtime.backup(sourceDb, staged);
+  } finally {
+    sourceDb.close();
+  }
+  const manager = new DatabaseManager(staged);
+  try {
+    manager.open({ preserveLegacyAttributes: true });
+    manager.close();
+    validateSqlite(staged);
+  } catch (error) {
+    manager.close();
+    rmSync(temporary, { recursive: true, force: true });
+    throw error;
+  }
+  return {
+    path: staged,
+    cleanup: () => rmSync(temporary, { recursive: true, force: true })
   };
 }
 
@@ -459,47 +629,49 @@ export class BackupService {
     path: string;
     validation: BackupValidation;
   }> {
-    const targetDirectory = resolve(directory);
-    mkdirSync(targetDirectory, { recursive: true });
-    const temporary = mkdtempSync(join(tmpdir(), "asset-track-backup-"));
-    try {
-      const snapshot = join(temporary, DATABASE_NAME);
-      await this.manager.snapshot(snapshot);
-      validateSqlite(snapshot);
-      const runtime = loadSqliteModule();
-      const db = new runtime.DatabaseSync(snapshot, { readOnly: true });
+    return this.manager.withExclusiveControl(async () => {
+      const targetDirectory = resolve(directory);
+      mkdirSync(targetDirectory, { recursive: true });
+      const temporary = mkdtempSync(join(tmpdir(), "asset-track-backup-"));
       try {
-        for (const config of CONFIG) {
-          writeTableCsv(db, config.name, config.columns, join(temporary, config.filename));
+        const snapshot = join(temporary, DATABASE_NAME);
+        await this.manager.snapshotWithinControlLock(snapshot);
+        validateSqlite(snapshot);
+        const runtime = loadSqliteModule();
+        const db = new runtime.DatabaseSync(snapshot, { readOnly: true });
+        try {
+          for (const config of CONFIG) {
+            writeTableCsv(db, config.name, config.columns, join(temporary, config.filename));
+          }
+          const manifest = this.buildManifest(temporary, db);
+          writeFileSync(
+            join(temporary, MANIFEST_NAME),
+            JSON.stringify(manifest, null, 2),
+            "utf8"
+          );
+        } finally {
+          db.close();
         }
-        const manifest = this.buildManifest(temporary, db);
-        writeFileSync(
-          join(temporary, MANIFEST_NAME),
-          JSON.stringify(manifest, null, 2),
-          "utf8"
-        );
+        const fileNames = [
+          DATABASE_NAME,
+          ...CONFIG.map((config) => config.filename),
+          MANIFEST_NAME
+        ].sort();
+        const output = uniquePath(join(
+          targetDirectory,
+          `asset-track-backup-${timestamp()}.zip`
+        ));
+        const pending = `${output}.tmp`;
+        writeFileSync(pending, zipFiles(fileNames.map((name) => ({
+          name,
+          data: readFileSync(join(temporary, name))
+        }))));
+        renameSync(pending, output);
+        return { path: output, validation: await this.validate(output) };
       } finally {
-        db.close();
+        rmSync(temporary, { recursive: true, force: true });
       }
-      const fileNames = [
-        DATABASE_NAME,
-        ...CONFIG.map((config) => config.filename),
-        MANIFEST_NAME
-      ].sort();
-      const output = uniquePath(join(
-        targetDirectory,
-        `asset-track-backup-${timestamp()}.zip`
-      ));
-      const pending = `${output}.tmp`;
-      writeFileSync(pending, zipFiles(fileNames.map((name) => ({
-        name,
-        data: readFileSync(join(temporary, name))
-      }))));
-      renameSync(pending, output);
-      return { path: output, validation: await this.validate(output) };
-    } finally {
-      rmSync(temporary, { recursive: true, force: true });
-    }
+    });
   }
 
   async validate(source: string): Promise<BackupValidation> {
@@ -509,7 +681,6 @@ export class BackupService {
       if (!existsSync(databasePath)) {
         fail("backup.database_missing");
       }
-      const schema = validateSqlite(databasePath);
       const manifestPath = join(materialized.root, MANIFEST_NAME);
       const hasManifest = existsSync(manifestPath);
       let manifest: Manifest | null = null;
@@ -519,28 +690,36 @@ export class BackupService {
         } catch (error) {
           fail("backup.manifest_unreadable", { cause: String(error) });
         }
-        if (manifest.format_version !== BACKUP_FORMAT_VERSION) {
+        if (manifest.format_version !== BACKUP_FORMAT_VERSION
+          && manifest.format_version !== 8) {
           fail("backup.format_unsupported", { version: manifest.format_version });
         }
-        if (JSON.stringify(manifest.required_tables) !== JSON.stringify(REQUIRED_TABLES)) {
-          fail("backup.manifest_tables_invalid");
-        }
-        if (
-          JSON.stringify(Object.keys(manifest.tables).sort())
-          !== JSON.stringify([...REQUIRED_TABLES].sort())
-        ) {
-          fail("backup.manifest_summary_invalid");
-        }
+      }
+      const sourceInspection = DatabaseManager.inspect(databasePath);
+      const legacyManifest = manifest?.format_version === 8
+        || (manifest === null && sourceInspection.migration_required === true);
+      const configs = legacyManifest ? LEGACY_CONFIG : CONFIG;
+      const expectedTables = legacyManifest
+        ? LEGACY_CONFIG.map((config) => config.name)
+        : [...REQUIRED_TABLES];
+      if (manifest && JSON.stringify(manifest.required_tables) !== JSON.stringify(expectedTables)) {
+        fail("backup.manifest_tables_invalid");
+      }
+      if (manifest && JSON.stringify(Object.keys(manifest.tables).sort())
+        !== JSON.stringify([...expectedTables].sort())) {
+        fail("backup.manifest_summary_invalid");
+      }
+      if (manifest) {
         const expectedFileNames = [
           DATABASE_NAME,
-          ...CONFIG.map((config) => config.filename)
+          ...configs.map((config) => config.filename)
         ].sort();
         if (JSON.stringify(Object.keys(manifest.files).sort()) !== JSON.stringify(expectedFileNames)) {
           fail("backup.manifest_files_invalid");
         }
-        for (const config of CONFIG) {
+        for (const config of configs) {
           const metadata = manifest.tables[config.name];
-          if (metadata.filename !== config.filename
+          if (!metadata || metadata.filename !== config.filename
             || JSON.stringify(metadata.columns) !== JSON.stringify(config.columns)) {
             fail("backup.manifest_summary_invalid");
           }
@@ -552,13 +731,15 @@ export class BackupService {
           }
         }
       }
+      const staged = await stageCurrentDatabase(databasePath);
+      const schema = validateSqlite(staged.path);
       const runtime = loadSqliteModule();
-      const db = new runtime.DatabaseSync(databasePath, { readOnly: true });
+      const sourceDb = new runtime.DatabaseSync(databasePath, { readOnly: true });
       try {
         const rowCounts: Record<string, number> = {};
-        for (const config of CONFIG) {
+        for (const config of configs) {
           const databaseCount = Number(
-            (db.prepare(`SELECT COUNT(*) AS count FROM ${config.name}`).get() as Row).count
+            (sourceDb.prepare(`SELECT COUNT(*) AS count FROM ${config.name}`).get() as Row).count
           );
           rowCounts[config.name] = databaseCount;
           if (!manifest) continue;
@@ -572,10 +753,10 @@ export class BackupService {
           if (csv.rows.length !== databaseCount || metadata.rows !== databaseCount) {
             fail("backup.row_count_mismatch", { table: config.name });
           }
-          const databaseDigest = tableDigest(db, config.name, config.columns);
+          const databaseDigest = tableDigest(sourceDb, config.name, config.columns);
           const csvDigest = canonicalDigest(
             csv.rows,
-            numericIndexes(db, config.name, config.columns)
+            numericIndexes(sourceDb, config.name, config.columns)
           );
           if (
             databaseDigest !== csvDigest
@@ -590,21 +771,26 @@ export class BackupService {
           schema,
           row_counts: rowCounts,
           manifest,
-          format_version: BACKUP_FORMAT_VERSION,
-          required_tables: [...REQUIRED_TABLES]
+          format_version: manifest?.format_version ?? BACKUP_FORMAT_VERSION,
+          required_tables: manifest?.required_tables ?? [...REQUIRED_TABLES]
         };
       } finally {
-        db.close();
+        sourceDb.close();
+        if (staged.path !== databasePath) staged.cleanup();
       }
     } finally {
       materialized.cleanup();
     }
   }
 
-  private async exportSafetyDirectory(directory: string): Promise<void> {
+  private async exportSafetyDirectory(directory: string, controlLockHeld = false): Promise<void> {
     mkdirSync(directory, { recursive: true });
     const databasePath = join(directory, DATABASE_NAME);
-    await this.manager.snapshot(databasePath);
+    if (controlLockHeld) {
+      await this.manager.snapshotWithinControlLock(databasePath);
+    } else {
+      await this.manager.snapshot(databasePath);
+    }
     const runtime = loadSqliteModule();
     const db = new runtime.DatabaseSync(databasePath, { readOnly: true });
     try {
@@ -625,28 +811,15 @@ export class BackupService {
     source: string,
     beforeCommit?: () => void
   ): Promise<BackupRestoreResult> {
-    const materialized = await materialize(source);
+    let materializedCleanup: (() => void) | null = null;
+    let validation: BackupValidation | null = null;
+    let incomingSource = "";
+    const target = this.manager.getPath();
+    const incoming = `${target}.incoming`;
+    const rollback = `${target}.rollback`;
+    let safety = "";
+    let hadTarget = false;
     try {
-      const validation = await this.validate(materialized.root);
-      const incomingSource = join(materialized.root, DATABASE_NAME);
-      const target = this.manager.getPath();
-      const incoming = `${target}.incoming`;
-      const rollback = `${target}.rollback`;
-      const safety = uniquePath(join(
-        dirname(target),
-        "backups",
-        `before-restore-${timestamp()}`
-      ));
-      rmSync(incoming, { force: true });
-      const runtime = loadSqliteModule();
-      const sourceDb = new runtime.DatabaseSync(incomingSource, { readOnly: true });
-      try {
-        await runtime.backup(sourceDb, incoming);
-      } finally {
-        sourceDb.close();
-      }
-      validateSqlite(incoming);
-      let hadTarget = false;
       await this.manager.withRestoreLock(async () => {
         let originalMoved = false;
         let candidateInstalled = false;
@@ -678,21 +851,58 @@ export class BackupService {
           throw error;
         }
       }, async () => {
+        // Materialize and validate the source while the control lock is held.
+        // Otherwise two restore calls can race while writing the shared
+        // `.incoming` candidate, and a backup/export can interleave between
+        // validation and installation.
+        const prepared = await materialize(source);
+        materializedCleanup = () => prepared.cleanup();
+        validation = await this.validate(prepared.root);
+        incomingSource = join(prepared.root, DATABASE_NAME);
+        rmSync(incoming, { force: true });
+        // A directory backup is user-controlled input and can change after
+        // validation. Capture an identity immediately before opening it and
+        // compare again after the SQLite backup finishes; a changed source is
+        // rejected instead of installing a mixed snapshot.
+        const sourceBeforeCopy = fingerprintFile(incomingSource);
+        const runtime = loadSqliteModule();
+        const sourceDb = new runtime.DatabaseSync(incomingSource, { readOnly: true });
+        try {
+          await runtime.backup(sourceDb, incoming);
+        } finally {
+          sourceDb.close();
+        }
+        if (!sameFingerprint(sourceBeforeCopy, fingerprintFile(incomingSource))) {
+          rmSync(incoming, { force: true });
+          fail("backup.source_changed", { path: incomingSource });
+        }
+        const incomingInspection = DatabaseManager.inspect(incoming);
+        if (!incomingInspection.valid && !incomingInspection.migration_required) {
+          fail("backup.schema_invalid", { reason: incomingInspection.error ?? null });
+        }
         // The safety snapshot must be created after the restore lock drains
         // the write queue. Otherwise a write committed between the snapshot
         // and the swap could be silently overwritten without being present in
         // either the restored database or the safety copy.
         hadTarget = existsSync(target);
-        if (hadTarget) await this.exportSafetyDirectory(safety);
+        if (hadTarget) {
+          safety = uniquePath(join(
+            dirname(target),
+            "backups",
+            `before-restore-${timestamp()}`
+          ));
+          await this.exportSafetyDirectory(safety, true);
+        }
       });
       return {
-        mode: validation.mode,
-        row_counts: validation.row_counts,
-        safety_snapshot: existsSync(safety) ? safety : null
+        mode: validation!.mode,
+        row_counts: validation!.row_counts,
+        safety_snapshot: safety && existsSync(safety) ? safety : null
       };
     } finally {
-      rmSync(`${this.manager.getPath()}.incoming`, { force: true });
-      materialized.cleanup();
+      rmSync(incoming, { force: true });
+      const cleanup = materializedCleanup as (() => void) | null;
+      if (cleanup) cleanup();
     }
   }
 }

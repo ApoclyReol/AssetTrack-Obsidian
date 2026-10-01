@@ -325,7 +325,7 @@ export function MatchingRulesTable({
           {t("保存规则", "Save rules")}
         </button>
         {readWindow && <span className="asset-track-section-scope-note" role="note">
-          {t(`统计范围：近 5 年（${readWindow.from_date} 至 ${readWindow.to_date}）`, `Statistics range: last 5 years (${readWindow.from_date} to ${readWindow.to_date})`)}
+          {t(`统计范围：近 1 年（${readWindow.from_date} 至 ${readWindow.to_date}）`, `Statistics range: last 1 year (${readWindow.from_date} to ${readWindow.to_date})`)}
         </span>}
       </>}
     </div>

@@ -27,14 +27,17 @@ import {
   type RuleReportReadContext
 } from "./ruleReportReadModel";
 import { ProductHistoryReadModel } from "./productHistoryReadModel";
+import { recentMonthReadWindow, PRODUCT_OVERVIEW_MONTHS } from "../domain/readWindows";
 
 export type RuleHistoryReadContext = RuleReportReadContext;
 
 export class RuleHistoryReadModel {
+  private readonly context: RuleHistoryReadContext;
   private readonly reports: RuleReportReadModel;
   private readonly products: ProductHistoryReadModel;
 
   constructor(context: RuleHistoryReadContext) {
+    this.context = context;
     this.reports = new RuleReportReadModel(context);
     this.products = new ProductHistoryReadModel(
       {
@@ -50,7 +53,14 @@ export class RuleHistoryReadModel {
   }
 
   savedRules(db: DatabaseSync): { revision: number; rows: SavedRule[] } {
-    const result = this.rules(db);
+    // Return the same one-year usage metrics that the matching-rules page
+    // displays after a save. History backfill and conflict checks continue to
+    // use the longer report window through normalizedRuleRows().
+    const result = this.reports.rules(db, recentMonthReadWindow(
+      "analysis",
+      this.context.savedMonths(db).sort().at(-1),
+      PRODUCT_OVERVIEW_MONTHS
+    ));
     return {
       revision: result.revision,
       rows: this.reports.rawRuleDefinitions(result.rows)
@@ -138,7 +148,10 @@ export class RuleHistoryReadModel {
     const threshold = Number.isFinite(requestedThreshold)
       ? Math.max(1, Math.min(10_000, Math.trunc(requestedThreshold)))
       : 2;
-    const productData = this.products.historyGroups(db, {});
+    // Matching-rule usage is an active configuration view. Keep its counts and
+    // latest month aligned with the product overview window instead of the
+    // longer system-check window used by data-health reports.
+    const productData = this.products.historyGroups(db, {}, "analysis");
     const ruleData = productData.ruleData;
     const categories = productData.categories;
     const history = productData.history;

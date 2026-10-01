@@ -301,14 +301,21 @@
 }
 
 .asset-track-context-toolbar-inline {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  flex-wrap: wrap;
   gap: 8px;
 }
 
 .asset-track-context-toolbar-inline .asset-track-context-period {
-  margin-left: auto;
+  justify-self: end;
+}
+
+.asset-track-context-title {
+  justify-self: center;
+  font-size: var(--font-ui-medium);
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .asset-track-context-row {
@@ -600,12 +607,23 @@
   flex: 1 1 auto;
 }
 
+.asset-track-transaction-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-normal) !important;
+}
+
 .asset-track-transaction-view-tabs {
   flex: 1 1 auto;
 }
 
 .asset-track-transaction-batch-actions {
   justify-content: flex-end;
+}
+
+.asset-track-transaction-toolbar-row--secondary .asset-track-transaction-batch-actions {
+  margin-left: auto;
 }
 
 .asset-track-transaction-batch-actions > [role="status"] {
@@ -618,10 +636,7 @@
 }
 
 .asset-track-transaction-toolbar-hint {
-  display: block;
-  color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
-  overflow-wrap: anywhere;
+  display: none;
 }
 
 .asset-track-transaction-tab-description,
@@ -1238,6 +1253,29 @@
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
+}
+
+.asset-track-import-field.is-incomplete .asset-track-import-field-control select,
+.asset-track-import-value-row.is-incomplete select,
+.asset-track-import-statuses.is-incomplete {
+  border-color: var(--color-red);
+  box-shadow:
+    0 0 0 2px rgba(var(--color-red-rgb), 0.24),
+    0 0 10px rgba(var(--color-red-rgb), 0.22);
+}
+
+.asset-track-import-field-control .asset-track-import-field-warning,
+.asset-track-import-value-label .asset-track-import-field-warning,
+.asset-track-import-statuses .asset-track-import-field-warning,
+.asset-track-import-validation-hint {
+  color: var(--color-red);
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.asset-track-import-validation-hint {
+  margin: 8px 0 0;
 }
 
 .asset-track-import-field-meta {
@@ -1999,9 +2037,10 @@
 
 .asset-track-category-table .asset-track-actions-heading,
 .asset-track-category-table .asset-track-actions-cell {
-  width: 128px;
-  padding-right: 3px;
-  padding-left: 3px;
+  width: 156px;
+  min-width: 156px;
+  padding-right: 6px;
+  padding-left: 6px;
 }
 
 .asset-track-category-table .asset-track-actions-heading .asset-track-sort-static {
@@ -2011,13 +2050,14 @@
 }
 
 .asset-track-category-actions {
-  flex-direction: column;
+  flex-direction: row;
   justify-content: center;
   gap: 4px;
 }
 
 .asset-track-category-table .asset-track-category-actions button {
-  width: 100%;
+  flex: 1 1 auto;
+  width: auto;
   min-width: 0;
   white-space: nowrap;
 }
@@ -2026,6 +2066,11 @@
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
+}
+
+.asset-track-category-table .asset-track-category-actions.asset-track-actions-cell > button {
+  width: auto;
+  flex: 1 1 auto;
 }
 
 .asset-track-summary-category-cell {
@@ -2124,7 +2169,7 @@
 
 .asset-track-summary-detail-table {
   width: 100%;
-  min-width: 0;
+  min-width: 820px;
   margin: 0;
   table-layout: fixed;
   background: var(--background-secondary);
@@ -2153,28 +2198,81 @@
   box-sizing: border-box;
 }
 
-.asset-track-summary-detail-content-heading,
-.asset-track-summary-detail-content {
-  display: grid;
-  min-width: 0;
-  grid-template-columns:
-    minmax(120px, 1.4fr)
-    minmax(88px, 0.65fr)
-    minmax(76px, 0.65fr)
-    minmax(104px, 1.3fr);
-  align-items: center;
-  gap: 4px;
+.asset-track-summary-detail-table--nested .asset-track-summary-detail-col-index {
+  width: 66px;
 }
 
-.asset-track-summary-detail-content-heading > span {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  text-align: center;
+.asset-track-summary-detail-table--nested .asset-track-summary-detail-col-date {
+  width: 112px;
 }
 
-.asset-track-summary-detail-content-cell {
+.asset-track-summary-detail-table--nested .asset-track-summary-detail-col-counterparty {
+  width: 16%;
+}
+
+.asset-track-summary-detail-table--nested .asset-track-summary-detail-col-product {
+  width: 16%;
+}
+
+.asset-track-summary-detail-table--nested .asset-track-summary-detail-col-tags {
+  width: 18%;
+}
+
+.asset-track-summary-detail-table--nested .asset-track-summary-detail-col-category {
+  width: 14%;
+}
+
+.asset-track-summary-detail-table--nested .asset-track-summary-detail-col-amount {
+  width: 96px;
+}
+
+.asset-track-summary-detail-table--nested .asset-track-summary-detail-col-actions {
+  width: 150px;
+}
+
+.asset-track-summary-detail-table--nested th:nth-child(1),
+.asset-track-summary-detail-table--nested td:nth-child(1) {
+  width: 66px;
+}
+
+.asset-track-summary-detail-table--nested th:nth-child(2),
+.asset-track-summary-detail-table--nested td:nth-child(2) {
+  width: 112px;
+}
+
+.asset-track-summary-detail-table--nested th:nth-child(3),
+.asset-track-summary-detail-table--nested td:nth-child(3) {
+  width: 16%;
+}
+
+.asset-track-summary-detail-table--nested th:nth-child(4),
+.asset-track-summary-detail-table--nested td:nth-child(4) {
+  width: 16%;
+}
+
+.asset-track-summary-detail-table--nested th:nth-child(5),
+.asset-track-summary-detail-table--nested td:nth-child(5) {
+  width: 18%;
+}
+
+.asset-track-summary-detail-table--nested th:nth-last-child(2),
+.asset-track-summary-detail-table--nested td:nth-last-child(2) {
+  width: 96px;
+}
+
+.asset-track-summary-detail-table--nested th:last-child,
+.asset-track-summary-detail-table--nested td:last-child {
+  width: 150px;
+}
+
+.asset-track-summary-detail-table--nested th,
+.asset-track-summary-detail-table--nested td {
   min-width: 0;
   vertical-align: middle;
+}
+
+.asset-track-summary-detail-table--nested .asset-track-summary-actions-cell {
+  min-width: 150px;
 }
 
 .asset-track-fixed-assets-table th:nth-child(1),
@@ -2235,12 +2333,12 @@
 
 .asset-track-category-table th:nth-child(1),
 .asset-track-category-table td:nth-child(1) {
-  width: 11%;
+  width: 16%;
 }
 
 .asset-track-category-table th:nth-child(2),
 .asset-track-category-table td:nth-child(2) {
-  width: 21%;
+  width: 28%;
 }
 
 .asset-track-category-table th:nth-child(3),
@@ -2252,22 +2350,12 @@
 
 .asset-track-category-table th:nth-child(5),
 .asset-track-category-table td:nth-child(5) {
-  width: 10%;
+  width: 24%;
 }
 
 .asset-track-category-table th:nth-child(6),
 .asset-track-category-table td:nth-child(6) {
-  width: 12%;
-}
-
-.asset-track-category-table th:nth-child(7),
-.asset-track-category-table td:nth-child(7) {
-  width: 9%;
-}
-
-.asset-track-category-table th:nth-child(8),
-.asset-track-category-table td:nth-child(8) {
-  width: 128px;
+  width: 156px;
 }
 
 .asset-track-rules-table th:last-child,
@@ -2295,7 +2383,7 @@
 }
 
 .asset-track-table-scroll.asset-track-rule-table-scroll {
-  overflow-x: hidden;
+  overflow-x: auto;
 }
 
 .asset-track-table-scroll.asset-track-rule-table-scroll table {
@@ -2305,7 +2393,7 @@
 }
 
 .asset-track-table-scroll.asset-track-rule-table-scroll .asset-track-category-table {
-  min-width: 0;
+  min-width: 760px;
   width: 100%;
   max-width: 100%;
 }
@@ -2818,8 +2906,8 @@
 }
 
 .asset-track-history-actions {
-  align-items: stretch;
-  flex-direction: column;
+  align-items: center;
+  flex-direction: row;
 }
 
 .asset-track-rule-history-selection-actions {
@@ -3045,7 +3133,7 @@
   max-height: 58vh;
   min-width: 0;
   margin-bottom: 12px;
-  overflow-x: hidden;
+  overflow-x: auto;
   overflow-y: auto;
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s);
@@ -3054,16 +3142,17 @@
 .asset-track-grid {
   display: grid;
   grid-template-columns:
-    minmax(0, 0.55fr)
-    minmax(0, 1fr)
-    minmax(0, 1.25fr)
-    minmax(0, 1fr)
-    minmax(0, 1.1fr)
-    minmax(64px, 0.85fr)
-    minmax(150px, 1.7fr);
+    minmax(64px, 0.55fr)
+    minmax(100px, 0.9fr)
+    minmax(110px, 1fr)
+    minmax(110px, 1fr)
+    minmax(120px, 1.1fr)
+    minmax(124px, 1.1fr)
+    minmax(88px, 0.8fr)
+    minmax(180px, 1.7fr);
   align-items: center;
   gap: 6px;
-  min-width: 0;
+  min-width: 980px;
   width: 100%;
   box-sizing: border-box;
   height: auto;
@@ -3074,64 +3163,387 @@
 
 .asset-track-grid--no-category {
   grid-template-columns:
-    minmax(0, 0.55fr)
-    minmax(0, 1fr)
-    minmax(0, 1.35fr)
-    minmax(0, 1.35fr)
-    minmax(64px, 0.85fr)
-    minmax(150px, 1.7fr);
+    minmax(64px, 0.55fr)
+    minmax(100px, 0.9fr)
+    minmax(110px, 1fr)
+    minmax(120px, 1.1fr)
+    minmax(124px, 1.1fr)
+    minmax(88px, 0.8fr)
+    minmax(180px, 1.7fr);
 }
 
 .asset-track-grid--outgoing {
   grid-template-columns:
-    minmax(0, 0.55fr)
-    minmax(0, 1fr)
-    minmax(0, 1.25fr)
-    minmax(0, 1fr)
-    minmax(0, 1.1fr)
-    minmax(64px, 0.85fr)
-    minmax(92px, 0.75fr);
+    minmax(64px, 0.55fr)
+    minmax(100px, 0.9fr)
+    minmax(110px, 1fr)
+    minmax(110px, 1fr)
+    minmax(120px, 1.1fr)
+    minmax(124px, 1.1fr)
+    minmax(88px, 0.8fr)
+    minmax(180px, 1.7fr);
 }
 
 .asset-track-grid--incoming {
   grid-template-columns:
-    minmax(0, 0.55fr)
-    minmax(0, 1fr)
-    minmax(0, 1.25fr)
-    minmax(0, 1fr)
-    minmax(0, 1.1fr)
-    minmax(64px, 0.85fr)
-    minmax(123px, 1.2fr);
+    minmax(64px, 0.55fr)
+    minmax(100px, 0.9fr)
+    minmax(110px, 1fr)
+    minmax(110px, 1fr)
+    minmax(120px, 1.1fr)
+    minmax(124px, 1.1fr)
+    minmax(88px, 0.8fr)
+    minmax(180px, 1.7fr);
 }
 
 .asset-track-grid--incoming.asset-track-grid--no-category {
   grid-template-columns:
-    minmax(0, 0.55fr)
-    minmax(0, 1fr)
-    minmax(0, 1.35fr)
-    minmax(0, 1.35fr)
-    minmax(64px, 0.85fr)
-    minmax(123px, 1.2fr);
+    minmax(64px, 0.55fr)
+    minmax(100px, 0.9fr)
+    minmax(110px, 1fr)
+    minmax(120px, 1.1fr)
+    minmax(124px, 1.1fr)
+    minmax(88px, 0.8fr)
+    minmax(180px, 1.7fr);
 }
 
 .asset-track-grid--outgoing.asset-track-grid--compact,
 .asset-track-grid--incoming.asset-track-grid--compact,
 .asset-track-grid--incoming.asset-track-grid--no-category.asset-track-grid--compact {
   grid-template-columns:
-    minmax(0, 0.55fr)
-    minmax(0, 1fr)
-    minmax(0, 2fr)
-    minmax(64px, 0.85fr)
-    minmax(92px, 0.75fr);
+    minmax(64px, 0.55fr)
+    minmax(100px, 0.9fr)
+    minmax(160px, 1.8fr)
+    minmax(124px, 1.1fr)
+    minmax(88px, 0.8fr)
+    minmax(180px, 1.7fr);
+}
+
+.asset-track-grid--compact {
+  min-width: 660px;
 }
 
 .asset-track-grid--investment {
   grid-template-columns:
-    minmax(0, 0.55fr)
-    minmax(0, 1.36fr)
-    minmax(0, 0.84fr)
-    minmax(64px, 0.85fr)
-    minmax(72px, 0.8fr);
+    minmax(64px, 0.55fr)
+    minmax(112px, 1.2fr)
+    minmax(150px, 1.1fr)
+    minmax(88px, 0.8fr)
+    minmax(180px, 1.7fr);
+  min-width: 620px;
+}
+
+.asset-track-taxonomy-panels {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.asset-track-taxonomy-panels > .asset-track-section {
+  min-width: 0;
+}
+
+.asset-track-taxonomy-table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.asset-track-taxonomy-table th:last-child,
+.asset-track-taxonomy-table td:last-child {
+  width: 156px;
+}
+
+.asset-track-taxonomy-table input:not([type="color"]) {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.asset-track-taxonomy-table input[type="color"] {
+  width: 32px;
+}
+
+.asset-track-taxonomy-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  min-width: 0;
+}
+
+.asset-track-taxonomy-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.asset-track-taxonomy-actions button {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.asset-track-taxonomy-empty-chip {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.asset-track-attribute-options-list {
+  display: grid;
+  max-height: 55vh;
+  gap: 6px;
+  margin: 12px 0;
+  overflow-y: auto;
+}
+
+.asset-track-attribute-option-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.asset-track-attribute-option-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.asset-track-taxonomy-chip {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 1px 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  background: var(--background-primary);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.asset-track-transaction-tag-cell {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 3px;
+}
+
+.asset-track-transaction-tag-cell .asset-track-taxonomy-chips {
+  flex: 1 1 auto;
+}
+
+.asset-track-transaction-tag-cell > button {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  font-size: var(--font-ui-smaller);
+}
+
+.asset-track-taxonomy-selection-list {
+  display: grid;
+  gap: 12px;
+  max-height: 55vh;
+  overflow-y: auto;
+}
+
+.asset-track-taxonomy-selection-list fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+}
+
+.asset-track-taxonomy-selection-list label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.asset-track-taxonomy-selection-empty {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.asset-track-analysis-transactions-modal .modal-content {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.asset-track-taxonomy-selection-modal,
+.asset-track-taxonomy-editor-modal,
+.asset-track-category-editor-modal {
+  width: min(720px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+}
+
+.asset-track-taxonomy-selection-modal .modal-content,
+.asset-track-taxonomy-editor-modal .modal-content,
+.asset-track-category-editor-modal .modal-content {
+  padding: 16px;
+  overflow-x: hidden;
+}
+
+.asset-track-taxonomy-selection-list,
+.asset-track-attribute-options-list {
+  padding: 5px;
+}
+
+.asset-track-taxonomy-editor-modal label,
+.asset-track-category-editor-fields label {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+.asset-track-taxonomy-editor-modal input:not([type="color"]),
+.asset-track-taxonomy-editor-modal select,
+.asset-track-category-editor-fields input:not([type="color"]),
+.asset-track-category-editor-fields select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.asset-track-taxonomy-editor-modal input:focus,
+.asset-track-taxonomy-editor-modal input:focus-visible,
+.asset-track-category-editor-modal input:focus,
+.asset-track-category-editor-modal input:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+  box-shadow: none;
+}
+
+.asset-track-inline-confirmation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--text-error);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+}
+
+.asset-track-inline-confirmation p { flex-basis: 100%; margin: 0; }
+.asset-track-inline-confirmation label { min-width: 180px; }
+
+.asset-track-editor-modal-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.asset-track-editor-modal-tabs .is-active {
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+}
+
+.asset-track-history-item-editor-modal .modal-content {
+  padding: 12px;
+  max-height: 78vh;
+  overflow-y: auto;
+}
+
+.asset-track-account-settings-hint {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.asset-track-category-table th:nth-child(1),
+.asset-track-category-table td:nth-child(1) { width: 16%; }
+.asset-track-category-table th:nth-child(2),
+.asset-track-category-table td:nth-child(2) { width: 26%; }
+.asset-track-category-table th:nth-child(3),
+.asset-track-category-table td:nth-child(3) { width: 9%; }
+.asset-track-category-table th:nth-child(4),
+.asset-track-category-table td:nth-child(4) { width: 7%; }
+.asset-track-category-table th:nth-child(5),
+.asset-track-category-table td:nth-child(5) { width: 31%; }
+.asset-track-category-table th:nth-child(6),
+.asset-track-category-table td:nth-child(6),
+.asset-track-category-table .asset-track-actions-heading,
+.asset-track-category-table .asset-track-actions-cell {
+  width: 11%;
+  min-width: 0;
+}
+
+.asset-track-category-color-swatch {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.asset-track-taxonomy-table th:last-child,
+.asset-track-taxonomy-table td:last-child { width: 78px; }
+.asset-track-history-group-table--health th:nth-child(6),
+.asset-track-history-group-table--health td:nth-child(6),
+.asset-track-history-group-table--overview th:nth-child(6),
+.asset-track-history-group-table--overview td:nth-child(6) { width: 11%; }
+.asset-track-history-group-table--overview th:nth-child(8),
+.asset-track-history-group-table--overview td:nth-child(8) { width: 92px; }
+
+.asset-track-grid--outgoing,
+.asset-track-grid--incoming {
+  grid-template-columns:
+    minmax(64px, 0.6fr) minmax(115px, 1fr) minmax(125px, 1.2fr)
+    minmax(116px, 1.1fr) minmax(135px, 1.35fr) minmax(125px, 1.15fr)
+    minmax(92px, 0.85fr) minmax(110px, 1fr) minmax(92px, 0.9fr);
+  min-width: 1080px;
+}
+
+.asset-track-grid--investment {
+  grid-template-columns: minmax(64px, 0.6fr) minmax(115px, 1fr)
+    minmax(155px, 1.4fr) minmax(95px, 0.85fr) minmax(90px, 0.8fr);
+  min-width: 620px;
+}
+
+.asset-track-transaction-rule-cell,
+.asset-track-summary-rule-cell { min-width: 0; text-align: center; }
+.asset-track-transaction-rule-cell button,
+.asset-track-summary-rule-cell button { max-width: 100%; white-space: nowrap; }
+.asset-track-transaction-actions { flex-wrap: nowrap; }
+
+.asset-track-summary-table--has-category .asset-track-summary-col-type { width: 10%; }
+.asset-track-summary-table--has-category .asset-track-summary-col-group { width: 28%; }
+.asset-track-summary-table--has-category .asset-track-summary-col-count { width: 10%; }
+.asset-track-summary-table--has-category .asset-track-summary-col-amount { width: 14%; }
+.asset-track-summary-table--has-category .asset-track-summary-col-category { width: 19%; }
+.asset-track-summary-table--has-category .asset-track-summary-col-rule { width: 10%; }
+.asset-track-summary-table--has-category .asset-track-summary-col-actions { width: 9%; }
+.asset-track-summary-table:not(.asset-track-summary-table--has-category) .asset-track-summary-col-type { width: 10%; }
+.asset-track-summary-table:not(.asset-track-summary-table--has-category) .asset-track-summary-col-group { width: 35%; }
+.asset-track-summary-table:not(.asset-track-summary-table--has-category) .asset-track-summary-col-count { width: 10%; }
+.asset-track-summary-table:not(.asset-track-summary-table--has-category) .asset-track-summary-col-amount { width: 17%; }
+.asset-track-summary-table:not(.asset-track-summary-table--has-category) .asset-track-summary-col-rule { width: 14%; }
+.asset-track-summary-table:not(.asset-track-summary-table--has-category) .asset-track-summary-col-actions { width: 14%; }
+
+.asset-track-summary-details { overflow-x: auto; }
+.asset-track-summary-detail-table--nested { min-width: 1060px; }
+.asset-track-summary-detail-table--nested .asset-track-summary-detail-col-tags,
+.asset-track-summary-detail-table--nested th:nth-child(5),
+.asset-track-summary-detail-table--nested td:nth-child(5) { width: 13%; }
+.asset-track-summary-detail-table--nested .asset-track-summary-detail-col-rule,
+.asset-track-summary-detail-table--nested th:nth-last-child(2),
+.asset-track-summary-detail-table--nested td:nth-last-child(2) { width: 115px; }
+.asset-track-summary-detail-table--nested .asset-track-summary-detail-col-actions,
+.asset-track-summary-detail-table--nested th:last-child,
+.asset-track-summary-detail-table--nested td:last-child { width: 112px; }
+
+.asset-track-analysis-income-table th:nth-child(2),
+.asset-track-analysis-income-table td:nth-child(2) { width: 26%; }
+.asset-track-analysis-income-table th:nth-child(3),
+.asset-track-analysis-income-table td:nth-child(3) { width: 100px; }
+
+@media (max-width: 1050px) {
+  .asset-track-taxonomy-panels {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .asset-track-investment-tables {
@@ -3476,6 +3888,39 @@
   gap: 8px;
 }
 
+.asset-track-month-inline-status {
+  display: inline-flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  justify-content: center;
+}
+
+.asset-track-month-status.is-compact {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.asset-track-month-status.is-compact .asset-track-month-status-state {
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.asset-track-month-status-compact-headline {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
 .asset-track-status.is-success {
   color: var(--color-green);
   background: rgba(var(--color-green-rgb), 0.12);
@@ -3660,7 +4105,7 @@
 }
 
 .asset-track-analysis-grid.asset-track-anomaly-grid {
-  grid-template-columns: minmax(220px, 0.7fr) minmax(440px, 1.3fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .asset-track-analysis-panel {
@@ -3705,6 +4150,31 @@
   gap: 20px;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.asset-track-analysis-list > div > strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.asset-track-analysis-drilldown-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.asset-track-analysis-drilldown {
+  padding: 2px 7px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.asset-track-analysis-drilldown:hover {
+  color: var(--text-normal);
 }
 
 .asset-track-big-ticket-panel table {
@@ -3836,6 +4306,376 @@
 
   .asset-track-filter-grid--overview .asset-track-rule-history-filter-search {
     grid-column: 1 / -1;
+  }
+
+}
+
+/* Shared native Modal rules.  All editor dialogs use the same outer spacing,
+ * focus treatment and action controls so a nested editor does not look like a
+ * different product surface. */
+.asset-track-native-modal {
+  min-width: 0;
+  max-width: min(860px, calc(100vw - 32px));
+  box-sizing: border-box;
+  overflow-x: hidden;
+}
+
+.asset-track-native-modal .modal-content {
+  width: 100%;
+  max-width: 100%;
+  max-height: min(82vh, 920px);
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 20px 22px 22px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.asset-track-native-modal button:not(:disabled) {
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    color 140ms ease,
+    transform 140ms ease;
+}
+
+.asset-track-native-modal button:not(:disabled):hover {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 1px var(--interactive-accent), 0 4px 12px rgba(var(--mono-rgb-100), 0.2);
+  transform: translateY(-1px);
+}
+
+.asset-track-native-modal button:focus-visible,
+.asset-track-native-modal input:focus-visible,
+.asset-track-native-modal select:focus-visible,
+.asset-track-native-modal textarea:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 3px;
+}
+
+.asset-track-native-modal button,
+.asset-track-native-modal input,
+.asset-track-native-modal select,
+.asset-track-native-modal textarea {
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+.asset-track-native-modal button {
+  min-height: var(--input-height);
+  white-space: nowrap;
+}
+
+.asset-track-native-modal input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
+.asset-track-native-modal select,
+.asset-track-native-modal textarea {
+  min-height: var(--input-height);
+  width: 100%;
+  min-width: 0;
+  padding: 5px 9px;
+  border: var(--input-border-width) solid var(--background-modifier-border);
+  border-radius: var(--input-radius);
+  background: var(--background-modifier-form-field);
+  color: var(--text-normal);
+  font: inherit;
+  line-height: 1.3;
+}
+
+.asset-track-native-modal input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]):focus,
+.asset-track-native-modal select:focus,
+.asset-track-native-modal textarea:focus {
+  border-color: var(--interactive-accent);
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 3px;
+  box-shadow: none;
+}
+
+.asset-track-native-modal .asset-track-rule-create-actions,
+.asset-track-native-modal .asset-track-product-rename-form,
+.asset-track-native-modal .asset-track-rule-history-selection-actions {
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.asset-track-editor-modal-tabs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.asset-track-editor-modal-tabs button {
+  min-height: 32px;
+  padding: 5px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+}
+
+.asset-track-editor-modal-tabs strong {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  padding: 5px 12px;
+  color: var(--text-normal);
+  font-weight: var(--font-semibold);
+}
+
+.asset-track-editor-modal-tabs .is-active {
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+  background: var(--interactive-accent);
+}
+
+.asset-track-editor-modal-section {
+  min-width: 0;
+  margin: 0 0 16px;
+  padding: 14px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+}
+
+.asset-track-category-editor-basic-grid,
+.asset-track-category-editor-core-grid {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+}
+
+.asset-track-category-editor-basic-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+}
+
+.asset-track-category-editor-core-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
+.asset-track-category-editor-basic-grid label,
+.asset-track-category-editor-core-grid label,
+.asset-track-category-attributes > label {
+  min-width: 0;
+  margin: 0;
+}
+
+.asset-track-category-attributes {
+  min-width: 0;
+  margin-top: 0;
+}
+
+.asset-track-category-attributes legend {
+  padding: 0 6px;
+  color: var(--text-normal);
+  font-weight: var(--font-semibold);
+}
+
+.asset-track-category-attributes > .asset-track-modal-subtitle {
+  margin: 0 0 12px;
+}
+
+.asset-track-category-attributes > fieldset {
+  min-width: 0;
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+}
+
+.asset-track-category-attributes > fieldset legend {
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+}
+
+.asset-track-category-attributes > fieldset label {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 14px 4px 0;
+  color: var(--text-normal);
+}
+
+.asset-track-category-attributes > fieldset input[type="radio"] {
+  flex: 0 0 auto;
+}
+
+.asset-track-inline-confirmation {
+  align-items: center;
+  margin: 0 0 16px;
+  padding: 12px;
+  border-color: var(--color-red);
+  background: rgba(var(--color-red-rgb), 0.08);
+}
+
+.asset-track-inline-confirmation button {
+  min-width: 120px;
+}
+
+.asset-track-history-item-editor {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+}
+
+.asset-track-history-item-editor-section {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+}
+
+.asset-track-history-item-editor-section > h3 {
+  margin: 0 0 12px;
+  color: var(--text-normal);
+  font-size: var(--font-ui-medium);
+}
+
+.asset-track-attribute-options-list {
+  max-height: 50vh;
+  margin: 12px 0;
+  padding: 8px;
+  overflow: auto;
+  scroll-padding: 8px;
+}
+
+.asset-track-attribute-option-row {
+  min-width: 0;
+  padding: 3px 4px;
+}
+
+.asset-track-attribute-option-row input:focus-visible {
+  outline-offset: 4px;
+}
+
+.asset-track-category-table,
+.asset-track-taxonomy-table,
+.asset-track-history-group-table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.asset-track-category-table th,
+.asset-track-category-table td,
+.asset-track-taxonomy-table th,
+.asset-track-taxonomy-table td,
+.asset-track-history-group-table th,
+.asset-track-history-group-table td {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  vertical-align: middle;
+}
+
+.asset-track-category-table th:nth-child(1),
+.asset-track-category-table td:nth-child(1) { width: 17%; }
+.asset-track-category-table th:nth-child(2),
+.asset-track-category-table td:nth-child(2) { width: 23%; }
+.asset-track-category-table th:nth-child(3),
+.asset-track-category-table td:nth-child(3) { width: 9%; }
+.asset-track-category-table th:nth-child(4),
+.asset-track-category-table td:nth-child(4) { width: 8%; }
+.asset-track-category-table th:nth-child(5),
+.asset-track-category-table td:nth-child(5) { width: auto; }
+.asset-track-category-table th:nth-child(6),
+.asset-track-category-table td:nth-child(6) {
+  width: 108px;
+  min-width: 108px;
+}
+
+.asset-track-category-actions,
+.asset-track-taxonomy-actions,
+.asset-track-history-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.asset-track-category-actions button,
+.asset-track-taxonomy-actions button,
+.asset-track-history-actions button {
+  width: 100%;
+  min-width: 88px;
+  max-width: 100%;
+}
+
+.asset-track-taxonomy-table th:last-child,
+.asset-track-taxonomy-table td:last-child {
+  width: 104px;
+  min-width: 104px;
+}
+
+.asset-track-history-group-table--health th:nth-child(6),
+.asset-track-history-group-table--health td:nth-child(6),
+.asset-track-history-group-table--overview th:nth-child(6),
+.asset-track-history-group-table--overview td:nth-child(6) {
+  width: 10%;
+}
+
+.asset-track-history-group-table--health th:nth-child(8),
+.asset-track-history-group-table--health td:nth-child(8),
+.asset-track-history-group-table--overview th:nth-child(8),
+.asset-track-history-group-table--overview td:nth-child(8) {
+  width: 112px;
+  min-width: 112px;
+}
+
+.asset-track-investment-account-heading {
+  margin: 0 0 8px;
+  color: var(--text-normal);
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-semibold);
+}
+
+.asset-track-analysis-income-table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.asset-track-analysis-income-table th,
+.asset-track-analysis-income-table td {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.asset-track-analysis-income-table th:nth-child(1),
+.asset-track-analysis-income-table td:nth-child(1) { width: 112px; }
+.asset-track-analysis-income-table th:nth-child(2),
+.asset-track-analysis-income-table td:nth-child(2) { width: 24%; }
+.asset-track-analysis-income-table th:nth-child(3),
+.asset-track-analysis-income-table td:nth-child(3) { width: 22%; }
+.asset-track-analysis-income-table th:nth-child(4),
+.asset-track-analysis-income-table td:nth-child(4) { width: auto; }
+.asset-track-analysis-income-table th:nth-child(5),
+.asset-track-analysis-income-table td:nth-child(5) { width: 112px; }
+
+@media (max-width: 680px) {
+  .asset-track-native-modal .modal-content {
+    padding: 16px;
+  }
+
+  .asset-track-category-editor-basic-grid,
+  .asset-track-category-editor-core-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .asset-track-category-table th:nth-child(6),
+  .asset-track-category-table td:nth-child(6),
+  .asset-track-taxonomy-table th:last-child,
+  .asset-track-taxonomy-table td:last-child {
+    width: 94px;
+    min-width: 94px;
   }
 
 }
@@ -4379,5 +5219,188 @@
 
   .asset-track-operation-retry-actions strong {
     flex: 1 0 100%;
+  }
+}
+
+/* Keep the final native dialog spacing after the legacy operation-dialog
+ * rules below the shared editor styles. */
+.asset-track-native-modal .modal-content {
+  padding: 20px 22px 22px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.asset-track-operation-preview-modal .modal-content,
+.asset-track-batch-edit-modal .modal-content {
+  max-height: min(82vh, 920px);
+  padding: 20px 22px 22px;
+}
+
+.asset-track-native-modal button:not(:disabled) {
+  cursor: pointer;
+}
+
+.asset-track-native-modal input:focus,
+.asset-track-native-modal input:focus-visible,
+.asset-track-native-modal select:focus,
+.asset-track-native-modal select:focus-visible,
+.asset-track-native-modal textarea:focus,
+.asset-track-native-modal textarea:focus-visible {
+  outline-offset: 3px;
+}
+
+/* The earlier table rules carry higher specificity; repeat the final action
+ * sizing here so every operation column keeps one predictable button lane. */
+.asset-track-category-table .asset-track-category-actions button,
+.asset-track-category-table .asset-track-category-actions.asset-track-actions-cell > button,
+.asset-track-taxonomy-table .asset-track-taxonomy-actions button {
+  flex: 0 1 100%;
+  width: 100%;
+  min-width: 88px;
+  max-width: 100%;
+}
+
+.asset-track-native-modal .asset-track-sort-static[aria-disabled="true"] {
+  cursor: default;
+  transition: none;
+}
+
+.asset-track-native-modal .asset-track-sort-static[aria-disabled="true"]:hover {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+/* Keep action buttons inside wrappers so the table cells retain table layout. */
+.asset-track-history-actions,
+.asset-track-taxonomy-actions {
+  width: 100%;
+  min-height: var(--input-height);
+  flex-direction: row;
+}
+
+.asset-track-history-action-cell,
+.asset-track-taxonomy-action-cell {
+  width: 112px;
+  min-width: 112px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.asset-track-history-action-cell > .asset-track-history-actions,
+.asset-track-taxonomy-action-cell > .asset-track-taxonomy-actions {
+  display: flex;
+  width: 100%;
+  min-height: var(--input-height);
+  box-sizing: border-box;
+  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+
+.asset-track-history-action-cell > .asset-track-history-actions > button,
+.asset-track-taxonomy-action-cell > .asset-track-taxonomy-actions > button {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  align-self: center;
+  margin: 0;
+}
+
+.asset-track-history-category-scroll {
+  max-height: min(42vh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.asset-track-history-category-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--background-secondary);
+}
+
+.asset-track-taxonomy-inline-input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.asset-track-taxonomy-color-input {
+  width: 34px;
+  min-width: 34px;
+  height: 30px;
+  padding: 2px;
+}
+
+.asset-track-taxonomy-value-list {
+  align-items: center;
+}
+
+.asset-track-taxonomy-panels--split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.asset-track-taxonomy-panels--split > .asset-track-section {
+  min-width: 0;
+  margin: 0;
+}
+
+.asset-track-taxonomy-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.asset-track-taxonomy-panel-actions > button {
+  flex: 1 1 160px;
+}
+
+.asset-track-taxonomy-value-button {
+  cursor: pointer;
+}
+
+.asset-track-taxonomy-add-button {
+  display: inline-flex;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.asset-track-taxonomy-editor-section {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+}
+
+.asset-track-taxonomy-editor-section p {
+  margin: 0;
+}
+
+.asset-track-taxonomy-panel-hidden {
+  display: none;
+}
+
+/* This override must remain after the final split declaration so narrow
+ * configuration panes stack instead of being forced back into two columns. */
+@media (max-width: 1050px) {
+  .asset-track-taxonomy-panels--split {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

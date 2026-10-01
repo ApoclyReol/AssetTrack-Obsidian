@@ -9,7 +9,7 @@
 映射为 `zh-CN`，其他语言映射为英文。React 界面、Setting API、Modal、Notice
 和 Electron 原生文件选择器共享该入口。
 
-国际化只存在于展示层。Repository、Service、schema 11、CSV 解析和财务计算继续
+国际化只存在于展示层。Repository、Service、schema 12、CSV 解析和财务计算继续
 使用既有规范值；中文业务枚举在展示时映射为英文标签，提交时仍写入原规范值。
 结构化错误不再依赖中文原文反向匹配英文；跨层错误统一使用
 `AssetTrackError { code, status, params, cause }`，由 `i18n.ts` 根据错误码和参数渲染。
@@ -23,7 +23,7 @@ flowchart LR
     B --> C["AssetTrackService"]
     C --> D["TypeScript Repository"]
     D --> E["node:sqlite"]
-    E --> F["SQLite schema 11"]
+    E --> F["SQLite schema 12"]
 ```
 
 | 层 | 当前职责 |
@@ -77,12 +77,13 @@ SQLite 事实模型中并由同一 Service/Repository 管理；不得引入云�
 schema 10 在流水和自动规则中分别保存 `counterparty`；加仓、提现流水还通过可空的
 `transactions.account_key` 指向理财账户。流水字段继续作为事实和统计数据使用，规则可以按交易对手、
 商品或二者组合做精确匹配。schema 11 放宽 `auto_rules.transaction_type`，允许代付拥有独立规则，
-但代付规则仍使用支出分类。schema 9/10 到最新 schema 的迁移在 `DatabaseManager`
-初始化阶段按版本链完成，迁移前建立 `before-schema11-*.db` 保护备份；完整迁移链在同一事务中提交。
-规则作用域无法判定、重复、分类无效或数据库完整性校验失败时
-阻止完成，不静默选择。
+但代付规则仍使用支出分类。schema 9/10/11 到 schema 12 的迁移在 `DatabaseManager`
+初始化阶段按版本链完成；设置页先展示只读影响，确认后建立 `before-schema12-*.db` 保护备份，完整迁移链在同一事务中提交。
+规则作用域无法判定、重复、分类无效或数据库完整性校验失败时阻止完成，不静默选择。
+schema 9/10/11 首次打开先由设置页只读展示迁移影响，用户选择保留、清除或取消；取消不会打开原文件。
+schema 12 的五张 taxonomy 表由同一 Repository 事务和外键维护。
 
-当前版本起，`data.json` 还保存基础货币、金额格式、平账容差、大额支出阈值和可选 AI
+当前版本起，`data.json` 还保存基础货币、金额格式、平账容差和可选 AI
 地址、模型、超时；当前维护线不改变这些设置的兼容方式。
 API Key 只通过 Obsidian SecretStorage 保存；AI 仅发送选中可分类流水的最小字段，结果必须
 预览、确认后才进入草稿。这些字段只影响展示、分析和可选建议，不改变财务事实。月度草稿使用 reducer
@@ -97,6 +98,16 @@ API Key 只通过 Obsidian SecretStorage 保存；AI 仅发送选中可分类流
 
 当前结构边界：
 
+### schema 12 taxonomy 边界
+
+`attribute_groups`、`attribute_options`、`category_attributes`、`tags` 和
+`transaction_tags` 是同一个 SQLite 事实层中的独立表。`AssetTrackRepository` 读取规范化的
+属性和标签工作区；`saveCategories()` 只在调用方明确提供 `attribute_keys` 时同步分类属性，
+`saveTaxonomy()` 使用属性和标签各自的 revision，并对被引用定义执行停用优先策略。
+月份读写用关联查询还原 `Transaction.tag_keys`，标签批量操作先由领域预览生成 before/after，
+再由月度事务校验当前 revision、目标标签和操作日志。分析读模型分别计算分类、属性和标签，
+标签视角允许重叠但不参与资产、对账或收支总额计算。
+
 - `AssetTrackEditorApp.tsx` 只负责 ItemView 路由、页面导航和唯一的切换确认入口；顶部主栏、
   分析/记录/配置上下文导航和月度摘要位于 `AssetTrackEditorToolbar.tsx`，空月份引导位于
   `AssetTrackEditorEmptyState.tsx`；
@@ -106,8 +117,8 @@ API Key 只通过 Obsidian SecretStorage 保存；AI 仅发送选中可分类流
   `src/ui/month/`；
 - `RulesEditor.tsx` 负责配置页渲染和保存动作；`useConfigurationSession.ts` 统一分类/规则 dirty
   状态，`useRuleAnalytics.ts` 负责健康统计。分类定义表与匹配规则表位于 `src/ui/rules/`，
-  数据健康、商品总览和历史迁移位于 `src/ui/configuration/`；`RuleHistoryModal.tsx` 只承担
-  原生 Modal 生命周期，不提供旧 Service 协议兼容别名；
+  数据健康、商品总览和历史迁移位于 `src/ui/configuration/`；`RuleHistoryModal.tsx` 只保留
+  旧内部导入的 re-export，不再提供第二个 Modal 外壳或关闭入口；
 - `AssetTrackRepository.ts` 是 application-facing persistence facade、读取协调和事务上下文入口。月份、账户余额、流水、借款、
   固定资产写入位于 `monthWriteRepository.ts`，分类、规则和账户定义写入位于
   `configurationWriteRepository.ts`，分类回溯和商品名称统一位于 `historyWriteRepository.ts`。
@@ -118,7 +129,7 @@ API Key 只通过 Obsidian SecretStorage 保存；AI 仅发送选中可分类流
   `DatabaseSync` 上下文；每个公开写入入口仍只调用一次 `manager.write()`，不得让子模块自行打开连接。
   UI 通过 `MonthEditorPort`、`ConfigurationEditorPort`、`AnalysisPort`、`BackupPort` 等能力端口依赖
   Service；`LocalAssetTrackService` 仍是唯一运行时实现，不拆成多个 Service 类；
-- 设置页修改平账容差或大额阈值后，由插件通过 `updateRuntimeSettings()` 同步到已打开的
+- 设置页修改平账容差后，由插件通过 `updateRuntimeSettings()` 同步到已打开的
   Repository/分析模型，并触发数据版本失效，避免设置显示与分析结果使用不同口径；
 - 全局类型按 CSV、transactions、month、configuration、rules、history、analysis 和 operations
   分域位于 `src/types/`，不保留一个重新导出全部类型的公共 barrel；
@@ -144,17 +155,17 @@ API Key 只通过 Obsidian SecretStorage 保存；AI 仅发送选中可分类流
   `BEGIN IMMEDIATE` 事务。
 - 规则工作台首次使用 `ruleWorkspaceShell()` 读取轻量分类、规则和 revision，数据健康和商品总览按需要
   通过 `productHistoryIndex()` / `productOverview()` 加载；筛选变化后自动刷新，具体商品详情才打开回溯 Modal。
-  商品总览默认使用最近 1 年，日期筛选可显式扩大业务分析窗口；数据健康和规则统计固定使用最近 5 年，并把
+  商品总览默认使用最近 1 年，日期筛选可显式扩大业务分析窗口；数据健康固定使用最近 5 年，匹配规则使用最近 1 年，并把
   实际起止日期返回给界面。月度分析固定使用当前月加前 11 个月，年度分析先计算月份索引，再按需读取年度、
   滚动和趋势抽样月份。
   商品编辑通过 `previewProductRename()` / `applyProductRename()` 只修改商品字段；分类迁移 Modal 直接使用
   `category_key` 加载源分类商品。所有商品历史只读取 `month_status.status='saved'` 的月份。
   规则解析共享 `src/domain/rules.ts`，按收支类型和交易对手/商品三种作用域索引；旧 `RuleConflictGroup` 和规则覆盖诊断仍由
   后端诊断模型派生，不新增数据库结构，也不作为当前数据健康页面的独立问题类型。
-- 分析、规则统计和历史统计只读取分类定义元数据；分类定义页的“流水数”由近 5 年统计结果回填，分类删除引用校验仍在写事务内按分类键检查全历史。
+- 分析、规则统计和历史统计只读取分类定义元数据；匹配规则页的流水数和最近月份由近 1 年统计结果回填，分类删除引用校验仍在写事务内按分类键检查全历史。
   分析页容器在进入年度/月度页面或切换年份、月份时预加载结果，并按“数据版本 + 查询键”复用内存缓存；年度、月度子组件只负责渲染，不再自行发起查询。月度分析使用独立的轻量 `monthOverview()` 读取入口，完整 `getMonth()` 只用于月度编辑器。
   年度、月度和规则工作台结果在当前数据版本内按查询键复用内存缓存，保存或收到数据变更事件后整体失效。
-- 年度/月份分析在一次读取中共享已经限定范围的流水快照：月度计算、异常变化和上一月对比不重复读取同一批流水；年度成本审计、周期消费和年度行也复用同一快照。商品总览、数据健康和规则统计在同一次历史查询中复用流水，再交给规则报告计算覆盖状态。
+- 年度/月份分析在一次读取中共享已经限定范围的流水快照：月度计算、异常变化和上一月对比不重复读取同一批流水；年度成本审计、周期消费和年度行也复用同一快照。商品总览、数据健康和规则统计在各自的历史窗口内复用流水，再交给规则报告计算覆盖状态。
 - 商品历史把规则审计与实际覆盖范围分开派生：`rule_coverage` 为 `none`、`partial` 或
   `full`，同时记录命中、未命中和冲突次数。无规则筛选包含完全未覆盖和部分覆盖商品；
   建议只使用未覆盖且没有未解决规则冲突的流水计算。

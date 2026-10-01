@@ -7,9 +7,11 @@ import {
   type CSSProperties,
   type ReactNode
 } from "react";
+import { Notice, type App } from "obsidian";
 import type {
   CategoryDefinition,
-  InvestmentAccountBalance
+  InvestmentAccountBalance,
+  TagDefinition
 } from "../types/configuration";
 import type {
   FixedAsset
@@ -52,7 +54,66 @@ import {
   transactionInputValue,
   type SortState
 } from "./editorPrimitives";
-import { ActionTableHeader } from "./TablePrimitives";
+import { ActionTableHeader, StaticTableHeader } from "./TablePrimitives";
+import { TaxonomySelectionModal } from "./TaxonomySelectionModal";
+
+function TransactionTags({ app, label, selected, tags, loadTags, onApply }: {
+  app?: App;
+  label: string;
+  selected: string[];
+  tags: TagDefinition[];
+  loadTags?: () => Promise<TagDefinition[]>;
+  onApply: (keys: string[]) => void;
+}) {
+  const modalLabel = label?.trim() || t("编辑标签", "Edit tags");
+  const [resolvedTags, setResolvedTags] = useState(tags);
+  useEffect(() => setResolvedTags(tags), [tags]);
+  const openEditor = async (): Promise<void> => {
+    if (!app) return;
+    let available = tags;
+    // The month snapshot is already the data rendered beside this button. Use
+    // it first so an editor opened during a taxonomy refresh never replaces a
+    // known tag list with a transient empty response.
+    if (resolvedTags.length > 0) available = resolvedTags;
+    if (!available.length && loadTags) {
+      try {
+        // The editor port is intentionally capability-based and can be
+        // supplied by older/live hosts while a plugin is being reloaded. Do
+        // not let an unexpected undefined/non-array response erase the
+        // already loaded month snapshot and turn the selector into an empty
+        // modal.
+        const loaded = await loadTags();
+        if (Array.isArray(loaded)) {
+          available = loaded;
+          setResolvedTags(loaded);
+        }
+      } catch (error) {
+        if (!available.length) {
+          new Notice(t(`无法加载流水标签：${displayError(error)}`, `Unable to load transaction tags: ${displayError(error)}`));
+          return;
+        }
+      }
+    }
+    new TaxonomySelectionModal({
+      app, kind: "tags", title: modalLabel, selected,
+      tags: available, onApply
+    }).open();
+  };
+  return <div className="asset-track-transaction-tag-cell">
+    <div className="asset-track-taxonomy-chips">{selected.map((key) => {
+      const tagName = resolvedTags.find((tag) => tag.tag_key === key)?.name;
+      const labelText = typeof tagName === "string" ? tagName.trim() : "";
+      const keyText = typeof key === "string" ? key.trim() : "";
+      return <span className="asset-track-taxonomy-chip" key={key}>{labelText || keyText || t("未命名标签", "Unnamed tag")}</span>;
+    })}</div>
+    <button type="button" disabled={!app} aria-label={modalLabel} onClick={() => void openEditor()}>{t("编辑", "Edit")}</button>
+  </div>;
+}
+
+function transactionTagTitle(product: unknown): string {
+  const name = scalarText(product).trim() || t("未命名商品", "Unnamed item");
+  return t(`编辑 ${name} 的标签`, `Edit tags for ${name}`);
+}
 
 const CATEGORY_TRANSACTION_TYPES = new Set(["支出", "收入"]);
 const SUMMARY_SORT_FIELDS = new Set([
@@ -215,7 +276,24 @@ function SummaryColumnGroup({ hasCategory }: { hasCategory: boolean }) {
       <col className="asset-track-summary-col-count" />
       <col className="asset-track-summary-col-amount" />
       {hasCategory && <col className="asset-track-summary-col-category" />}
+      <col className="asset-track-summary-col-rule" />
       <col className="asset-track-summary-col-actions" />
+    </colgroup>
+  );
+}
+
+function SummaryDetailColumnGroup({ hasCategory, showTags }: { hasCategory: boolean; showTags: boolean }) {
+  return (
+    <colgroup>
+      <col className="asset-track-summary-detail-col-index" />
+      <col className="asset-track-summary-detail-col-date" />
+      <col className="asset-track-summary-detail-col-counterparty" />
+      <col className="asset-track-summary-detail-col-product" />
+      {showTags && <col className="asset-track-summary-detail-col-tags" />}
+      {hasCategory && <col className="asset-track-summary-detail-col-category" />}
+      <col className="asset-track-summary-detail-col-amount" />
+      <col className="asset-track-summary-detail-col-rule" />
+      <col className="asset-track-summary-detail-col-actions" />
     </colgroup>
   );
 }
@@ -235,10 +313,13 @@ export type TransactionRowActions = (
 ) => ReactNode;
 
 export interface TransactionTableProps {
+  app?: App;
   title: string;
   rows: Transaction[];
   visibleIndexes: number[];
   categories: CategoryDefinition[];
+  tags?: TagDefinition[];
+  loadTags?: () => Promise<TagDefinition[]>;
   investmentAccounts?: InvestmentAccountBalance[];
   issues?: Array<Record<string, unknown>>;
   onUpdate: (index: number, field: keyof Transaction, value: string) => void;
@@ -255,8 +336,11 @@ export interface TransactionTableProps {
 }
 
 export interface TransactionSummaryTableProps {
+  app?: App;
   rows: Transaction[];
   categories: CategoryDefinition[];
+  tags?: TagDefinition[];
+  loadTags?: () => Promise<TagDefinition[]>;
   issues?: Array<Record<string, unknown>>;
   businessTab?: TransactionBusinessTab;
   rules?: SavedRule[];
@@ -279,10 +363,13 @@ export interface TransactionSummaryTableProps {
 }
 
 export function TransactionTable({
+  app,
   title,
   rows,
   visibleIndexes,
   categories,
+  tags = [],
+  loadTags,
   investmentAccounts = [],
   issues = [],
   onUpdate,
@@ -338,7 +425,9 @@ export function TransactionTable({
         ? [["category", t("分类", "Category")] as [string, string]]
         : []),
       ["product", t("商品", "Item")],
-      ["amount", t("金额", "Amount")]
+      ["tag_keys", t("标签", "Tags")],
+      ["amount", t("金额", "Amount")],
+      ["rule", t("规则", "Rule")]
     ];
   const sorted = useMemo(
     () =>
@@ -562,6 +651,14 @@ export function TransactionTable({
                   value={row.product}
                   onChange={(event) => onUpdate(originalIndex, "product", event.target.value)}
                 />}
+                {!usesInvestmentAccount && <TransactionTags
+                  app={app}
+                  label={transactionTagTitle(row.product)}
+                  selected={row.tag_keys ?? []}
+                  tags={tags}
+                  loadTags={loadTags}
+                  onApply={(keys) => onUpdate(originalIndex, "tag_keys", JSON.stringify(keys))}
+                />}
                 <input
                   aria-label={t(`${title}第 ${blockNumber} 行金额`, `${displayTitle} row ${blockNumber} amount`)}
                   aria-invalid={Boolean(fieldIssueTitle(rowIssues, "amount"))}
@@ -572,12 +669,10 @@ export function TransactionTable({
                   value={transactionInputValue(row.amount)}
                   onChange={(event) => onUpdate(originalIndex, "amount", event.target.value)}
                 />
+                {!usesInvestmentAccount && <span className="asset-track-transaction-rule-cell">
+                  {usesCategory && renderRuleControls?.({ row, index: originalIndex, transactionKey: stableKey })}
+                </span>}
                 <span className="asset-track-transaction-actions">
-                  {usesCategory && renderRuleControls?.({
-                    row,
-                    index: originalIndex,
-                    transactionKey: stableKey
-                  })}
                   {renderTransactionActions?.({
                     row,
                     index: originalIndex,
@@ -620,8 +715,11 @@ export function TransactionTable({
 }
 
 export function TransactionSummaryTable({
+  app,
   rows,
   categories,
+  tags = [],
+  loadTags,
   issues = [],
   businessTab,
   rules = [],
@@ -650,6 +748,7 @@ export function TransactionSummaryTable({
     summarySortValue
   );
   const hasCategory = groups.some(({ row: group }) => transactionTypeUsesCategory(group.type));
+  const showTags = businessTab !== "investment";
   const summaryClassName = [
     businessTab ? `asset-track-summary-table--${businessTab}` : "",
     hasCategory ? "asset-track-summary-table--has-category" : ""
@@ -679,6 +778,7 @@ export function TransactionSummaryTable({
                   <SortButton label={t("分类", "Category")} field="category" sort={effectiveSort} onSort={onSort} />
                 </th>
               )}
+              <StaticTableHeader label={t("规则", "Rule")} className="asset-track-centered-column" />
               <ActionTableHeader className="asset-track-summary-actions-heading" />
             </tr>
           </thead>
@@ -747,9 +847,8 @@ export function TransactionSummaryTable({
                       )}
                     </td>
                   )}
-                  <td className="asset-track-actions-cell asset-track-summary-actions-cell">
-                    <span className="asset-track-transaction-actions">
-                      {transactionTypeUsesRules(group.type) && (group.ruleIds.length > 0
+                  <td className="asset-track-summary-rule-cell">
+                    {transactionTypeUsesRules(group.type) && (group.ruleIds.length > 0
                         ? <button
                           type="button"
                           className="asset-track-rule-button"
@@ -759,6 +858,9 @@ export function TransactionSummaryTable({
                         : onCreateRule && <button type="button" onClick={() => onCreateRule(group)}>
                           {t("新建规则", "New rule")}
                         </button>)}
+                  </td>
+                  <td className="asset-track-actions-cell asset-track-summary-actions-cell">
+                    <span className="asset-track-transaction-actions">
                       <button type="button" onClick={() => onExpanded(expanded === groupViewKey ? "" : groupViewKey)}>
                         {expanded === groupViewKey ? t("收起", "Collapse") : t("展开逐项", "Expand items")}
                       </button>
@@ -767,36 +869,35 @@ export function TransactionSummaryTable({
                 </tr>
                 {expanded === groupViewKey && (
                   <tr key={`${groupViewKey}:expanded`} className="asset-track-summary-detail-row">
-                    <td className="asset-track-summary-detail-host-cell" colSpan={5 + (hasCategory ? 1 : 0)}>
+                    <td className="asset-track-summary-detail-host-cell" colSpan={6 + (hasCategory ? 1 : 0)}>
                       <div className="asset-track-summary-details">
                         <table className={`asset-track-summary-detail-table asset-track-summary-detail-table--nested${hasCategory ? " asset-track-summary-detail-table--has-category" : ""}`}>
-                          <SummaryColumnGroup hasCategory={hasCategory} />
+                          <SummaryDetailColumnGroup hasCategory={hasCategory} showTags={showTags} />
                           <thead>
                             <tr>
                               <th scope="col">{t("行号", "Row")}</th>
-                              <th scope="col" colSpan={3}>
-                                <div className="asset-track-summary-detail-content-heading">
-                                  <span>{t("交易对手", "Counterparty")}</span>
-                                  <span>{t("商品", "Item")}</span>
-                                  <span>{t("金额", "Amount")}</span>
-                                  <span>{t("日期", "Date")}</span>
-                                </div>
-                              </th>
+                              <th scope="col">{t("日期", "Date")}</th>
+                              <th scope="col">{t("交易对手", "Counterparty")}</th>
+                              <th scope="col">{t("商品", "Item")}</th>
+                              {showTags && <th scope="col">{t("标签", "Tags")}</th>}
                               {hasCategory && <th scope="col">{t("分类", "Category")}</th>}
+                              <th scope="col" className="asset-track-summary-amount-heading">{t("金额", "Amount")}</th>
+                              <StaticTableHeader label={t("规则", "Rule")} className="asset-track-centered-column" />
                               <th scope="col" className="asset-track-summary-actions-heading">{t("操作", "Actions")}</th>
                             </tr>
                           </thead>
                           <tbody>
                             {group.indexes.map((index) => {
                               const item = rows[index];
-                              const usesCategory = transactionTypeUsesCategory(item.type);
+                              const itemType = item.type?.trim() || "支出";
+                              const usesCategory = transactionTypeUsesCategory(itemType);
                               const stableKey = transactionKey(item);
                               const blockNumber = transactionBlockNumber(rows, index);
-                              const itemDisplayType = businessLabel(item.type);
+                              const itemDisplayType = businessLabel(itemType);
                               const available = categories.filter(
                                 (category) =>
                                   (category.is_active || category.category_key === item.category_key)
-                                  && category.transaction_type === categoryTypeForTransaction(item.type)
+                                  && category.transaction_type === categoryTypeForTransaction(itemType)
                               );
                               return (
                                 <tr key={tableReactKey(item, index)}>
@@ -808,7 +909,7 @@ export function TransactionSummaryTable({
                                           type="checkbox"
                                           checked={stableKey !== null && selectedTransactionKeys.has(stableKey)}
                                           disabled={stableKey === null}
-                                          aria-label={t(`选择${item.type}第 ${blockNumber} 行`, `Select ${businessLabel(item.type)} row ${blockNumber}`)}
+                                          aria-label={t(`选择${itemType}第 ${blockNumber} 行`, `Select ${itemDisplayType} row ${blockNumber}`)}
                                           onChange={() => {
                                             if (stableKey !== null) onToggleTransaction(stableKey);
                                           }}
@@ -817,55 +918,57 @@ export function TransactionSummaryTable({
                                       <span>{blockNumber}</span>
                                       <RowIssueMarker
                                         issues={issuesByRow.get(index)}
-                                        label={t(`${item.type}第 ${blockNumber} 行`, `${businessLabel(item.type)} row ${blockNumber}`)}
+                                        label={t(`${itemType}第 ${blockNumber} 行`, `${itemDisplayType} row ${blockNumber}`)}
                                       />
                                     </span>
                                   </td>
-                                  <td colSpan={3} className="asset-track-summary-detail-content-cell">
-                                    <div className="asset-track-summary-detail-content">
-                                      <input
-                                        value={item.counterparty ?? ""}
-                                        placeholder={t("交易对手", "Counterparty")}
-                                        aria-label={t(`${item.type}第 ${blockNumber} 行交易对手`, `${itemDisplayType} row ${blockNumber} counterparty`)}
-                                        onChange={(event) => onUpdate(index, "counterparty", event.target.value)}
-                                      />
-                                      <input
-                                        value={item.product}
-                                        aria-label={t(`${item.type}第 ${blockNumber} 行商品`, `${itemDisplayType} row ${blockNumber} item`)}
-                                        onChange={(event) => onUpdate(index, "product", event.target.value)}
-                                      />
-                                      <input
-                                        className="asset-track-amount-cell"
-                                        type="number"
-                                        value={transactionInputValue(item.amount)}
-                                        aria-label={t(`${item.type}第 ${blockNumber} 行金额`, `${itemDisplayType} row ${blockNumber} amount`)}
-                                        onChange={(event) => onUpdate(index, "amount", event.target.value)}
-                                      />
-                                      <input
-                                        type="date"
-                                        value={item.transaction_date}
-                                        aria-label={t(`${item.type}第 ${blockNumber} 行日期`, `${itemDisplayType} row ${blockNumber} date`)}
-                                        onChange={(event) => onUpdate(index, "transaction_date", event.target.value)}
-                                      />
-                                    </div>
-                                  </td>
+                                  <td><input
+                                    type="date"
+                                    value={item.transaction_date}
+                                    aria-label={t(`${itemType}第 ${blockNumber} 行日期`, `${itemDisplayType} row ${blockNumber} date`)}
+                                    onChange={(event) => onUpdate(index, "transaction_date", event.target.value)}
+                                  /></td>
+                                  <td><input
+                                    value={item.counterparty ?? ""}
+                                    placeholder={t("交易对手", "Counterparty")}
+                                    aria-label={t(`${itemType}第 ${blockNumber} 行交易对手`, `${itemDisplayType} row ${blockNumber} counterparty`)}
+                                    onChange={(event) => onUpdate(index, "counterparty", event.target.value)}
+                                  /></td>
+                                  <td><input
+                                    value={item.product ?? ""}
+                                    aria-label={t(`${itemType}第 ${blockNumber} 行商品`, `${itemDisplayType} row ${blockNumber} item`)}
+                                    onChange={(event) => onUpdate(index, "product", event.target.value)}
+                                  /></td>
+                                  {showTags && <td><TransactionTags
+                                    app={app}
+                                    label={transactionTagTitle(item.product)}
+                                    selected={item.tag_keys ?? []}
+                                    tags={tags}
+                                    loadTags={loadTags}
+                                    onApply={(keys) => onUpdate(index, "tag_keys", JSON.stringify(keys))}
+                                  /></td>}
                                   {hasCategory && <td>
                                     {usesCategory && <select
                                       value={item.category_key ?? ""}
-                                      aria-label={t(`${item.type}第 ${blockNumber} 行分类`, `${itemDisplayType} row ${blockNumber} category`)}
+                                      aria-label={t(`${itemType}第 ${blockNumber} 行分类`, `${itemDisplayType} row ${blockNumber} category`)}
                                       onChange={(event) => onUpdate(index, "category_key", event.target.value)}
                                     >
                                       <option value="">{t("请选择分类", "Select category")}</option>
                                       {available.map((category) => <option key={category.category_key} value={category.category_key}>{category.name}</option>)}
                                     </select>}
                                   </td>}
+                                  <td><input
+                                    className="asset-track-amount-cell"
+                                    type="number"
+                                    value={transactionInputValue(item.amount)}
+                                    aria-label={t(`${itemType}第 ${blockNumber} 行金额`, `${itemDisplayType} row ${blockNumber} amount`)}
+                                    onChange={(event) => onUpdate(index, "amount", event.target.value)}
+                                  /></td>
+                                  <td className="asset-track-summary-rule-cell">{transactionTypeUsesRules(itemType) && renderRuleControls?.({
+                                    row: item, index, transactionKey: stableKey
+                                  })}</td>
                                   <td className="asset-track-actions-cell asset-track-summary-actions-cell">
                                     <span className="asset-track-transaction-actions">
-                                      {transactionTypeUsesRules(item.type) && renderRuleControls?.({
-                                        row: item,
-                                        index,
-                                        transactionKey: stableKey
-                                      })}
                                       {renderTransactionActions?.({
                                         row: item,
                                         index,

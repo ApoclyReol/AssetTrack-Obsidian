@@ -13,10 +13,9 @@ focused monthly review: import what already exists, resolve the few things that 
 judgment, check the result, and move on.
 
 > [!IMPORTANT]
-> Current recommended version: **1.9.0**. This release makes the monthly review easier to follow:
-> bill import is split into clear structure, mapping, and preview steps, while transaction warnings,
-> grouped views, monthly progress, and reconciliation explanations are presented more compactly.
-> It does not introduce a database or settings migration.
+> Current recommended version: **2.0.0**. This release adds category attributes and transaction tags,
+> and refines categories, rules, analysis, and monthly transaction editing. Existing databases may need
+> a schema 12 upgrade on first load; the plugin shows the migration impact and never upgrades silently.
 
 ## Why Asset Track
 
@@ -107,7 +106,7 @@ you explicitly choose a backup export destination or restoration file.
 ## Compatibility
 
 - Desktop Obsidian only: macOS, Windows, and Linux.
-- Version 1.9.0 requires Obsidian 1.13.0 or later. Update to the latest available 1.13.x desktop release before installing or updating.
+- Version 2.0.0 requires Obsidian 1.13.0 or later. Update to the latest available 1.13.x desktop release before installing or updating.
 - The plugin does not require Python, a separate Node.js installation, or a sidecar.
 
 ## Read more

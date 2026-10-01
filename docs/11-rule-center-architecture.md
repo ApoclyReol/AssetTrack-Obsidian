@@ -4,7 +4,7 @@
 > [用户指南](02-user-guide.md)处理分类和异常。
 
 本文补充 v1.9.0 当前架构中与导入容错、月流水警告、通用规则、批量操作和配置中心有关的接口边界。
-它以 schema 11、月份 `saved` 状态和 SQLite 写入事务为事实边界。理财流水的 `account_key`
+它以 schema 12、月份 `saved` 状态和 SQLite 写入事务为事实边界。理财流水的 `account_key`
 只用于加仓和提现，交易对手仍是流水统计字段，不参与账户关系或规则范围扩展。
 
 ## 导入契约
@@ -70,7 +70,7 @@ CSV 确认只把接受行写入当前 React 草稿，不调用通用流水操作
 `expected_month_revisions`；写入只更新 `transactions.product`，不自动同步规则。统一商品
 名称后刷新商品-分类冲突统计。
 
-分类定义和匹配规则分别通过 `saveCategories()` 与 `saveRules()` 保存，并分别检查 revision；分类表只显示读取窗口内的历史流水数，
+分类定义、属性/标签定义和匹配规则分别通过 `saveCategories()`、`saveTaxonomy()` 与 `saveRules()` 保存，并分别检查 revision；分类属性虽然在同一配置页展示，但仍使用各自的保存边界；匹配规则表的流水数和最近月份只显示近 1 年读取窗口内的历史数据，
 商品总览负责用户选择范围内的统计，默认近 1 年。分类删除失败和确认都使用原生 Modal。旧规则冲突由现有规则和已保存流水派生为
 `RuleConflictGroup`，仅用于兼容诊断和阻止可能覆盖历史语义的回溯；当前界面没有独立规则冲突面板。回溯成功后
 发布现有数据变更事件：无草稿的月份窗口重新读取数据库，有草稿的窗口保留草稿并提示外部 revision 已变化，
@@ -78,7 +78,7 @@ CSV 确认只把接受行写入当前 React 草稿，不调用通用流水操作
 
 ## 规则洞察与能力端口
 
-`ruleWorkspaceAnalytics(minOccurrences = 2)` 查询最近 5 年已保存月份中的 `transactions`，
+`ruleWorkspaceAnalytics(minOccurrences = 2)` 查询最近 1 年已保存月份中的 `transactions`，
 不读取 React 草稿，并返回实际读取范围。配置 UI 通过 `ConfigurationEditorPort` 访问它，并返回规则 revision、
 推荐分类规则和历史商品统计：
 
@@ -94,3 +94,7 @@ CSV 确认只把接受行写入当前 React 草稿，不调用通用流水操作
 后才能确认写入，规则创建与规则表保存直接保存当前规则草稿；商品总览提供规则创建入口，不提供“打开最近月份”导航入口。
 流水批量操作统一使用 `TransactionOperationPreviewRequest`，批量编辑在同一个编辑窗口中显示简要前后对比，确认后进入草稿，
 保存时由 Repository 在同一月份事务中重新校验目标和 revision，并写入 `operation_logs`。AI 批次预览也写入本地审计元数据，不产生专用财务表。
+
+标签批量操作使用 `bulk-add-tag`、`bulk-remove-tag` 和 `bulk-replace-tags` 三种 operation kind。
+标签关联落在 `transaction_tags`，不会进入导入或规则自动应用；配置页的属性组、选项和标签定义
+使用独立 revision，引用中的定义停用优先，未引用定义删除前先创建保护快照。

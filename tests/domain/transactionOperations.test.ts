@@ -258,6 +258,33 @@ describe("transaction operation previews", () => {
     expect(counterparty.rows[0].counterparty).toBe("");
   });
 
+  it("previews add, remove, and replace tag operations without changing amounts", () => {
+    const tagged = rows.map((row) => ({ ...row, tag_keys: row.id === 1 ? ["tag-travel"] : [] }));
+    const add = previewTransactionOperation(tagged, request("bulk-add-tag", [1, 2], {
+      target_tag_key: "tag-project"
+    }));
+    expect(add.rows[0].tag_keys).toEqual(["tag-travel", "tag-project"]);
+    expect(add.rows[1].tag_keys).toEqual(["tag-project"]);
+    expect(add.rows[0].amount).toBe(tagged[0].amount);
+    const remove = previewTransactionOperation(add.rows, request("bulk-remove-tag", [1], {
+      target_tag_key: "tag-travel"
+    }));
+    expect(remove.rows[0].tag_keys).toEqual(["tag-project"]);
+    const replace = previewTransactionOperation(remove.rows, request("bulk-replace-tags", [1, 2], {
+      target_tag_keys: ["tag-trip", "tag-trip"]
+    }));
+    expect(replace.rows[0].tag_keys).toEqual(["tag-trip"]);
+    expect(replace.rows[1].tag_keys).toEqual(["tag-trip"]);
+  });
+
+  it("rejects an empty single-tag target but allows replacing with no tags", () => {
+    expect(validateTransactionOperationRequest(rows, request("bulk-add-tag", [1]))[0].code)
+      .toBe("transaction.tag.invalid_target");
+    expect(validateTransactionOperationRequest(rows, request("bulk-replace-tags", [1], {
+      target_tag_keys: []
+    }))).toEqual([]);
+  });
+
   it("uses one selected rule and reports a conflicting same-priority result", () => {
     const rules = [
       {

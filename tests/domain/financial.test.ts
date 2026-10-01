@@ -33,7 +33,8 @@ describe("monthly calculation category ownership", () => {
       is_big_ticket: false,
       color: "#fff",
       is_active: true,
-      sort_order: 0
+      sort_order: 0,
+      attribute_keys: ["attr-necessity-required", "attr-pattern-daily"]
     }]);
 
     expect(result.category_summary).toEqual({ "餐饮基础": 100 });

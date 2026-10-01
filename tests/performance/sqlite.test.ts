@@ -75,14 +75,21 @@ describe("node:sqlite technical spike", () => {
       to_date: "2026-12-31",
       month_count: 12
     });
-    expect(ruleInsights.historical_products).toHaveLength(200);
+    // Matching-rule usage is intentionally limited to the latest 12 months.
+    expect(ruleInsights.historical_products).toHaveLength(60);
     expect(ruleInsights.scope).toMatchObject({
-      kind: "system-check",
-      from_date: "2022-01-01",
+      kind: "analysis",
+      from_date: "2026-01-01",
       to_date: "2026-12-31",
-      month_count: 60
+      month_count: 12
     });
     expect(analyticsElapsed).toBeLessThan(8_000);
+    db.exec("INSERT INTO transaction_tags(transaction_id,tag_key) SELECT id,'tag-travel' FROM transactions");
+    const taxonomyStarted = performance.now();
+    const taxonomy = repository.taxonomy();
+    const taxonomyElapsed = performance.now() - taxonomyStarted;
+    expect(taxonomy.tags.find((tag) => tag.tag_key === "tag-travel")?.transaction_count).toBe(50_000);
+    expect(taxonomyElapsed).toBeLessThan(4_000);
     manager.close();
 
     const reopened = new DatabaseManager(path);

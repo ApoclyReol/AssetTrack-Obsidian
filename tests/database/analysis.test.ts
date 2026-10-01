@@ -3,6 +3,25 @@ import { categoryKey } from "../../src/database/schema";
 import { fixture } from "./databaseTestFixtures";
 
 describe("database read windows", () => {
+  it("lists each income transaction in the monthly income panel without investment withdrawals", async () => {
+    const { repository } = fixture();
+    const incomeKey = categoryKey("工资收入");
+    await repository.saveMonth("2026-03", 0,
+      [{ account_key: "cash-default", balance: 1200 }],
+      [{ account_key: "investment-default", principal: 0, market_value: 0, cash_balance: 0 }],
+      [
+        { transaction_date: "2026-03-05", type: "收入", category_key: incomeKey,
+          category: "工资收入", counterparty: "公司", product: "工资", amount: 1000 },
+        { transaction_date: "2026-03-10", type: "收入", category_key: incomeKey,
+          category: "工资收入", counterparty: "公司", product: "补发", amount: 200 },
+        { transaction_date: "2026-03-11", type: "提现", account_key: "investment-default",
+          category: "", product: "", amount: 50 }
+      ], []);
+    const overview = repository.monthOverview("2026-03");
+    expect(overview.income_transactions?.map((row) => [row.product, row.category, row.amount]))
+      .toEqual([["补发", "工资收入", 200], ["工资", "工资收入", 1000]]);
+  });
+
   it("applies runtime analysis settings without reopening the repository", async () => {
     const { repository } = fixture();
     const food = categoryKey("餐饮基础");
@@ -43,21 +62,18 @@ describe("database read windows", () => {
     expect(before.computed.big_tickets).toEqual([]);
     expect(before.overview.reconciliation?.explanation.level).toBe("success");
 
-    repository.updateRuntimeSettings({
-      largeExpenseThreshold: 50,
-      reconciliationTolerance: 10
-    });
+    repository.updateRuntimeSettings({ reconciliationTolerance: 10 });
 
     const after = await repository.getMonth("2026-01");
     expect(after.computed).not.toBeNull();
     if (!after.computed) throw new Error("expected computed monthly calculation");
-    expect(after.computed.big_tickets).toHaveLength(1);
+    expect(after.computed.big_tickets).toEqual([]);
     expect(after.overview.reconciliation?.explanation.level).toBe("error");
     expect(repository.monthOverview("2026-01").reconciliation?.explanation.level)
       .toBe("error");
   });
 
-  it("defaults product overview to one year and system checks to five years", async () => {
+  it("defaults product overview and matching rules to one year while system checks stay at five years", async () => {
     const { repository } = fixture();
     const food = categoryKey("餐饮基础");
     const investment = [{
@@ -117,10 +133,10 @@ describe("database read windows", () => {
 
     const analytics = repository.ruleWorkspaceAnalytics();
     expect(analytics.scope).toMatchObject({
-      kind: "system-check",
-      from_date: "2021-02-01",
+      kind: "analysis",
+      from_date: "2025-02-01",
       to_date: "2026-01-31",
-      month_count: 60
+      month_count: 12
     });
     expect(analytics.historical_products.map((row) => row.product)).toEqual(["近期商品"]);
   });
@@ -192,6 +208,78 @@ describe("database read windows", () => {
   });
 });
 describe("analysis repository", () => {
+
+  it("keeps tag overlap out of financial totals and reports spending dimensions", async () => {
+    const { repository } = fixture();
+    const category = categoryKey("餐饮基础");
+    const taxonomy = repository.taxonomy();
+    await repository.saveTaxonomy(
+      taxonomy.attribute_revision,
+      taxonomy.groups,
+      taxonomy.options,
+      taxonomy.tag_revision,
+      [...taxonomy.tags, {
+        tag_key: "tag-project",
+        name: "项目",
+        description: "测试标签",
+        color: "#2563eb",
+        is_active: true,
+        sort_order: taxonomy.tags.length
+      }]
+    );
+    await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 850 }],
+      [{ account_key: "investment-default", principal: 0, market_value: 0, cash_balance: 0 }],
+      [
+        {
+          transaction_date: "2026-01-01",
+          type: "支出",
+          category_key: category,
+          category: "餐饮基础",
+          product: "旅行餐饮",
+          amount: 100,
+          tag_keys: ["tag-travel", "tag-project"]
+        },
+        {
+          transaction_date: "2026-01-02",
+          type: "支出",
+          category_key: category,
+          category: "餐饮基础",
+          product: "日常餐饮",
+          amount: 50,
+          tag_keys: ["tag-travel"]
+        },
+        {
+          transaction_date: "2026-01-03",
+          type: "收入",
+          category_key: categoryKey("工资收入"),
+          category: "工资收入",
+          product: "工资",
+          amount: 1000,
+          tag_keys: ["tag-project"]
+        }
+      ],
+      []
+    );
+    const monthly = repository.monthOverview("2026-01");
+    expect(monthly.metrics?.total_expense).toBe(150);
+    expect(monthly.tag_summary).toEqual(expect.arrayContaining([
+      expect.objectContaining({ tag: "旅行", amount: 150, transaction_count: 2 }),
+      expect.objectContaining({ tag: "项目", amount: 100, transaction_count: 1 })
+    ]));
+    expect((monthly.tag_summary ?? []).reduce((total, row) => total + row.amount, 0)).toBe(250);
+    expect(monthly.attribute_summary).toEqual(expect.arrayContaining([
+      expect.objectContaining({ attribute: "必要", amount: 150 })
+    ]));
+    const annual = repository.annual("2026");
+    expect(annual.metrics.total_expense).toBe(150);
+    expect(annual.cost_audit.tags).toEqual(expect.arrayContaining([
+      expect.objectContaining({ tag: "旅行", total: 150, trend: [{ month: "2026-01", amount: 150 }] }),
+      expect.objectContaining({ tag: "项目", total: 100 })
+    ]));
+  });
 
 it("matches the synthetic cross-month financial baseline", async () => {
     const { repository } = fixture();
@@ -469,7 +557,7 @@ it("summarizes recurring expenses by product without changing schema", async () 
       latest_amount: 20,
       last_date: "2026-01-20"
     }]);
-    expect(manager.validate(false).schema_version).toBe(11);
+    expect(manager.validate(false).schema_version).toBe(12);
   });
 
 it("matches the frozen Python obsidian-v1 golden fixture", async () => {

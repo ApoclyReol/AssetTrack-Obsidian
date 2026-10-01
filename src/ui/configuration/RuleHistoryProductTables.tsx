@@ -63,7 +63,9 @@ function ProductGroupTable({
         return <tr key={`${group.transaction_type}\u0000${group.product_key}`}>
           <td className="asset-track-date-cell">{group.last_date || "—"}</td>
           <td className="asset-track-type-cell">{businessLabel(group.transaction_type)}</td>
-          <td title={group.variants.join("、")}>{group.product || t("（空商品）", "(empty item)")}</td>
+          <td title={group.variants.join("、")}>{group.product || (groupBy === "counterparty"
+            ? t("未填写交易对手", "Counterparty not specified")
+            : t("（空商品）", "(empty item)"))}</td>
           <td className="asset-track-centered-cell">{statusStack(categorySummary(group.category_counts), categoryStatusLabel(group.category_status))}</td>
           <td className="asset-track-centered-cell">{statusStack(
             ruleCoverageLabel(group.rule_coverage),
@@ -76,11 +78,13 @@ function ProductGroupTable({
           )}</td>
           <td className="asset-track-centered-cell">{health}</td>
           <td className="asset-track-count-cell">{group.occurrences}</td>
-          <td className="asset-track-history-actions">
-            {onOpenProductRename && <button type="button" onClick={() => onOpenProductRename(group)}>{t("编辑商品", "Edit item")}</button>}
-            {onOpenCounterpartyRename && <button type="button" onClick={() => onOpenCounterpartyRename(group)}>{t("编辑交易对手", "Edit counterparty")}</button>}
-            {onCreateRule && group.rule_suggestion && group.unmatched_occurrences > 0 && <button type="button" onClick={() => onCreateRule(group)}>{group.rule_coverage === "partial" ? t("补充规则", "Complete rule coverage") : t("创建规则", "Create rule")}</button>}
-            <button type="button" onClick={() => onOpenDetail(group)}>{t("编辑分类", "Edit category")}</button>
+          <td className="asset-track-actions-cell asset-track-history-action-cell">
+            <div className="asset-track-history-actions">
+              {onOpenProductRename && <button type="button" onClick={() => onOpenProductRename(group)}>{t("编辑商品", "Edit item")}</button>}
+              {onOpenCounterpartyRename && <button type="button" onClick={() => onOpenCounterpartyRename(group)}>{t("编辑交易对手", "Edit counterparty")}</button>}
+              {onCreateRule && group.rule_suggestion && group.unmatched_occurrences > 0 && <button type="button" onClick={() => onCreateRule(group)}>{group.rule_coverage === "partial" ? t("补充规则", "Complete rule coverage") : t("创建规则", "Create rule")}</button>}
+              <button type="button" onClick={() => onOpenDetail(group)}>{t("编辑分类", "Edit category")}</button>
+            </div>
           </td>
         </tr>;
       })}</tbody>

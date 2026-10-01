@@ -458,7 +458,7 @@ describe("editor draft restoration", () => {
       />
     );
 
-    expect(screen.getByDisplayValue("恢复分类")).toBeTruthy();
+    expect(within(document.querySelector(".asset-track-category-table") as HTMLElement).getByDisplayValue("恢复分类")).toBeTruthy();
     expect(onSessionChange).toHaveBeenCalledWith(expect.objectContaining({
       kind: "rules",
       category_dirty: true,
@@ -595,8 +595,8 @@ describe("editor draft restoration", () => {
       rule_conflicts: [],
       summary: workspace.summary
     });
-    await waitFor(() => expect(screen.getByDisplayValue("保存后分类")).toBeTruthy());
-    expect(screen.queryByDisplayValue("旧 analytics 分类")).toBeNull();
+    await waitFor(() => expect(within(document.querySelector(".asset-track-category-table") as HTMLElement).getByDisplayValue("保存后分类")).toBeTruthy());
+    expect(within(document.querySelector(".asset-track-category-table") as HTMLElement).queryByText("旧 analytics 分类")).toBeNull();
   });
 
   it("uses the new rules revision when saving category and rule drafts together", async () => {

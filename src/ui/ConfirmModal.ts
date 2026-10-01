@@ -26,7 +26,7 @@ class ConfirmationModal extends Modal {
   }
 
   onOpen(): void {
-    this.modalEl.addClass("asset-track-confirmation-modal");
+    this.modalEl.addClass("asset-track-native-modal", "asset-track-confirmation-modal");
     this.setTitle(this.title);
     this.contentEl.createEl("p", { text: this.message });
     new Setting(this.contentEl)
@@ -69,7 +69,7 @@ class InformationModal extends Modal {
   }
 
   onOpen(): void {
-    this.modalEl.addClass("asset-track-confirmation-modal");
+    this.modalEl.addClass("asset-track-native-modal", "asset-track-confirmation-modal");
     this.setTitle(this.title);
     this.contentEl.createEl("p", { text: this.message });
     const setting = new Setting(this.contentEl);
@@ -108,7 +108,7 @@ class ChoiceModal<T extends string> extends Modal {
   }
 
   onOpen(): void {
-    this.modalEl.addClass("asset-track-confirmation-modal");
+    this.modalEl.addClass("asset-track-native-modal", "asset-track-confirmation-modal");
     this.setTitle(this.title);
     this.contentEl.createEl("p", { text: this.message });
     const setting = new Setting(this.contentEl);

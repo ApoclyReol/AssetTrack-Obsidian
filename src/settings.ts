@@ -38,7 +38,6 @@ export const DEFAULT_SETTINGS: AssetTrackSettings = {
   baseCurrency: "CNY",
   currencyFormat: "standard",
   reconciliationTolerance: 100,
-  largeExpenseThreshold: 1000,
   aiEndpoint: "",
   aiModel: "",
   aiTimeoutMs: 60_000
@@ -56,6 +55,7 @@ export class AssetTrackSettingTab extends PluginSettingTab {
   private directoryInspectionPath: string | null = null;
   private directoryInspectionText = "";
   private inspectionSequence = 0;
+  private databaseActionBusy = false;
 
   constructor(app: App, private readonly plugin: AssetTrackPlugin) {
     super(app, plugin);
@@ -172,20 +172,6 @@ export class AssetTrackSettingTab extends PluginSettingTab {
               validate: (value: number) => this.validateNonNegative(value)
             }
           },
-          {
-            name: t("大额支出阈值", "Large expense threshold"),
-            desc: t(
-              "单笔或同商品汇总达到该金额时视为大额。",
-              "A transaction or item total at this amount is treated as large."
-            ),
-            control: {
-              type: "number",
-              key: "largeExpenseThreshold",
-              min: 0,
-              step: "any",
-              validate: (value: number) => this.validatePositive(value)
-            }
-          }
         ]
       },
       {
@@ -290,15 +276,6 @@ export class AssetTrackSettingTab extends PluginSettingTab {
     if (key === "reconciliationTolerance") {
       await this.plugin.updateSettings((settings) => {
         settings.reconciliationTolerance = Number(value);
-      });
-      this.plugin.updateRuntimeSettings();
-      await this.plugin.refreshViews();
-      return;
-    }
-
-    if (key === "largeExpenseThreshold") {
-      await this.plugin.updateSettings((settings) => {
-        settings.largeExpenseThreshold = Number(value);
       });
       this.plugin.updateRuntimeSettings();
       await this.plugin.refreshViews();
@@ -437,29 +414,41 @@ export class AssetTrackSettingTab extends PluginSettingTab {
     const directory = () => this.currentDataDirectory();
     if (this.plugin.isDatabaseReady()) {
       setting.addButton((button) =>
-        button.setButtonText(t("迁移当前库", "Migrate current database")).onClick(() =>
+        button.setDisabled(this.databaseActionBusy).setButtonText(t("迁移当前库", "Migrate current database")).onClick(() =>
           void this.runDatabaseAction(() =>
             this.plugin.switchDataDirectory(directory(), "migrate")
           )
         )
       );
       setting.addButton((button) =>
-        button.setButtonText(t("载入目标库", "Load target database")).onClick(() =>
+        button.setDisabled(this.databaseActionBusy).setButtonText(t("载入目标库", "Load target database")).onClick(() =>
           void this.runDatabaseAction(() =>
-            this.plugin.switchDataDirectory(directory(), "load")
+            this.loadOrSwitchDirectory(directory(), "load", "preserve")
+          )
+        )
+      );
+      setting.addButton((button) =>
+        button.setDisabled(this.databaseActionBusy).setButtonText(t("载入并清除旧属性", "Load and clear legacy attributes")).onClick(() =>
+          void this.runDatabaseAction(() =>
+            this.loadOrSwitchDirectory(directory(), "load", "clear")
           )
         )
       );
       return;
     }
     setting.addButton((button) =>
-      button.setButtonText(t("创建新数据库", "Create new database")).onClick(() =>
+      button.setDisabled(this.databaseActionBusy).setButtonText(t("创建新数据库", "Create new database")).onClick(() =>
         void this.runDatabaseAction(() => this.plugin.createDatabase(directory()))
       )
     );
     setting.addButton((button) =>
-      button.setCta().setButtonText(t("载入数据库", "Load database")).onClick(() =>
-        void this.runDatabaseAction(() => this.plugin.loadDatabase(directory()))
+      button.setDisabled(this.databaseActionBusy).setCta().setButtonText(t("载入数据库", "Load database")).onClick(() =>
+        void this.runDatabaseAction(() => this.loadOrSwitchDirectory(directory(), "load", "preserve"))
+      )
+    );
+    setting.addButton((button) =>
+      button.setDisabled(this.databaseActionBusy).setButtonText(t("载入并清除旧属性", "Load and clear legacy attributes")).onClick(() =>
+        void this.runDatabaseAction(() => this.loadOrSwitchDirectory(directory(), "load", "clear"))
       )
     );
   }
@@ -490,17 +479,70 @@ export class AssetTrackSettingTab extends PluginSettingTab {
         ));
   }
 
-  private async runDatabaseAction(action: () => Promise<void>): Promise<void> {
+  private async loadOrSwitchDirectory(
+    directory: string,
+    mode: "load" | "migrate",
+    choice: "preserve" | "clear"
+  ): Promise<boolean> {
+    const inspection = await this.plugin.inspectDataDirectory(directory);
+    if (inspection.migration_required) {
+      const impact = inspection.migration_impact;
+      const details = impact
+        ? t(
+            `将从 schema ${impact.from_schema} 升级：${impact.category_count} 个分类、${impact.transaction_count} 条流水；旧必要性 ${impact.legacy_necessity_count} 个、消费频率 ${impact.legacy_pattern_count} 个、大额分类 ${impact.legacy_big_ticket_count} 个。`,
+            `Upgrade from schema ${impact.from_schema}: ${impact.category_count} categories and ${impact.transaction_count} transactions; ${impact.legacy_necessity_count} legacy necessity values, ${impact.legacy_pattern_count} frequency values, and ${impact.legacy_big_ticket_count} large-ticket categories.`
+          )
+        : t("将升级旧版数据库并创建保护备份。", "The older database will be upgraded and protected by a safety backup.");
+      const message = choice === "preserve"
+        ? t(`${details}\n旧分类属性会转换为新的属性关联。确认后才会写入。`, `${details}\nLegacy category fields will be converted to new attribute relations. Nothing is written until you confirm.`)
+        : t(`${details}\n旧分类属性不会转换，新的属性关联保持为空。此选择不可自动恢复，请先确认已有保护备份。`, `${details}\nLegacy category fields will not be converted and new attribute relations will remain empty. This choice cannot be undone automatically; confirm that you have a protection backup.`);
+      const confirmed = await confirmAction(
+        this.app,
+        choice === "preserve"
+          ? t("保留旧分类属性并迁移？", "Migrate and preserve legacy category attributes?")
+          : t("清除旧分类属性并迁移？", "Migrate and clear legacy category attributes?"),
+        message,
+        choice === "preserve" ? t("保留并迁移", "Preserve and migrate") : t("清除并迁移", "Clear and migrate")
+      );
+      if (!confirmed) return false;
+      if (choice === "clear") {
+        const clearedConfirmed = await confirmAction(
+          this.app,
+          t("再次确认清除旧属性？", "Confirm clearing legacy attributes again?"),
+          t(
+            "这会放弃旧分类的必要性、消费频率和大额标记映射；保护备份仍会保留，但迁移后不会自动恢复这些属性。继续清除？",
+            "This will discard the legacy necessity, frequency, and large-ticket mapping. The protection backup will remain, but these attributes will not be restored automatically after migration. Clear them anyway?"
+          ),
+          t("确认清除并迁移", "Clear and migrate")
+        );
+        if (!clearedConfirmed) return false;
+      }
+    }
+    // A ready plugin must switch through the serialized control plane. Directly
+    // calling loadDatabase in that state is rejected by the lifecycle guard and
+    // used to make the "载入目标库" action fail after inspection/confirmation.
+    if (this.plugin.isDatabaseReady()) {
+      await this.plugin.switchDataDirectory(directory, mode, choice);
+    } else {
+      await this.plugin.loadDatabase(directory, choice);
+    }
+    return true;
+  }
+
+  private async runDatabaseAction(action: () => Promise<boolean | void>): Promise<void> {
+    if (this.databaseActionBusy) return;
+    this.databaseActionBusy = true;
+    this.update();
     let succeeded = false;
     try {
-      await action();
-      succeeded = true;
-      new Notice(t("数据库操作完成", "Database operation complete"));
+      succeeded = (await action()) !== false;
+      if (succeeded) new Notice(t("数据库操作完成", "Database operation complete"));
     } catch (error) {
       this.directoryInspectionPath = this.currentDataDirectory();
       this.directoryInspectionText = message(error);
       new Notice(message(error), 10_000);
     } finally {
+      this.databaseActionBusy = false;
       if (succeeded) {
         this.dataDirectoryDraft = this.plugin.settings.dataDirectory;
         this.dataDirectoryDraftDirty = false;
@@ -552,10 +594,19 @@ export class AssetTrackSettingTab extends PluginSettingTab {
         "发现未完成的数据库恢复残留；载入时会先恢复有效候选文件。",
         "An unfinished database restore was found. Loading will first recover the valid candidate file."
       );
-      if (result.migration_required) return t(
-        "发现旧版数据库；载入时会先创建保护备份，再自动无损升级到最新 schema。",
-        "An older database was found. Loading it will create a protection backup and automatically upgrade it to the latest schema without changing its financial rows."
-      );
+      if (result.migration_required) {
+        const impact = result.migration_impact;
+        const summary = impact
+          ? t(
+              `schema ${impact.from_schema}：${impact.category_count} 个分类、${impact.transaction_count} 条流水；旧属性 ${impact.legacy_necessity_count + impact.legacy_pattern_count + impact.legacy_big_ticket_count} 项。`,
+              `schema ${impact.from_schema}: ${impact.category_count} categories, ${impact.transaction_count} transactions, and ${impact.legacy_necessity_count + impact.legacy_pattern_count + impact.legacy_big_ticket_count} legacy attribute values.`
+            )
+          : t("旧版数据库", "An older database");
+        return t(
+          `发现${summary}。载入前请选择保留或清除旧分类属性；取消会保持原文件不变。`,
+          `${summary} Choose whether to preserve or clear legacy category attributes before loading. Cancel leaves the original file untouched.`
+        );
+      }
       if (result.valid) return t(
         `发现有效的 ${DATABASE_NAME}，可以载入。`,
         `A valid ${DATABASE_NAME} was found and can be loaded.`
@@ -599,7 +650,7 @@ export class AssetTrackSettingTab extends PluginSettingTab {
               "正在创建并校验一致性 zip 备份…",
               "Creating and validating a consistent ZIP backup…"
             ));
-            const result = await this.plugin.api.backup(directory);
+            const result = await this.plugin.backup(directory);
             exportedPath = result.path;
             revealButton?.setDisabled(false);
             backupStatus.setText(t(
@@ -630,6 +681,7 @@ export class AssetTrackSettingTab extends PluginSettingTab {
 
     let restorePath = "";
     let restoreValidated = false;
+    let restoreBusy = false;
     let restoreValidationSequence = 0;
     let restoreButton:
       | { setDisabled(value: boolean): unknown }
@@ -666,7 +718,7 @@ export class AssetTrackSettingTab extends PluginSettingTab {
         "Validating the selected backup…"
       ));
       try {
-        const result = await this.plugin.api.validateBackup(restorePath);
+        const result = await this.plugin.validateBackup(restorePath);
         if (sequence !== restoreValidationSequence) return;
         restoreValidated = true;
         restoreButton?.setDisabled(false);
@@ -697,19 +749,35 @@ export class AssetTrackSettingTab extends PluginSettingTab {
           .setButtonText(t("确认恢复", "Confirm restore"))
           .setDisabled(true)
           .onClick(async () => {
-            if (!restorePath || !restoreValidated) return;
+            if (restoreBusy || !restorePath || !restoreValidated) return;
+            restoreBusy = true;
+            button.setDisabled(true);
+            const releaseRestoreBusy = () => {
+              restoreBusy = false;
+              button.setDisabled(!restoreValidated);
+            };
             const selectedPath = restorePath;
             const selectedSequence = restoreValidationSequence;
-            const confirmed = await confirmAction(
-              this.app,
-              t("恢复数据库备份？", "Restore database backup?"),
-              t(
-                `将恢复：${selectedPath}。恢复前会创建当前数据库一致性安全备份。`,
-                `Restore ${selectedPath}? A consistent safety backup of the current database will be created first.`
-              ),
-              t("确认恢复", "Confirm restore")
-            );
-            if (!confirmed) return;
+            let confirmed = false;
+            try {
+              confirmed = await confirmAction(
+                this.app,
+                t("恢复数据库备份？", "Restore database backup?"),
+                t(
+                  `将恢复：${selectedPath}。恢复前会创建当前数据库一致性安全备份。`,
+                  `Restore ${selectedPath}? A consistent safety backup of the current database will be created first.`
+                ),
+                t("确认恢复", "Confirm restore")
+              );
+            } catch (error) {
+              backupStatus.setText(message(error));
+              releaseRestoreBusy();
+              return;
+            }
+            if (!confirmed) {
+              releaseRestoreBusy();
+              return;
+            }
             if (selectedSequence !== restoreValidationSequence
               || restorePath !== selectedPath
               || !restoreValidated) {
@@ -717,6 +785,7 @@ export class AssetTrackSettingTab extends PluginSettingTab {
                 "备份候选已改变，请重新校验后再恢复。",
                 "The backup candidate changed. Validate it again before restoring."
               ));
+              releaseRestoreBusy();
               return;
             }
             if (this.plugin.hasUnsavedEditorChanges()) {
@@ -724,15 +793,15 @@ export class AssetTrackSettingTab extends PluginSettingTab {
                 "当前编辑器有未保存草稿，请先保存或放弃草稿后再恢复备份。",
                 "The editor has unsaved drafts. Save or discard them before restoring a backup."
               ));
+              releaseRestoreBusy();
               return;
             }
-            button.setDisabled(true);
             backupStatus.setText(t(
               "正在 staging 恢复数据库…",
               "Staging the database restore…"
             ));
             try {
-              await this.plugin.api.restoreBackup(selectedPath, () => {
+              await this.plugin.restoreBackup(selectedPath, () => {
                 if (this.plugin.hasUnsavedEditorChanges()) {
                   throw new AssetTrackError({ code: "database.unsaved_changes", status: 409 });
                 }
@@ -750,7 +819,7 @@ export class AssetTrackSettingTab extends PluginSettingTab {
                 `Restore failed: ${message(error)}`
               ));
             } finally {
-              button.setDisabled(!restoreValidated);
+              releaseRestoreBusy();
             }
           });
       });

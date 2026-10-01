@@ -6,12 +6,16 @@ export type OperationKind =
   | "bulk-edit-counterparty"
   | "bulk-edit-product"
   | "bulk-edit-category"
+  | "bulk-add-tag"
+  | "bulk-remove-tag"
+  | "bulk-replace-tags"
   | "create-rule"
   | "income-to-daifu"
   | "daifu-to-income"
   | "ai-classification"
   | "save-categories"
   | "save-rules"
+  | "remove-taxonomy"
   | "history-category-backfill"
   | "history-product-rename"
   | "history-counterparty-rename";
@@ -108,6 +112,8 @@ export interface TransactionOperationRequest {
   business_tab?: OperationBusinessTab;
   target_value?: string;
   target_category_key?: string | null;
+  target_tag_key?: string;
+  target_tag_keys?: string[];
   target_type?: "收入" | "代付";
   rules_revision?: number;
   protected_transaction_ids?: number[];

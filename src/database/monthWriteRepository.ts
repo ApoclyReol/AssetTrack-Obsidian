@@ -136,6 +136,15 @@ export class MonthWriteRepository {
     input: Transaction[]
   ): { rows: Transaction[]; issues: ValidationIssue[] } {
     const categories = this.context.categoryDefinitions(db);
+    const tagDefinitions = new Map(rows(db.prepare(
+      "SELECT tag_key,is_active FROM tags"
+    ).all()).map((row) => [text(row.tag_key), boolean(row.is_active)] as const));
+    const existingTagPairs = new Set(rows(db.prepare(`
+      SELECT tt.transaction_id,tt.tag_key
+      FROM transaction_tags tt
+      JOIN transactions t ON t.id=tt.transaction_id
+      WHERE t.month=?
+    `).all(month)).map((row) => `${Number(row.transaction_id)}\u0000${text(row.tag_key)}`));
     const byKey = new Map(categories.map((row) => [row.category_key, row]));
     const byName = new Map(categories.map((row) => [row.name, row]));
     const accounts = this.accountDefinitions(db);
@@ -182,6 +191,37 @@ export class MonthWriteRepository {
           suggestion: "选择一个理财账户后再保存"
         });
       }
+      const tagKeys = [...new Set((row.tag_keys ?? [])
+        .map((tagKey) => text(tagKey))
+        .filter(Boolean))];
+      tagKeys.forEach((tagKey) => {
+        if (!tagDefinitions.has(tagKey)) {
+          issues.push({
+            severity: "错误",
+            blocking: true,
+            row_index: index,
+            type,
+            product: text(row.product) || "(空商品)",
+            field: "标签",
+            issue: `标签不存在：${tagKey}`,
+            suggestion: "从标签管理中选择有效标签"
+          });
+          return;
+        }
+        const existingPair = typeof row.id === "number"
+          && existingTagPairs.has(`${row.id}\u0000${tagKey}`);
+        if (tagDefinitions.get(tagKey) === true || existingPair) return;
+        issues.push({
+          severity: "错误",
+          blocking: true,
+          row_index: index,
+          type,
+          product: text(row.product) || "(空商品)",
+          field: "标签",
+          issue: `标签已停用：${tagKey}`,
+          suggestion: "移除该标签，或先在标签管理中重新启用"
+        });
+      });
       return {
         ...row,
         transaction_date: transactionDate,
@@ -193,6 +233,7 @@ export class MonthWriteRepository {
           : text(row.product),
         source: text(row.source),
         amount,
+        tag_keys: tagKeys,
         category_key: definition?.category_key ?? null,
         category: definition?.name ?? ""
       };
@@ -223,7 +264,8 @@ export class MonthWriteRepository {
   ): PendingOperationLog[] {
     if (!logs.length) return [];
     const current = rows(db.prepare(`
-      SELECT id,month,transaction_date,type,category_key,category,counterparty,product,source,account_key,amount
+      SELECT id,month,transaction_date,type,category_key,category,counterparty,product,source,account_key,amount,
+             COALESCE((SELECT json_group_array(tag_key) FROM transaction_tags tt WHERE tt.transaction_id=transactions.id),'[]') AS tag_keys
       FROM transactions WHERE month=? ORDER BY id
     `).all(month)).map(transactionFromRow);
     const currentById = new Map(current.flatMap((row) =>
@@ -391,6 +433,39 @@ export class MonthWriteRepository {
     metadata: Record<string, unknown>,
     changes: OperationPreviewChange[]
   ): void {
+    if (operationType === "bulk-add-tag"
+      || operationType === "bulk-remove-tag"
+      || operationType === "bulk-replace-tags") {
+      const tags = new Map(
+        rows(db.prepare("SELECT tag_key,is_active FROM tags").all())
+          .map((row) => [text(row.tag_key), boolean(row.is_active)] as const)
+      );
+      const targetKeys = operationType === "bulk-replace-tags"
+        ? [...new Set((Array.isArray(metadata.target_tag_keys) ? metadata.target_tag_keys : [])
+            .map((value) => text(value)).filter(Boolean))]
+        : [text(metadata.target_tag_key)];
+      const targetIsInvalid = targetKeys.some((key) => !key
+        || !tags.has(key)
+        || (operationType !== "bulk-remove-tag" && tags.get(key) !== true));
+      if (targetIsInvalid) {
+        throw new RepositoryValidationError({ code: "transaction.tag.invalid_target" });
+      }
+      for (const change of changes) {
+        if (change.status === "skip" && change.reason === "位于本次保护范围") continue;
+        const before = operationTagKeys(change.before.tag_keys);
+        const after = operationTagKeys(change.after.tag_keys);
+        const expected = operationType === "bulk-add-tag"
+          ? [...new Set([...before, targetKeys[0]])]
+          : operationType === "bulk-remove-tag"
+            ? before.filter((key) => key !== targetKeys[0])
+            : targetKeys;
+        if ([...after].some((key) => !tags.has(key))
+          || !sameStringSet(new Set(after), new Set(expected))) {
+          throw new RepositoryValidationError({ code: "operation.preview_tag_changed" });
+        }
+      }
+      return;
+    }
     if (operationType !== "bulk-edit-category") return;
     const targetKey = text(metadata.target_category_key);
     const targetValue = text(metadata.target_value);
@@ -461,6 +536,8 @@ export class MonthWriteRepository {
         transaction_date=?,type=?,category_key=?,category=?,counterparty=?,product=?,source=?,account_key=?,amount=?
       WHERE id=? AND month=?
     `);
+    const deleteTags = db.prepare("DELETE FROM transaction_tags WHERE transaction_id=?");
+    const insertTag = db.prepare("INSERT INTO transaction_tags(transaction_id,tag_key) VALUES (?,?)");
     for (const row of normalized.rows) {
       const values = [
         row.transaction_date, row.type, row.category_key ?? null,
@@ -476,11 +553,15 @@ export class MonthWriteRepository {
         submitted.add(id);
         update.run(...values, id, month);
       }
+      const transactionId = Number(row.id);
+      deleteTags.run(transactionId);
+      (row.tag_keys ?? []).forEach((tagKey) => insertTag.run(transactionId, tagKey));
     }
     const remove = db.prepare("DELETE FROM transactions WHERE id=?");
     for (const id of existing) if (!submitted.has(id)) remove.run(id);
     return rows(db.prepare(`
-      SELECT id,transaction_date,type,category_key,category,counterparty,product,source,account_key,amount
+      SELECT id,transaction_date,type,category_key,category,counterparty,product,source,account_key,amount,
+             COALESCE((SELECT json_group_array(tag_key) FROM transaction_tags tt WHERE tt.transaction_id=transactions.id),'[]') AS tag_keys
       FROM transactions WHERE month=? ORDER BY id
     `).all(month)).map(transactionFromRow);
   }
@@ -902,7 +983,10 @@ function operationFields(row: Transaction): Record<string, unknown> {
     source: row.source ?? "",
     category_key: row.category_key ?? null,
     category: row.category,
-    amount: row.amount
+    amount: row.amount,
+    // Tag order has no meaning; keep operation comparisons stable even when
+    // SQLite returns relation rows in a different index order.
+    tag_keys: [...new Set(row.tag_keys ?? [])].sort()
   };
 }
 
@@ -955,10 +1039,20 @@ function transactionFromOperationFields(
       ? null
       : scalarOperationText(fields.category_key, ""),
     category: scalarOperationText(fields.category, base.category),
-    amount: Number(fields.amount ?? base.amount)
+    amount: Number(fields.amount ?? base.amount),
+    tag_keys: Object.prototype.hasOwnProperty.call(fields, "tag_keys")
+      ? (Array.isArray(fields.tag_keys)
+          ? [...new Set(fields.tag_keys.map((value) => text(value)).filter(Boolean))]
+          : [])
+      : [...new Set(base.tag_keys ?? [])]
   };
 }
 
 function scalarOperationText(value: unknown, fallback: string): string {
   return value === undefined || value === null ? fallback : text(value);
+}
+
+function operationTagKeys(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map((item) => text(item)).filter(Boolean))];
 }

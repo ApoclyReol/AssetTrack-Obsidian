@@ -1,7 +1,12 @@
 import type {
   AccountDefinition,
+  AttributeGroup,
+  AttributeOption,
   CategoryDefinition,
-  MonthCreationPolicy
+  MonthCreationPolicy,
+  TagDefinition,
+  TaxonomyRemoval,
+  TaxonomyWorkspace
 } from "../types/configuration";
 import type {
   AnnualOverview
@@ -104,9 +109,29 @@ export interface MonthEditorPort extends RuleLookupPort, RuleWritePort {
     selection?: CsvStructureSelection
   ): Promise<CsvImportPreview>;
   categories(): Promise<{ revision: number; rows: CategoryDefinition[] }>;
+  taxonomy?: () => Promise<TaxonomyWorkspace>;
+  saveTaxonomy?: (
+    attributeRevision: number,
+    groups: AttributeGroup[],
+    options: AttributeOption[],
+    tagRevision: number,
+    tags: TagDefinition[],
+    removals?: TaxonomyRemoval[]
+  ) => Promise<TaxonomyWorkspace>;
 }
 
 export interface ConfigurationEditorPort extends RuleLookupPort, RuleWritePort {
+  taxonomy?: () => Promise<TaxonomyWorkspace>;
+  /** Create a local SQLite safety snapshot before destructive taxonomy edits. */
+  createProtectionBackup?: (prefix?: string) => Promise<string>;
+  saveTaxonomy?: (
+    attributeRevision: number,
+    groups: AttributeGroup[],
+    options: AttributeOption[],
+    tagRevision: number,
+    tags: TagDefinition[],
+    removals?: TaxonomyRemoval[]
+  ) => Promise<TaxonomyWorkspace>;
   ruleImpactPreview(rule: RuleRow): Promise<RuleImpactPreview>;
   ruleWorkspaceAnalytics(minOccurrences?: number): Promise<RuleWorkspaceAnalytics>;
   productOverview(query?: ProductHistoryQuery): Promise<ProductHistoryIndexResult>;

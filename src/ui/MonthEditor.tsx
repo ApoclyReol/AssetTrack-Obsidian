@@ -24,6 +24,7 @@ import type {
 import type {
   Transaction
 } from "../types/transactions";
+import type { TransactionAnalysisDrilldown } from "../types/analysis";
 import type {
   MonthEditorPort,
   RuleWritePort
@@ -192,6 +193,8 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
   hostWindow: Window;
   month: string;
   months: string[];
+  transactionDrilldown?: TransactionAnalysisDrilldown | null;
+  onClearTransactionDrilldown?: () => void;
   dataVersion: number;
   reconciliationTolerance: number;
   activeSection?: MonthSection;
@@ -216,6 +219,8 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
   hostWindow,
   month,
   months,
+  transactionDrilldown,
+  onClearTransactionDrilldown,
   dataVersion,
   reconciliationTolerance,
   activeSection,
@@ -271,6 +276,13 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
     hasUnsavedChanges,
     getDraftSnapshot
   } = session;
+  // MonthWorkspace is the canonical snapshot used to render this editor. It
+  // already contains the tag definitions that belong to the loaded month, so
+  // use it immediately instead of waiting for a second taxonomy request. The
+  // transaction tag editor refreshes the global taxonomy on demand through
+  // `loadTags`, which keeps long-lived drafts current without rendering an
+  // empty selector during the initial async load.
+  const tags = draft?.tags ?? [];
   const operations = useTransactionOperations({
     app,
     api,
@@ -279,6 +291,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
     month,
     draft,
     categories,
+    tags,
     rules,
     rulesRevision,
     setState,
@@ -339,7 +352,20 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
   ): Transaction => {
     const next = {
       ...row,
-      [field]: field === "amount" ? transactionAmount(value) : value
+      [field]: field === "amount"
+        ? transactionAmount(value)
+        : field === "tag_keys"
+          ? (() => {
+              try {
+                const parsed = JSON.parse(value) as unknown;
+                return Array.isArray(parsed)
+                  ? [...new Set(parsed.map((item) => String(item).trim()).filter(Boolean))]
+                  : [];
+              } catch {
+                return value.split(",").map((item) => item.trim()).filter(Boolean);
+              }
+            })()
+          : value
     };
     if (field === "type" && ["代付", "加仓", "提现"].includes(value)) {
       if (value !== "代付") {
@@ -662,6 +688,22 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
     }
     if (workflow.nextSection) await onNavigateSection?.(workflow.nextSection);
   };
+  const statusBar = <MonthEditorStatusBar
+    state={state}
+    workflow={workflow}
+    issues={issues}
+    feedback={csv.importFeedback}
+    lastSavedAt={lastSavedAt}
+    activeSection={activeSection}
+    compact={activeSection !== undefined}
+    onNextStep={goToNextStep}
+    onRetryImport={csv.openImport}
+    onSaveImport={saveAndClearImportFeedback}
+    onDismissImport={csv.clearImportFeedback}
+    onViewTransactions={onNavigateSection
+      ? () => { void onNavigateSection("transactions"); }
+      : undefined}
+  />;
 
   return (
     <main className="asset-track-editor">
@@ -701,6 +743,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
         monthMetrics={monthMetrics}
         reconciliationTolerance={reconciliationTolerance}
         businessTab={operations.businessTab}
+        statusBar={activeSection ? statusBar : undefined}
         hasSelectedTransactions={operations.selectedTransactionKeys.size > 0}
         emptyMonth={emptyMonth}
         deleteConfirm={deleteConfirm}
@@ -719,30 +762,21 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
           setDeleteConfirm("");
         }}
       />
-      <MonthEditorStatusBar
-        state={state}
-        workflow={workflow}
-        issues={issues}
-        feedback={csv.importFeedback}
-        lastSavedAt={lastSavedAt}
-        activeSection={activeSection}
-        onNextStep={goToNextStep}
-        onRetryImport={csv.openImport}
-        onSaveImport={saveAndClearImportFeedback}
-        onDismissImport={csv.clearImportFeedback}
-        onViewTransactions={onNavigateSection
-          ? () => { void onNavigateSection("transactions"); }
-          : undefined}
-      />
+      {activeSection === undefined && statusBar}
       {(showAllSections || activeSection === "assets") && <MonthEditorAssetsSection
         draft={draft}
         onCashBalanceChange={updateCashBalance}
         onInvestmentChange={updateInvestment}
       />}
       {(showAllSections || activeSection === "transactions") && <MonthEditorTransactionsSection
+        app={app}
         month={month}
         draft={draft}
         categories={categories}
+        tags={tags}
+        loadTags={api.taxonomy ? async () => (await api.taxonomy!()).tags : undefined}
+        transactionDrilldown={transactionDrilldown}
+        onClearTransactionDrilldown={onClearTransactionDrilldown}
         issues={issues}
         rules={rules}
         summarySort={summarySort}
@@ -808,6 +842,38 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
                 (row) => row.type === "支出" || row.type === "收入" || row.type === "代付"
               )}
             >{t("修改分类", "Edit category")}</button>
+          </>}
+          {(currentTab === "outgoing" || currentTab === "incoming") && <>
+            <button
+              type="button"
+              disabled={state.kind === "pending" || keys.size === 0}
+              onClick={() => operations.openTagBatchEdit(
+                "bulk-add-tag",
+                currentTab,
+                keys,
+                (row) => row.type === "支出" || row.type === "收入" || row.type === "代付"
+              )}
+            >{t("添加标签", "Add tag")}</button>
+            <button
+              type="button"
+              disabled={state.kind === "pending" || keys.size === 0}
+              onClick={() => operations.openTagBatchEdit(
+                "bulk-remove-tag",
+                currentTab,
+                keys,
+                (row) => row.type === "支出" || row.type === "收入" || row.type === "代付"
+              )}
+            >{t("移除标签", "Remove tag")}</button>
+            <button
+              type="button"
+              disabled={state.kind === "pending" || keys.size === 0}
+              onClick={() => operations.openTagBatchEdit(
+                "bulk-replace-tags",
+                currentTab,
+                keys,
+                (row) => row.type === "支出" || row.type === "收入" || row.type === "代付"
+              )}
+            >{t("替换标签", "Replace tags")}</button>
           </>}
           {currentTab === "incoming" && <>
             <button

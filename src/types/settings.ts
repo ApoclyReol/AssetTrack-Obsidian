@@ -6,7 +6,8 @@ export interface AssetTrackSettings {
   baseCurrency: string;
   currencyFormat: "standard" | "accounting";
   reconciliationTolerance: number;
-  largeExpenseThreshold: number;
+  /** Retained only to read old settings; large-ticket status now comes from attributes. */
+  largeExpenseThreshold?: number;
   aiEndpoint?: string;
   aiModel?: string;
   aiTimeoutMs?: number;
@@ -14,5 +15,5 @@ export interface AssetTrackSettings {
 
 export type AnalysisRuntimeSettings = Pick<
   AssetTrackSettings,
-  "reconciliationTolerance" | "largeExpenseThreshold"
+  "reconciliationTolerance"
 >;

@@ -57,8 +57,11 @@ export interface CategoryDefinition {
   category_key: string;
   name: string;
   transaction_type: "支出" | "收入";
+  /** Deprecated schema 11 storage field; use attribute_keys for behavior. */
   necessity: "必要" | "可控" | "不适用";
+  /** Deprecated schema 11 storage field; use attribute_keys for behavior. */
   pattern: "周期" | "日常" | "偶尔" | "不适用";
+  /** Deprecated schema 11 storage field; use attribute_keys for behavior. */
   is_big_ticket: boolean;
   color: string;
   is_active: boolean;
@@ -68,6 +71,63 @@ export interface CategoryDefinition {
   rule_count?: number;
   conflict_product_count?: number;
   impact_months?: string[];
+  /** Stable attribute option keys attached to this category. */
+  attribute_keys?: string[];
+}
+
+export interface AttributeGroup {
+  group_key: string;
+  name: string;
+  selection_mode: "single";
+  is_active: boolean;
+  sort_order: number;
+  option_count?: number;
+  usage_count?: number;
+  usage_revision?: number;
+  impact_months?: string[];
+}
+
+export interface AttributeOption {
+  attribute_key: string;
+  group_key: string;
+  name: string;
+  is_active: boolean;
+  sort_order: number;
+  category_count?: number;
+  usage_revision?: number;
+  impact_months?: string[];
+}
+
+export interface TagDefinition {
+  tag_key: string;
+  name: string;
+  description?: string;
+  color: string;
+  is_active: boolean;
+  sort_order: number;
+  transaction_count?: number;
+  usage_revision?: number;
+  impact_months?: string[];
+}
+
+export interface TaxonomyWorkspace {
+  attribute_revision: number;
+  tag_revision: number;
+  groups: AttributeGroup[];
+  options: AttributeOption[];
+  tags: TagDefinition[];
+}
+
+/** An explicit, revision-checked historical rewrite for removing a definition. */
+export interface TaxonomyRemoval {
+  kind: "group" | "option" | "tag";
+  key: string;
+  action: "clear" | "transfer";
+  target_key?: string;
+  expected_count: number;
+  expected_usage_revision: number;
+  /** Required for group transfer because existing selections in the target group are replaced. */
+  expected_target_group_usage_revision?: number;
 }
 
 export interface AccountDefinition {

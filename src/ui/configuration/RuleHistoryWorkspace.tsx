@@ -190,6 +190,7 @@ export function HistoryBackfillContent({
       from_date: undefined,
       to_date: undefined,
       read_scope: "all" as const,
+      group_by: groupBy,
       transaction_type: group.transaction_type,
       product_key: group.product_key
     };
@@ -223,7 +224,7 @@ export function HistoryBackfillContent({
     } finally {
       if (sequence === requestSequence.current) setLoading(false);
     }
-  }, [api, categories, detailOnly, embedded, onOpenDetail, query]);
+  }, [api, categories, detailOnly, embedded, groupBy, onOpenDetail, query]);
 
   useEffect(() => {
     if (mode !== "product" || detailOnly || hasLoadedOnce) return;
@@ -332,7 +333,7 @@ export function HistoryBackfillContent({
     if (!preview) return;
     const previewSnapshot = preview;
     const previewSequence = requestSequence.current;
-    if (mode === "category") {
+    if (mode === "category" && !embedded) {
       const confirmed = await confirmAction(
         t("确认迁移历史分类？", "Confirm historical category migration?"),
         t(
@@ -434,7 +435,7 @@ export function HistoryBackfillContent({
       onReset={resetFilters}
     />}
 
-    {scope && !detailOnly && <p className="asset-track-read-window-note" role="note">{overview
+    {scope && !detailOnly && !embedded && <p className="asset-track-read-window-note" role="note">{overview
       ? t(`商品总览范围：${scope.from_date} 至 ${scope.to_date}`, `Item overview range: ${scope.from_date} to ${scope.to_date}`)
       : mode === "category"
         ? t(`分类历史范围：全部历史（${scope.from_date} 至 ${scope.to_date}）`, `Category history range: all history (${scope.from_date} to ${scope.to_date})`)
@@ -472,7 +473,6 @@ export function HistoryBackfillContent({
 
     {mode === "category" && groups && <CategoryHistoryMigrationPanel
       groups={sortedGroups}
-      sourceCategoryName={sourceCategory?.name ?? ""}
       sort={sort}
       targetCategoryKey={targetCategoryKey}
       targetCategories={targetCategories}
@@ -487,7 +487,6 @@ export function HistoryBackfillContent({
       onTargetCategoryChange={updateTargetCategory}
       onPreview={() => { void previewBackfill(); }}
       onApply={() => { void applyBackfill(); }}
-      onClose={onClose}
     />}
 
     {mode === "product" && selectedGroup && detailRows && <ProductHistoryDetailPanel

@@ -6,10 +6,12 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { AssetTrackRepository } from "../../src/database/AssetTrackRepository";
 import { DatabaseManager } from "../../src/database/DatabaseManager";
 import { categoryKey } from "../../src/database/schema";
+import { createSchema } from "../../src/database/schema";
 import { BackupService } from "../../src/services/BackupService";
 
 const managers: DatabaseManager[] = [];
@@ -38,6 +40,27 @@ afterEach(() => {
 });
 
 describe("current backup service", () => {
+  it("validates and restores a schema 11 SQLite backup through protected migration", async () => {
+    const { repository, backup, root } = setup();
+    const legacyPath = join(root, "legacy.db");
+    const legacy = new DatabaseSync(legacyPath);
+    createSchema(legacy);
+    legacy.exec(`
+      DROP TABLE transaction_tags;
+      DROP TABLE category_attributes;
+      DROP TABLE tags;
+      DROP TABLE attribute_options;
+      DROP TABLE attribute_groups;
+      PRAGMA user_version=11;
+    `);
+    legacy.close();
+    const validation = await backup.validate(legacyPath);
+    expect(validation.valid).toBe(true);
+    expect(validation.schema.schema_version).toBe(12);
+    await expect(backup.restore(legacyPath)).resolves.toMatchObject({ mode: "sqlite" });
+    expect(repository.accounts().rows).toHaveLength(2);
+  });
+
   it("exports, validates and restores one complete zip", async () => {
     const { repository, backup, root } = setup();
     await repository.saveMonth(
@@ -100,6 +123,16 @@ describe("current backup service", () => {
     ]));
   });
 
+  it("serializes concurrent ZIP exports and keeps distinct output files", async () => {
+    const { backup, root } = setup();
+    const results = await Promise.all([
+      backup.exportZip(join(root, "exports")),
+      backup.exportZip(join(root, "exports"))
+    ]);
+    expect(new Set(results.map((result) => result.path)).size).toBe(2);
+    expect(results.every((result) => result.validation.valid)).toBe(true);
+  });
+
   it("rejects a damaged zip before replacing the current database", async () => {
     const { repository, backup, root } = setup();
     await repository.saveMonth(
@@ -146,5 +179,44 @@ describe("current backup service", () => {
     })).rejects.toThrow("restore guard rejected");
     expect(manager.isOpen).toBe(true);
     expect((await repository.getMonth("2026-01")).cash_accounts[0].balance).toBe(456);
+  });
+
+  it("serializes concurrent restores through one incoming candidate", async () => {
+    const { repository, backup, root } = setup();
+    await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 111 }],
+      [{
+        account_key: "investment-default",
+        principal: 0,
+        market_value: 0,
+        cash_balance: 0
+      }],
+      [],
+      []
+    );
+    const exported = await backup.exportZip(join(root, "exports"));
+    await repository.saveMonth(
+      "2026-01",
+      1,
+      [{ account_key: "cash-default", balance: 222 }],
+      [{
+        account_key: "investment-default",
+        principal: 0,
+        market_value: 0,
+        cash_balance: 0
+      }],
+      [],
+      []
+    );
+
+    const results = await Promise.all([
+      backup.restore(exported.path),
+      backup.restore(exported.path)
+    ]);
+    expect(results).toHaveLength(2);
+    expect(results.every((result) => result.safety_snapshot)).toBe(true);
+    expect((await repository.getMonth("2026-01")).cash_accounts[0].balance).toBe(111);
   });
 });

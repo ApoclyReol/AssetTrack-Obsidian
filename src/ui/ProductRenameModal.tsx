@@ -214,7 +214,7 @@ export class ProductRenameModal extends Modal {
 
   onOpen(): void {
     this.setTitle(t("编辑商品", "Edit item"));
-    this.modalEl.addClass("asset-track-product-rename-modal");
+    this.modalEl.addClass("asset-track-native-modal", "asset-track-product-rename-modal");
     const hostWindow = this.app.workspace.containerEl.ownerDocument.defaultView;
     if (!hostWindow) return;
     this.root = createRoot(this.contentEl);

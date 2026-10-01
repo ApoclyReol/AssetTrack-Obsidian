@@ -40,7 +40,7 @@ function scopeLabel(value: SavedRule["match_scope"] | null): string {
         : t("待填写", "Incomplete");
 }
 
-function RuleCreationContent({
+export function RuleCreationContent({
   categories,
   initial,
   onConfirm,
@@ -159,7 +159,7 @@ export class RuleCreationModal extends Modal {
     this.setTitle(this.options.initial.id
       ? t("编辑匹配规则", "Edit matching rule")
       : t("创建匹配规则", "Create matching rule"));
-    this.modalEl.addClass("asset-track-rule-create-modal");
+    this.modalEl.addClass("asset-track-native-modal", "asset-track-rule-create-modal");
     const hostWindow = this.app.workspace.containerEl.ownerDocument.defaultView;
     if (!hostWindow) return;
     this.root = createRoot(this.contentEl);

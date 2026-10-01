@@ -131,7 +131,7 @@ export class TransactionBatchEditModal extends Modal {
 
   onOpen(): void {
     this.setTitle(titleFor(this.options.operationType));
-    this.modalEl.addClass("asset-track-batch-edit-modal");
+    this.modalEl.addClass("asset-track-native-modal", "asset-track-batch-edit-modal");
     this.root = createRoot(this.contentEl);
     this.root.render(createElement(BatchEditContent, {
       operationType: this.options.operationType,

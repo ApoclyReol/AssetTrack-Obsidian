@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import {
   CURRENT_SCHEMA_VERSION,
+  SCHEMA11_VERSION,
   SCHEMA10_VERSION,
   SCHEMA9_VERSION,
   REQUIRED_COLUMNS,
@@ -50,10 +51,21 @@ export interface SchemaValidation {
   foreign_key_violations: number | null;
 }
 
+/** Read-only information shown before a pre-taxonomy database is opened. */
+export interface DatabaseMigrationImpact {
+  from_schema: number;
+  category_count: number;
+  transaction_count: number;
+  legacy_necessity_count: number;
+  legacy_pattern_count: number;
+  legacy_big_ticket_count: number;
+}
+
 export interface DatabaseInspection {
   exists: boolean;
   valid: boolean;
   migration_required?: boolean;
+  migration_impact?: DatabaseMigrationImpact;
   recovery_available?: boolean;
   validation: SchemaValidation | null;
   error: string | AssetTrackError | null;
@@ -93,6 +105,45 @@ function tableNames(db: DatabaseSync): string[] {
     "SELECT name FROM sqlite_master "
     + "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
   ).all() as Array<{ name: string }>).map((row) => row.name);
+}
+
+function migrationImpact(
+  db: DatabaseSync,
+  version: number
+): DatabaseMigrationImpact {
+  const tables = new Set(tableNames(db));
+  const columns = new Map<string, Set<string>>();
+  const hasColumn = (table: string, column: string): boolean => {
+    if (!tables.has(table)) return false;
+    let tableColumns = columns.get(table);
+    if (!tableColumns) {
+      tableColumns = new Set(
+        (db.prepare(`PRAGMA table_xinfo("${table}")`).all() as Array<{ name: string }>)
+          .map((row) => row.name)
+      );
+      columns.set(table, tableColumns);
+    }
+    return tableColumns.has(column);
+  };
+  const count = (table: string, where = ""): number => {
+    if (!tables.has(table)) return 0;
+    try {
+      return Number((db.prepare(`SELECT COUNT(*) AS count FROM ${table}${where}`).get() as { count: number }).count);
+    } catch {
+      return 0;
+    }
+  };
+  return {
+    from_schema: version,
+    category_count: count("category_definitions"),
+    transaction_count: count("transactions"),
+    legacy_necessity_count: hasColumn("category_definitions", "necessity")
+      ? count("category_definitions", " WHERE necessity IN ('必要','可控','不适用')") : 0,
+    legacy_pattern_count: hasColumn("category_definitions", "pattern")
+      ? count("category_definitions", " WHERE pattern IN ('周期','日常','偶尔','不适用')") : 0,
+    legacy_big_ticket_count: hasColumn("category_definitions", "is_big_ticket")
+      ? count("category_definitions", " WHERE is_big_ticket=1") : 0
+  };
 }
 
 function normalizedSql(value: unknown): string {
@@ -257,9 +308,21 @@ function schemaValidation(db: DatabaseSync, full: boolean): SchemaValidation {
         && String(foreignKey.on_delete ?? "NO ACTION").toUpperCase() === "NO ACTION"
         && String(foreignKey.on_update ?? "NO ACTION").toUpperCase() === "NO ACTION"
     )
-      ? []
-      : [`${expected.table}.${expected.from}`
-        + `→${expected.targetTable}.${expected.targetColumn}`];
+      ? (expected.onDelete === undefined && expected.onUpdate === undefined
+        ? []
+        : [`${expected.table}.${expected.from}`
+          + `→${expected.targetTable}.${expected.targetColumn}`])
+      : foreignKeys.some(
+          (foreignKey) =>
+            foreignKey.table === expected.targetTable
+            && foreignKey.from === expected.from
+            && foreignKey.to === expected.targetColumn
+            && String(foreignKey.on_delete ?? "NO ACTION").toUpperCase() === String(expected.onDelete ?? "NO ACTION").toUpperCase()
+            && String(foreignKey.on_update ?? "NO ACTION").toUpperCase() === String(expected.onUpdate ?? "NO ACTION").toUpperCase()
+        )
+        ? []
+        : [`${expected.table}.${expected.from}`
+          + `→${expected.targetTable}.${expected.targetColumn}`];
   });
   const version = Number(
     (db.prepare("PRAGMA user_version").get() as { user_version: number })
@@ -336,7 +399,7 @@ function validationError(validation: SchemaValidation): string {
   const columns = Object.entries(validation.missing_columns)
     .map(([table, missing]) => `${table}(${missing.join(",")})`)
     .join(";");
-  return `仅支持完整 schema ${CURRENT_SCHEMA_VERSION} 数据库（schema ${SCHEMA9_VERSION}/${SCHEMA10_VERSION} 会在打开时迁移）；`
+  return `仅支持完整 schema ${CURRENT_SCHEMA_VERSION} 数据库（schema ${SCHEMA9_VERSION}/${SCHEMA10_VERSION}/${SCHEMA11_VERSION} 会在打开时迁移）；`
     + `版本=${validation.schema_version}，`
     + `缺少表=${validation.missing_tables.join(",") || "无"}，`
     + `缺少字段=${columns || "无"}，`
@@ -356,9 +419,12 @@ function validationError(validation: SchemaValidation): string {
 export class DatabaseManager {
   private db: DatabaseSync | null = null;
   private writeTail: Promise<unknown> = Promise.resolve();
+  private controlTail: Promise<void> = Promise.resolve();
+  private controlLockDepth = 0;
   private restoring = false;
   private acceptingWrites = true;
   private migrationReport: SchemaMigrationReport | null = null;
+  private migrationOptions: { preserveLegacyAttributes?: boolean } = {};
 
   constructor(private path: string) {}
 
@@ -383,6 +449,9 @@ export class DatabaseManager {
         exists: true,
         valid: validation.valid,
         migration_required: migrationRequired,
+        ...(migrationRequired
+          ? { migration_impact: migrationImpact(db, validation.schema_version) }
+          : {}),
         ...(!validation.valid && !migrationRequired && recoveryArtifact(path)
           ? { recovery_available: true }
           : {}),
@@ -408,7 +477,9 @@ export class DatabaseManager {
 
   setPath(path: string): void {
     if (path === this.path) return;
-    this.close();
+    if (this.db || this.restoring) {
+      throw new AssetTrackError({ code: "database.already_open", status: 409 });
+    }
     this.path = path;
   }
 
@@ -420,11 +491,22 @@ export class DatabaseManager {
     return this.db !== null;
   }
 
-  private canApplyMigrations(version: number): boolean {
-    return version === SCHEMA9_VERSION || version === SCHEMA10_VERSION;
+  get lastMigrationReport(): SchemaMigrationReport | null {
+    return this.migrationReport;
   }
 
-  open(): DatabaseSync {
+  setMigrationOptions(options: { preserveLegacyAttributes?: boolean }): void {
+    if (this.db) {
+      throw new AssetTrackError({ code: "database.already_open", status: 409 });
+    }
+    this.migrationOptions = { ...options };
+  }
+
+  private canApplyMigrations(version: number): boolean {
+    return version === SCHEMA9_VERSION || version === SCHEMA10_VERSION || version === SCHEMA11_VERSION;
+  }
+
+  open(migrationOptions: { preserveLegacyAttributes?: boolean } = {}): DatabaseSync {
     if (this.db) return this.db;
     if (!this.restoring) this.recoverRestoreArtifacts();
     const runtime = sqliteRuntime();
@@ -462,7 +544,10 @@ export class DatabaseManager {
       } else if (this.canApplyMigrations(version)) {
         migrationProtectionBackup = this.createMigrationProtectionBackup(db, version);
         try {
-          this.migrationReport = migrateSchemaToCurrent(db);
+          this.migrationReport = migrateSchemaToCurrent(db, {
+            ...this.migrationOptions,
+            ...migrationOptions
+          });
           this.migrationReport.protection_backup_path = migrationProtectionBackup;
         } catch (error) {
           if (error instanceof SchemaMigrationError) {
@@ -531,6 +616,71 @@ export class DatabaseManager {
     await this.writeTail;
   }
 
+  private async withControlLock<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.controlTail;
+    let release!: () => void;
+    this.controlTail = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    this.controlLockDepth += 1;
+    try {
+      return await operation();
+    } finally {
+      this.controlLockDepth -= 1;
+      release();
+    }
+  }
+
+  /**
+   * Serialize a control-plane operation while rejecting new writes for its
+   * whole duration. This is used by directory switching, where taking a
+   * snapshot alone is not enough: the old service must remain quiescent until
+   * the replacement API is ready to publish.
+   */
+  async withExclusiveControl<T>(operation: () => Promise<T>): Promise<T> {
+    return this.withControlLock(async () => {
+      const previousAcceptingWrites = this.acceptingWrites;
+      this.acceptingWrites = false;
+      await this.drain();
+      try {
+        return await operation();
+      } finally {
+        // A successful directory switch closes this manager permanently. Do
+        // not re-enable writes on a closed connection; failed preparations
+        // still leave the old open manager writable.
+        this.acceptingWrites = this.db ? previousAcceptingWrites : false;
+      }
+    });
+  }
+
+  private async snapshotNow(targetPath: string): Promise<void> {
+    if (!this.db) {
+      throw new AssetTrackError({ code: "database.not_open", status: 409 });
+    }
+    mkdirSync(dirname(targetPath), { recursive: true });
+    await sqliteRuntime().backup(this.db, targetPath);
+  }
+
+  /**
+   * Used by a restore operation while the database control lock is already
+   * held. Keeping this separate from snapshot() prevents a nested lock
+   * deadlock while still making an in-flight restore/backup interleave
+   * impossible for external callers.
+   */
+  async snapshotWithinControlLock(targetPath: string): Promise<void> {
+    if (this.controlLockDepth === 0) {
+      throw new AssetTrackError({ code: "database.control_lock_required", status: 409 });
+    }
+    await this.snapshotNow(targetPath);
+  }
+
+  async closeWhenIdle(): Promise<void> {
+    await this.withControlLock(async () => {
+      this.acceptingWrites = false;
+      await this.drain();
+      this.close();
+    });
+  }
+
   close(): void {
     this.acceptingWrites = false;
     if (!this.db) return;
@@ -539,38 +689,54 @@ export class DatabaseManager {
   }
 
   async reopen(): Promise<void> {
-    this.acceptingWrites = false;
-    await this.drain();
-    this.close();
-    this.open();
-    this.acceptingWrites = true;
+    await this.withControlLock(async () => {
+      const previousAcceptingWrites = this.acceptingWrites;
+      this.acceptingWrites = false;
+      try {
+        await this.drain();
+        this.close();
+        this.open();
+      } finally {
+        this.acceptingWrites = previousAcceptingWrites;
+      }
+    });
   }
 
   async withRestoreLock<T>(
     operation: () => Promise<T>,
     beforeClose?: () => Promise<void>
   ): Promise<T> {
-    this.acceptingWrites = false;
-    await this.drain();
-    try {
-      // The callback runs after the write queue has drained but before the
-      // connection is closed. This lets restore create its safety snapshot
-      // while the restore lock already blocks every new write.
-      await beforeClose?.();
-      this.restoring = true;
-      this.close();
-      return await operation();
-    } finally {
-      this.restoring = false;
-      this.acceptingWrites = true;
-    }
+    return this.withControlLock(async () => {
+      const previousAcceptingWrites = this.acceptingWrites;
+      this.acceptingWrites = false;
+      await this.drain();
+      try {
+        // The callback runs after the write queue has drained and while the
+        // control lock blocks every competing snapshot or restore. Restore's
+        // safety snapshot uses snapshotWithinControlLock() to avoid nesting
+        // the public lock method.
+        await beforeClose?.();
+        this.restoring = true;
+        this.close();
+        return await operation();
+      } finally {
+        this.restoring = false;
+        this.acceptingWrites = previousAcceptingWrites;
+      }
+    });
   }
 
   async snapshot(targetPath: string): Promise<void> {
-    await this.drain();
-    mkdirSync(dirname(targetPath), { recursive: true });
-    const db = this.db ?? this.open();
-    await sqliteRuntime().backup(db, targetPath);
+    await this.withControlLock(async () => {
+      const previousAcceptingWrites = this.acceptingWrites;
+      this.acceptingWrites = false;
+      try {
+        await this.drain();
+        await this.snapshotNow(targetPath);
+      } finally {
+        this.acceptingWrites = previousAcceptingWrites;
+      }
+    });
   }
 
   validate(full = true): SchemaValidation {
@@ -682,11 +848,19 @@ export class DatabaseManager {
         "investment_account_balances",
         "fixed_assets",
         "debt_manager",
-        "month_status"
+        "month_status",
+        "auto_rules",
+        "operation_logs"
       ];
+      const sourceTables = new Set(tableNames(db));
+      const backupTables = new Set(tableNames(snapshot));
       const countMismatch = preservedTables.find((table) => {
-        const sourceCount = Number((db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count);
-        const backupCount = Number((snapshot.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count);
+        const sourceCount = sourceTables.has(table)
+          ? Number((db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count)
+          : 0;
+        const backupCount = backupTables.has(table)
+          ? Number((snapshot.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count)
+          : 0;
         return sourceCount !== backupCount;
       });
       if (version !== sourceVersion || integrity !== "ok" || countMismatch) {

@@ -301,7 +301,17 @@ export function CsvImportDialog({
   );
   const [error, setError] = useState("");
   const previewRequestSequence = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => () => {
+    mounted.current = false;
+    previewRequestSequence.current += 1;
+  }, []);
   useEffect(() => {
+    // A parent may replace the inspection while a header/worksheet reread is
+    // still in flight. Invalidate that request before installing the new
+    // session snapshot so the old response cannot write back into it.
+    previewRequestSequence.current += 1;
+    setHeaderBusy(false);
     setActiveInspection(inspection);
     setMapping(initialMapping(inspection, savedMapping));
     setPreview(null);
@@ -385,12 +395,14 @@ export function CsvImportDialog({
       return;
     }
     previewRequestSequence.current += 1;
+    const sequence = previewRequestSequence.current;
     setHeaderBusy(true);
     setHeaderError("");
     setError("");
     setPreview(null);
     try {
       const nextInspection = await onHeaderRowChange(selection);
+      if (!mounted.current || sequence !== previewRequestSequence.current) return;
       setActiveInspection(nextInspection);
       setMapping(initialMapping(nextInspection));
       setHeaderRowInput(String(nextInspection.header_row ?? row ?? 1));
@@ -399,16 +411,16 @@ export function CsvImportDialog({
         && !nextInspection.header_confirmed
       );
     } catch (reason) {
-      setHeaderError(displayError(reason));
+      if (mounted.current && sequence === previewRequestSequence.current) setHeaderError(displayError(reason));
     } finally {
-      setHeaderBusy(false);
+      if (mounted.current && sequence === previewRequestSequence.current) setHeaderBusy(false);
     }
   };
   const valid = requiredFields().every(([field]) =>
     scalarText(mapping[field]).trim()
   )
-    && directionValues.every((value) => Boolean(mapping.type_values[value]))
-    && (!mapping.status_column || mapping.included_statuses.length > 0);
+    && directionValues.every((value) => scalarText(mapping.type_values[value]).trim())
+    && (!mapping.status_column || statusValues.length === 0 || mapping.included_statuses.length > 0);
   const blockingIssueCount = preview?.issues.filter(issueIsBlocking).length ?? 0;
   const warningIssueCount = (preview?.issues.length ?? 0) - blockingIssueCount;
   const filteredSummary = preview
@@ -431,17 +443,22 @@ export function CsvImportDialog({
   };
 
   const clearSavedMapping = async (): Promise<void> => {
-    previewRequestSequence.current += 1;
+    const sequence = ++previewRequestSequence.current;
     setPreview(null);
     setError("");
     setMappingBusy(true);
     try {
       await onClearSavedMapping?.(activeInspection.header_signature);
+      if (!mounted.current || sequence !== previewRequestSequence.current) return;
       setMapping(initialMapping(activeInspection));
     } catch (reason) {
-      setError(displayError(reason));
+      if (mounted.current && sequence === previewRequestSequence.current) {
+        setError(displayError(reason));
+      }
     } finally {
-      setMappingBusy(false);
+      if (mounted.current && sequence === previewRequestSequence.current) {
+        setMappingBusy(false);
+      }
     }
   };
 
@@ -962,16 +979,25 @@ export function CsvImportDialog({
             </span>
             <small>{t("这 4 项都确认后才能生成预览", "All four must be confirmed before previewing")}</small>
           </legend>
+          {!valid && (
+            <p className="asset-track-import-validation-hint" role="status">
+              {t(
+                "请先完成红色标记的字段和收支映射，生成预览按钮才会启用。",
+                "Complete the fields and type mappings highlighted in red to enable preview."
+              )}
+            </p>
+          )}
           <div className="asset-track-mapping-grid">
             {requiredFields().map(([field, label]) => {
               const selected = scalarText(mapping[field]);
+              const incomplete = !selected.trim();
               const meta = selected === "__month_start__"
                 ? t("每条流水使用当前月 1 日", "Every row uses the first day of the target month")
                 : selected
                   ? formatColumnMeta(activeInspection, selected)
                   : t("尚未选择列", "No column selected");
               return (
-                <label key={field} className="asset-track-import-field">
+                <label key={field} className={`asset-track-import-field${incomplete ? " is-incomplete" : ""}`}>
                   <span className="asset-track-import-field-label">
                     <strong>{label}</strong>
                     <small>{fieldHelp(field)}</small>
@@ -981,6 +1007,8 @@ export function CsvImportDialog({
                       value={selected}
                       disabled={interactionBusy}
                       aria-required="true"
+                      aria-invalid={incomplete}
+                      aria-describedby={incomplete ? `${titleId}-${field}-required` : undefined}
                       title={meta}
                       onChange={(event) => setColumn(field, event.target.value)}
                     >
@@ -997,6 +1025,11 @@ export function CsvImportDialog({
                         <option key={header} value={header}>{header}</option>
                       ))}
                     </select>
+                    {incomplete && (
+                      <small id={`${titleId}-${field}-required`} className="asset-track-import-field-warning">
+                        {t("需要选择", "Selection required")}
+                      </small>
+                    )}
                   </span>
                 </label>
               );
@@ -1069,10 +1102,12 @@ export function CsvImportDialog({
               </span>
             </legend>
             <div className="asset-track-import-control-list">
-              {directionValues.map((raw) => {
+              {directionValues.map((raw, rawIndex) => {
                 const count = valueCountFor(activeInspection, mapping.type_column, raw);
+                const incomplete = !scalarText(mapping.type_values[raw]).trim();
+                const rawKey = `type-${rawIndex}`;
                 return (
-                  <label key={raw} className="asset-track-import-value-row">
+                  <label key={raw} className={`asset-track-import-value-row${incomplete ? " is-incomplete" : ""}`}>
                     <span className="asset-track-import-value-label">
                       <strong>{raw || t("（空收支值）", "(empty type value)")}</strong>
                       <small>
@@ -1080,10 +1115,17 @@ export function CsvImportDialog({
                           ? t("数量未知", "Count unavailable")
                           : `${count} ${t("行", "rows")}`}
                       </small>
+                      {incomplete && (
+                        <small id={`${titleId}-${rawKey}-required`} className="asset-track-import-field-warning">
+                          {t("需要选择映射", "Mapping required")}
+                        </small>
+                      )}
                     </span>
                     <select
                       value={mapping.type_values[raw] ?? ""}
                       disabled={interactionBusy}
+                      aria-invalid={incomplete}
+                      aria-describedby={incomplete ? `${titleId}-${rawKey}-required` : undefined}
                       aria-label={t(`将${raw || "空收支值"}映射为`, `Map ${raw || "empty type value"} to`)}
                       onChange={(event) => {
                         previewRequestSequence.current += 1;
@@ -1111,7 +1153,7 @@ export function CsvImportDialog({
         )}
 
         {mapping.status_column && statusValues.length > 0 && (
-          <fieldset className="asset-track-import-fieldset asset-track-import-statuses">
+          <fieldset className={`asset-track-import-fieldset asset-track-import-statuses${mapping.included_statuses.length > 0 ? "" : " is-incomplete"}`}>
             <legend>
               <span
                 className="asset-track-import-legend-title"
@@ -1130,6 +1172,11 @@ export function CsvImportDialog({
                 {mapping.included_statuses.length} / {statusValues.length} {t("已选择", "selected")}
               </span>
             </legend>
+            {mapping.included_statuses.length === 0 && (
+              <p className="asset-track-import-field-warning">
+                {t("至少选择一个要导入的状态。", "Select at least one status to import.")}
+              </p>
+            )}
             <div className="asset-track-import-control-list">
               {statusValues.map((status) => {
                 const count = valueCountFor(activeInspection, mapping.status_column ?? "", status);

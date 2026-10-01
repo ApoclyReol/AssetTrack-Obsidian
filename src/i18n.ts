@@ -128,6 +128,11 @@ function structuredErrorText(
         chinese: `revision 冲突：草稿基于 ${paramText(params, "expected")}，当前数据库为 ${paramText(params, "actual")}。请重新加载。`,
         english: `Revision conflict: the draft is based on ${paramText(params, "expected")}, but the database is at ${paramText(params, "actual")}. Reload and try again.`
       };
+    case "database.migration_confirmation_required":
+      return {
+        chinese: "发现旧版数据库。请先在插件设置中查看迁移影响，并选择保留、清除或取消；原数据库尚未打开。",
+        english: "An older database was found. Review its migration impact in plugin settings and choose preserve, clear, or cancel. The original database has not been opened."
+      };
     case "rules.revision_conflict":
       return {
         chinese: `规则 revision 冲突：预览基于 ${paramText(params, "expected_rules_revision")}，当前规则为 ${paramText(params, "actual_rules_revision")}。请重新生成预览。`,
@@ -152,6 +157,11 @@ function structuredErrorText(
       return {
         chinese: "批量分类的目标分类必须与所有选中流水的收支类型一致。",
         english: "The target category must match the transaction type of every selected row."
+      };
+    case "transaction.tag.invalid_target":
+      return {
+        chinese: "标签操作包含不存在或已停用的标签；添加和替换只能使用启用标签。",
+        english: "The tag operation includes a missing or inactive tag. Add and replace operations require active tags."
       };
     case "transaction.operation.unsupported":
       return {
@@ -533,9 +543,40 @@ function structuredErrorText(
     case "operation.preview_draft_mismatch":
     case "operation.preview_uncategorized_changed":
     case "operation.preview_category_changed":
+    case "operation.preview_tag_changed":
       return {
         chinese: "流水操作预览已失效，请重新生成后再保存。",
         english: "The transaction operation preview is no longer valid. Generate it again before saving."
+      };
+    case "category.attribute_invalid":
+      return {
+        chinese: `第 ${paramText(params, "row")} 个分类包含不存在或已停用的属性选项。`,
+        english: `Category row ${paramText(params, "row")} contains a missing or inactive attribute option.`
+      };
+    case "category.attribute_group_duplicate":
+      return {
+        chinese: `第 ${paramText(params, "row")} 个分类在同一属性组中选择了多个选项。每组只能选择一项。`,
+        english: `Category row ${paramText(params, "row")} selects multiple options in one attribute group. Choose one option per group.`
+      };
+    case "attribute.group_invalid":
+      return {
+        chinese: `第 ${paramText(params, "row")} 个属性组无效，请检查名称、键值和状态。`,
+        english: `Attribute group row ${paramText(params, "row")} is invalid. Check its name, key, and status.`
+      };
+    case "attribute.option_invalid":
+      return {
+        chinese: `第 ${paramText(params, "row")} 个属性选项无效，请检查所属组、名称、键值和状态。`,
+        english: `Attribute option row ${paramText(params, "row")} is invalid. Check its group, name, key, and status.`
+      };
+    case "tag.invalid":
+      return {
+        chinese: `第 ${paramText(params, "row")} 个标签无效，请检查名称、键值和状态。`,
+        english: `Tag row ${paramText(params, "row")} is invalid. Check its name, key, and status.`
+      };
+    case "taxonomy.removal_invalid":
+      return {
+        chinese: "属性或标签的移除方案已失效，请重新加载配置后再次选择“清理”或“转移”。",
+        english: "The attribute or tag removal plan is no longer valid. Reload the configuration and choose “clear” or “transfer” again."
       };
     case "backup.directory_required":
       return {
@@ -556,6 +597,11 @@ function structuredErrorText(
       };
     case "backup.zip.central_directory_invalid":
       return { chinese: "ZIP 中央目录无效。", english: "The ZIP central directory is invalid." };
+    case "backup.zip.duplicate_member":
+      return {
+        chinese: `ZIP 包含重复文件：${paramText(params, "path")}`,
+        english: `The ZIP contains a duplicate file: ${paramText(params, "path")}`
+      };
     case "backup.zip.uncompressed_limit":
       return {
         chinese: "ZIP 解压后体积超过安全上限。",
@@ -568,6 +614,11 @@ function structuredErrorText(
       };
     case "backup.zip.local_directory_invalid":
       return { chinese: "ZIP 本地目录无效。", english: "The ZIP local directory is invalid." };
+    case "backup.zip.local_data_invalid":
+      return {
+        chinese: `ZIP 本地数据边界无效：${paramText(params, "path")}`,
+        english: `The ZIP local data range is invalid: ${paramText(params, "path")}`
+      };
     case "backup.zip.compression_unsupported":
       return {
         chinese: `ZIP 压缩算法不受支持：${paramText(params, "method")}`,
@@ -592,6 +643,11 @@ function structuredErrorText(
       return {
         chinese: `不支持的备份来源：${paramText(params, "path")}`,
         english: `The backup source is not supported: ${paramText(params, "path")}`
+      };
+    case "backup.source_changed":
+      return {
+        chinese: `备份来源在校验或复制期间发生变化：${paramText(params, "path")}`,
+        english: `The backup source changed during validation or copy: ${paramText(params, "path")}`
       };
     case "backup.manifest_unreadable":
       return {
@@ -679,6 +735,16 @@ function structuredErrorText(
       return {
         chinese: "数据库正在恢复，请稍后重试",
         english: "The database is being restored. Try again shortly."
+      };
+    case "database.not_open":
+      return {
+        chinese: "数据库连接尚未打开。",
+        english: "The database connection is not open."
+      };
+    case "database.control_lock_required":
+      return {
+        chinese: "该数据库操作必须在控制面锁内执行。",
+        english: "This database operation requires the control-plane lock."
       };
     case "database.already_open":
       return {

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type {
   MonthSection,
   MonthWorkspace
@@ -23,6 +24,7 @@ interface MonthEditorHeaderProps {
   monthMetrics: MonthMetrics;
   reconciliationTolerance: number;
   businessTab: TransactionBusinessTab;
+  statusBar?: ReactNode;
   hasSelectedTransactions?: boolean;
   emptyMonth: boolean;
   deleteConfirm: string;
@@ -84,6 +86,7 @@ export function MonthEditorHeader({
   monthMetrics,
   reconciliationTolerance,
   businessTab,
+  statusBar,
   hasSelectedTransactions = false,
   emptyMonth,
   deleteConfirm,
@@ -111,6 +114,7 @@ export function MonthEditorHeader({
           <div className="asset-track-page-heading-content">
             <div className="asset-track-page-heading-main">
               <h2>{activeSectionTitle(activeSection, draft)}</h2>
+              {activeSection && statusBar && <div className="asset-track-month-inline-status">{statusBar}</div>}
               {activeSection === "transactions" && <div
                 className="asset-track-transaction-business-tabs"
                 role="tablist"

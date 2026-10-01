@@ -6,6 +6,7 @@ import type {
 import type { MonthlyCalculation } from "./analysis";
 import type { Transaction } from "./transactions";
 import type { PendingOperationLog } from "./operations";
+import type { AttributeGroup, AttributeOption, TagDefinition } from "./configuration";
 import type { ReadWindow } from "./readWindows";
 
 export interface FixedAsset {
@@ -42,6 +43,9 @@ export interface MonthWorkspace {
   cash_accounts: CashAccountBalance[];
   investment_accounts: InvestmentAccountBalance[];
   transactions: Transaction[];
+  attribute_groups?: AttributeGroup[];
+  attribute_options?: AttributeOption[];
+  tags?: TagDefinition[];
   debts: DebtRecord[];
   fixed_assets: FixedAsset[];
   computed: MonthlyCalculation | null;
@@ -166,6 +170,14 @@ export interface MonthOverview {
     controlled_categories: string[];
   };
   category_summary?: Array<{ category: string; amount: number }>;
+  income_transactions?: Array<{
+    id: number | null;
+    transaction_date: string;
+    product: string;
+    counterparty: string;
+    category: string;
+    amount: number;
+  }>;
   category_comparison?: {
     available: boolean;
     previous_month: string | null;
@@ -177,4 +189,19 @@ export interface MonthOverview {
     }>;
   };
   big_tickets?: Array<{ product: string; category: string; amount: number }>;
+  attribute_summary?: Array<{
+    group_key: string;
+    group: string;
+    attribute_key: string;
+    attribute: string;
+    amount: number;
+    transaction_count: number;
+  }>;
+  tag_summary?: Array<{
+    tag_key: string;
+    tag: string;
+    amount: number;
+    transaction_count: number;
+    categories: Array<{ category: string; amount: number }>;
+  }>;
 }

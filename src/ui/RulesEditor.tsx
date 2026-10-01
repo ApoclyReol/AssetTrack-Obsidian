@@ -1,7 +1,8 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Notice, type App } from "obsidian";
 import type {
-  CategoryDefinition
+  CategoryDefinition,
+  TaxonomyWorkspace
 } from "../types/configuration";
 import type {
   HistoricalProductStat,
@@ -16,16 +17,9 @@ import type { ConfigurationEditorPort } from "../services/ports";
 import { AssetTrackError } from "../application/errors";
 import { inferRuleScopeFromConditions, ruleConditionKey } from "../domain/rules";
 import { t } from "../i18n";
-import {
-  HistoryBackfillContent,
-  ProductRenameModal,
-  type ProductRenameGroup,
-  RuleCreationModal,
-  RuleHistoryModal
-} from "./RuleHistoryModal";
-import { CounterpartyRenameModal, type CounterpartyRenameGroup } from "./CounterpartyRenameModal";
+import { HistoryBackfillContent } from "./configuration/RuleHistoryWorkspace";
+import { HistoryItemEditorModal } from "./HistoryItemEditorModal";
 import type { RulesMode } from "../constants";
-import { alertAction } from "./ConfirmModal";
 import {
   messageFor,
   OperationState,
@@ -39,6 +33,8 @@ import type {
 } from "./editorDraft";
 import { CategoryDefinitionsTable } from "./rules/CategoryDefinitionsTable";
 import { MatchingRulesTable } from "./rules/MatchingRulesTable";
+import { TaxonomyPanel } from "./rules/TaxonomyPanel";
+import type { TaxonomyPanelHandle } from "./rules/TaxonomyPanel";
 import type { EditorSession } from "./editorSession";
 import { useConfigurationSession } from "./rules/useConfigurationSession";
 import { useRuleAnalytics } from "./rules/useRuleAnalytics";
@@ -95,6 +91,9 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
   const [categoryState, setCategoryState] = useState<OperationState>({ kind: "idle" });
   const [ruleState, setRuleState] = useState<OperationState>({ kind: "idle" });
   const [state, setState] = useState<OperationState>({ kind: "idle" });
+  const [taxonomy, setTaxonomy] = useState<TaxonomyWorkspace | null>(null);
+  const [taxonomyDirty, setTaxonomyDirty] = useState(false);
+  const taxonomyPanelRef = useRef<TaxonomyPanelHandle | null>(null);
   const rulesSectionRef = useRef<HTMLElement | null>(null);
   const editorRequestSequence = useRef(0);
   const mounted = useRef(true);
@@ -126,6 +125,14 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
     updateRules,
     getDraftSnapshot
   } = session;
+  useEffect(() => {
+    if (!api.taxonomy) return;
+    let active = true;
+    void api.taxonomy().then((next) => {
+      if (active) setTaxonomy(next);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [api, dataVersion]);
   const onAnalyticsError = useCallback((message: string) => {
     setState({ kind: "error", message });
   }, []);
@@ -177,12 +184,22 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
     onSaved();
   }, [loadAnalytics, onSaved]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     const sequence = ++editorRequestSequence.current;
+    const generation = draftGeneration.current;
     setState({ kind: "pending", message: t("加载数据健康…", "Loading data health…") });
     try {
       const shell: RuleWorkspaceShell = await api.ruleWorkspaceShell();
       if (!mounted.current || sequence !== editorRequestSequence.current) return;
+      if (!force && (generation !== draftGeneration.current
+        || dirtyFlagsRef.current.category || dirtyFlagsRef.current.rule)) {
+        const message = t(
+          "加载期间产生了新修改，当前草稿已保留。",
+          "New edits were made while loading; the current draft was preserved."
+        );
+        setState({ kind: "error", message });
+        return;
+      }
       setWorkspace({ ...shell, recommendations: [], historical_products: [], rule_conflicts: [], summary: EMPTY_RULE_HEALTH_SUMMARY });
       setAnalyticsReady(false);
       setDirtyFlags(false, false);
@@ -196,7 +213,7 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
       new Notice(message);
       setState({ kind: "error", message });
     }
-  }, [api, clearSaveBlock, onSessionChange, scheduleAnalyticsLoad, setDirtyFlags]);
+  }, [api, clearSaveBlock, dirtyFlagsRef, draftGeneration, onSessionChange, scheduleAnalyticsLoad, setDirtyFlags]);
 
   useEffect(() => {
     const restored = restoredDraft.current;
@@ -294,6 +311,36 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
     const sequence = ++editorRequestSequence.current;
     const generation = draftGeneration.current;
     const submittedCategories = workspace.categories;
+    let currentShell: RuleWorkspaceShell;
+    try {
+      currentShell = await api.ruleWorkspaceShell();
+    } catch (error) {
+      if (!mounted.current || sequence !== editorRequestSequence.current) return { saved: false };
+      const message = messageFor(error);
+      new Notice(message);
+      setCategoryState({ kind: "error", message });
+      return { saved: false };
+    }
+    const currentByKey = new Map(currentShell.categories.map((category) => [category.category_key, category]));
+    const attributeChanges = submittedCategories.flatMap((category) => {
+      const current = currentByKey.get(category.category_key);
+      const before = [...new Set(current?.attribute_keys ?? [])].sort();
+      const after = [...new Set(category.attribute_keys ?? [])].sort();
+      return JSON.stringify(before) === JSON.stringify(after)
+        ? []
+        : [category];
+    });
+    if (attributeChanges.length) {
+      const confirmed = await confirmAction(
+        t("确认修改分类属性？", "Confirm category attribute changes?"),
+        t("保存后会更新受影响流水的属性分析。是否继续？", "Saving updates attribute analysis for the affected transactions. Continue?"),
+        t("确认并保存属性", "Confirm and save attributes")
+      );
+      if (!confirmed || !currentConfigurationRequest(sequence, generation)) {
+        setCategoryState({ kind: "idle" });
+        return { saved: false };
+      }
+    }
     setCategoryState({ kind: "pending", message: t("保存分类…", "Saving categories…") });
     let result: Awaited<ReturnType<ConfigurationEditorPort["saveCategories"]>>;
     try {
@@ -498,8 +545,11 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
 
   const saveCurrentSection = async (): Promise<boolean> => {
     if (saveBlockedRef.current) return false;
+    if (currentSection === "taxonomy") {
+      return taxonomyPanelRef.current ? taxonomyPanelRef.current.save() : true;
+    }
     if (currentSection === "categories") {
-      return (await saveCategories()).saved;
+      return categoryDirty ? (await saveCategories()).saved : true;
     }
     if (currentSection === "matching") {
       return saveRules();
@@ -512,6 +562,7 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
       rulesRevision = categoryResult.rulesRevision;
     }
     if (saved && dirtyFlagsRef.current.rule) saved = await saveRules(rulesRevision);
+    if (saved && taxonomyPanelRef.current?.hasUnsavedChanges()) saved = await taxonomyPanelRef.current.save();
     return saved;
   };
 
@@ -525,10 +576,17 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
       rulesRevision = categoryResult.rulesRevision;
     }
     if (saved && dirtyFlagsRef.current.rule) saved = await saveRules(rulesRevision);
+    if (saved && taxonomyPanelRef.current?.hasUnsavedChanges()) {
+      saved = await taxonomyPanelRef.current.save();
+    }
     return saved;
   };
 
   const reloadCurrentSection = async () => {
+    if (currentSection === "taxonomy") {
+      await taxonomyPanelRef.current?.discard();
+      return;
+    }
     const sequence = ++editorRequestSequence.current;
     const generation = draftGeneration.current;
     setState({ kind: "pending", message: t("重载当前规则页面…", "Reloading this rules page…") });
@@ -677,46 +735,12 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
     hostWindow.setTimeout(() => rulesSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   };
   const openProductDetail = (group: HistoricalProductStat, query: ProductHistoryQuery) => {
-    new RuleHistoryModal({ app, api, categories: workspace.categories, mode: "product", initialQuery: query, detailOnly: true, detailGroup: group, confirmAction, onSaved: handleHistorySaved, onDataChanged }).open();
+    new HistoryItemEditorModal({ app, api, categories: workspace.categories, group,
+      groupBy: query.group_by === "counterparty" ? "counterparty" : "product",
+      onSaved: handleHistorySaved, onDataChanged, onCreateRule: createRuleImmediately }).open();
   };
-  const openProductRename = (group: ProductRenameGroup) => {
-    new ProductRenameModal({ app, api, group, onSaved: handleHistorySaved, onDataChanged }).open();
-  };
-  const openCounterpartyRename = (group: CounterpartyRenameGroup) => {
-    new CounterpartyRenameModal({ app, api, group, onSaved: handleHistorySaved, onDataChanged }).open();
-  };
-  const openRuleCreation = (group: HistoricalProductStat) => {
-    const suggestion = group.rule_suggestion;
-    new RuleCreationModal({
-      app,
-      categories: workspace.categories,
-      initial: {
-        transaction_type: group.transaction_type,
-        match_scope: suggestion?.match_scope ?? "product",
-        counterparty: suggestion?.counterparty ?? "",
-        product: suggestion?.product ?? group.product,
-        category_key: suggestion?.category_key ?? group.recommended_category_key ?? "",
-        category: suggestion?.category ?? group.recommended_category
-      },
-      onConfirm: createRuleImmediately
-    }).open();
-  };
-  const openCategoryHistory = (initialQuery: ProductHistoryQuery) => {
-    new RuleHistoryModal({ app, api, categories: workspace.categories, mode: "category", initialQuery, confirmAction, onSaved: handleHistorySaved, onDataChanged }).open();
-  };
-  const removeCategory = async (category: CategoryDefinition, index: number) => {
-    const reasons: string[] = [];
-    if ((category.transaction_count ?? 0) > 0) reasons.push(t(`${category.transaction_count} 条历史流水`, `${category.transaction_count} historical transactions`));
-    if ((category.rule_count ?? 0) > 0) reasons.push(t(`${category.rule_count} 条规则`, `${category.rule_count} rules`));
-    if (reasons.length > 0) {
-      const actions: Array<{ text: string; onClick?: () => void }> = [{ text: t("关闭", "Close") }];
-      if ((category.transaction_count ?? 0) > 0) actions.push({ text: t("打开历史迁移", "Open history migration"), onClick: () => openCategoryHistory({ category_key: category.category_key }) });
-      if ((category.rule_count ?? 0) > 0) actions.push({ text: t("查看规则", "View rules"), onClick: openMatchingRulesPage });
-      alertAction(app, t("无法删除分类", "Category cannot be deleted"), t(`该分类仍绑定${reasons.join("和")}，请先处理这些引用。`, `This category is still bound to ${reasons.join(" and ")}. Resolve these references first.`), actions);
-      return;
-    }
-    const confirmed = await confirmAction(t("确认删除分类？", "Confirm category deletion?"), t(`分类“${category.name}”没有历史流水或规则引用，删除后不可恢复。`, `Category “${category.name}” has no historical transactions or rule references and cannot be restored after deletion.`), t("确认删除", "Delete category"));
-    if (!confirmed) return;
+  const removeCategory = (category: CategoryDefinition) => {
+    if ((category.transaction_count ?? 0) > 0 || (category.rule_count ?? 0) > 0) return;
     setWorkspace((current) => current ? {
       ...current,
       categories: current.categories.filter((candidate) => candidate.category_key !== category.category_key)
@@ -725,12 +749,18 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
   };
 
   actionRef.current = {
-    hasUnsavedChanges: () => dirtyFlagsRef.current.category || dirtyFlagsRef.current.rule,
+    hasUnsavedChanges: () => dirtyFlagsRef.current.category
+      || dirtyFlagsRef.current.rule
+      || taxonomyDirty
+      || Boolean(taxonomyPanelRef.current?.hasUnsavedChanges()),
     getDraftSnapshot: getRulesDraftSnapshot,
     save: saveCurrentSection,
     saveAll: saveAllSections,
     discard: reloadCurrentSection,
-    discardAll: load
+    discardAll: async () => {
+      await load(true);
+      await taxonomyPanelRef.current?.discard();
+    }
   };
 
   return <main className="asset-track-editor">
@@ -748,7 +778,6 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
         onSaved={handleHistorySaved}
         onDataChanged={onDataChanged}
         onOpenDetail={openProductDetail}
-        onOpenProductRename={openProductRename}
       />
     </Section>}
     {section === "products" && <Section>
@@ -767,27 +796,42 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
         onSaved={handleHistorySaved}
         onDataChanged={onDataChanged}
         onOpenDetail={openProductDetail}
-        onOpenProductRename={openProductRename}
-        onOpenCounterpartyRename={openCounterpartyRename}
-        onCreateRule={openRuleCreation}
       />
     </Section>}
     {(section === undefined || section === "categories") && <CategoryDefinitionsTable
+      app={app}
+      api={api}
       categories={workspace.categories}
+      attributeGroups={taxonomy?.groups}
+      attributeOptions={taxonomy?.options}
       sort={categorySort}
       onSort={setCategorySort}
       onChange={updateCategories}
       onRemove={removeCategory}
-      onOpenHistory={openCategoryHistory}
+      onSavedHistory={handleHistorySaved}
+      onDataChanged={onDataChanged}
+      onOpenRules={openMatchingRulesPage}
       showSectionActions={section === "categories"}
-      dirty={categoryDirty && !saveBlocked}
       saveBlocked={saveBlocked}
       pageState={state}
       saveState={categoryState}
       onReload={reloadCurrentSection}
-      onSave={async () => { await saveCategories(); }}
-      readWindow={section === "categories" ? workspace.scope : null}
+      dirty={categoryDirty && !saveBlocked}
+      onSave={async () => {
+        if (categoryDirty) await saveCategories();
+      }}
     />}
+    <div className={section === undefined || section === "taxonomy" ? "" : "asset-track-taxonomy-panel-hidden"}>
+      <TaxonomyPanel
+        ref={taxonomyPanelRef}
+        app={app}
+        api={api}
+        dataVersion={dataVersion}
+        view="all"
+        onDirtyChange={setTaxonomyDirty}
+        onDataChanged={onDataChanged}
+      />
+    </div>
     {(section === undefined || section === "matching") && <MatchingRulesTable
       rules={workspace.rules}
       categories={workspace.categories}

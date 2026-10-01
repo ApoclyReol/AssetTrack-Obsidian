@@ -10,13 +10,15 @@ import {
 import { Notice, type App } from "obsidian";
 import { AssetTrackError } from "../../application/errors";
 import type {
-  CategoryDefinition
+  CategoryDefinition,
+  TagDefinition
 } from "../../types/configuration";
 import type {
   MonthWorkspace
 } from "../../types/month";
 import type {
   OperationPreview,
+  OperationPreviewChange,
   PendingOperationLog,
   TransactionBusinessTab,
   TransactionOperationRequest
@@ -45,6 +47,7 @@ import {
 } from "../transactionGrouping";
 import { confirmAction } from "../ConfirmModal";
 import { TransactionBatchEditModal } from "../TransactionBatchEditModal";
+import { TransactionTagBatchEditModal } from "../TransactionTagBatchEditModal";
 import { TransactionOperationModal } from "../TransactionOperationModal";
 
 export type MonthOperationRequest = TransactionOperationRequest & {
@@ -97,7 +100,7 @@ function operationSuccessNotice(
       `Transaction type conversion entered the draft: ${preview.change_count} updated${skippedText}${failureText}. Save transactions to persist.`
     );
   }
-  if (request.operation_type.startsWith("bulk-edit-")) {
+  if (request.operation_type.startsWith("bulk-edit-") || request.operation_type.startsWith("bulk-")) {
     return t(
       `批量修改已进入草稿：更新 ${preview.change_count} 条${skippedText}${failureText}。保存流水后生效。`,
       `Batch edit entered the draft: ${preview.change_count} updated${skippedText}${failureText}. Save transactions to persist.`
@@ -131,7 +134,8 @@ export interface TransactionOperations {
     extra?: Partial<TransactionOperationRequest>,
     allRows?: Transaction[],
     requestSequenceOverride?: number,
-    presentation?: "modal" | "direct"
+    presentation?: "modal" | "direct",
+    canonicalRows?: Transaction[]
   ) => Promise<void>;
   applyOperationPreview: (
     request: MonthOperationRequest,
@@ -158,6 +162,12 @@ export interface TransactionOperations {
     keys: ReadonlySet<TransactionKey>,
     predicate: (row: Transaction) => boolean
   ) => void;
+  openTagBatchEdit: (
+    operationType: Extract<TransactionOperationRequest["operation_type"], "bulk-add-tag" | "bulk-remove-tag" | "bulk-replace-tags">,
+    business: TransactionBusinessTab,
+    keys: ReadonlySet<TransactionKey>,
+    predicate: (row: Transaction) => boolean
+  ) => void;
 }
 
 export interface TransactionOperationsOptions {
@@ -168,6 +178,7 @@ export interface TransactionOperationsOptions {
   month: string;
   draft: MonthWorkspace | null;
   categories: CategoryDefinition[];
+  tags?: TagDefinition[];
   rules: SavedRule[];
   rulesRevision: number | null;
   setState: Dispatch<SetStateAction<OperationState>>;
@@ -190,6 +201,76 @@ function transactionIndexMap(rows: Transaction[]): Map<Transaction, number> {
   return indexes;
 }
 
+function operationAuditFields(row: Transaction): Record<string, unknown> {
+  return {
+    transaction_date: row.transaction_date,
+    type: row.type,
+    account_key: row.account_key ?? null,
+    counterparty: row.counterparty ?? "",
+    product: row.product,
+    source: row.source ?? "",
+    category_key: row.category_key ?? null,
+    category: row.category,
+    amount: row.amount,
+    tag_keys: [...new Set(row.tag_keys ?? [])].sort()
+  };
+}
+
+function sameOperationFields(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function rebaseOperationPreviewToCanonical(
+  result: OperationPreviewResult,
+  canonicalRows: Transaction[]
+): OperationPreviewResult {
+  const canonicalById = new Map<number, Transaction>();
+  const canonicalByKey = new Map<string, Transaction>();
+  canonicalRows.forEach((row, index) => {
+    if (typeof row.id === "number") canonicalById.set(row.id, row);
+    canonicalByKey.set(operationTransactionKey(row, index), row);
+  });
+  const changes = result.preview.changes.map((change) => {
+    const canonical = change.transaction_id === null
+      ? canonicalByKey.get(change.transaction_key ?? "")
+      : canonicalById.get(change.transaction_id);
+    if (!canonical) return change;
+    const before = operationAuditFields(canonical);
+    const changedFromCanonical = !sameOperationFields(before, change.after);
+    // The service preview compares the draft to itself. Rebase the audit
+    // baseline and recalculate status against the persisted row so a manual
+    // edit followed by a rule pass remains a valid, saveable change. A rule
+    // conflict is kept as a failure only when the final draft still matches
+    // the canonical row; otherwise the user's manual edit must be persisted.
+    const status: OperationPreviewChange["status"] = changedFromCanonical
+      ? "change"
+      : change.status === "failure" ? "failure" : "skip";
+    return {
+      ...change,
+      before,
+      status,
+      reason: changedFromCanonical && change.status === "skip"
+        ? "保留未保存的手工编辑"
+        : change.reason
+    };
+  });
+  return {
+    ...result,
+    preview: {
+      ...result.preview,
+      total_count: changes.length,
+      change_count: changes.filter((change) => change.status === "change").length,
+      skipped_count: changes.filter((change) => change.status === "skip").length,
+      failure_count: changes.filter((change) => change.status === "failure").length,
+      protected_count: changes.filter((change) => change.reason === "位于本次保护范围").length,
+      changes
+    }
+  };
+}
+
 export function useTransactionOperations({
   app,
   api,
@@ -198,6 +279,7 @@ export function useTransactionOperations({
   month,
   draft,
   categories,
+  tags = [],
   rules,
   rulesRevision,
   setState,
@@ -432,7 +514,8 @@ export function useTransactionOperations({
     extra: Partial<TransactionOperationRequest> = {},
     allRows?: Transaction[],
     requestSequenceOverride?: number,
-    presentation: "modal" | "direct" = "modal"
+    presentation: "modal" | "direct" = "modal",
+    canonicalRows?: Transaction[]
   ): Promise<void> => {
     if (!rows.length) {
       new Notice(t("当前范围没有可操作流水。", "There are no operable transactions in the current range."));
@@ -462,11 +545,14 @@ export function useTransactionOperations({
       rules_revision: operationUsesRules ? rulesRevision ?? undefined : undefined
     });
     if (!ensureRequestContext(request, sourceDraft, sourceMonth)) return;
+    const rebasedResult = canonicalRows
+      ? rebaseOperationPreviewToCanonical(result, canonicalRows)
+      : result;
     if (presentation === "direct") {
-      applyOperationResultToDraft(request, result);
+      applyOperationResultToDraft(request, rebasedResult);
       return;
     }
-    await applyOperationPreview(request, result.preview, result.rows);
+    await applyOperationPreview(request, rebasedResult.preview, rebasedResult.rows);
   }, [api, applyOperationPreview, applyOperationResultToDraft, draft, ensureRequestContext, month, nextRequestSequence, operationRequest, rules, rulesRevision]);
 
   const protectTransaction = useCallback((index: number): void => {
@@ -515,7 +601,29 @@ export function useTransactionOperations({
     if (!isCurrentRequest(sequence, sourceDraft, sourceMonth)) return;
     setState({ kind: "pending", message: t("正在检查规则并写入草稿…", "Checking rules and writing to the draft…") });
     try {
-      await previewOperation("apply-rules", rows, undefined, {}, undefined, sequence, "direct");
+      let canonicalRows: Transaction[] | undefined;
+      if (typeof api.month === "function") {
+        const canonical = await api.month(sourceMonth);
+        if (!isCurrentRequest(sequence, sourceDraft, sourceMonth)) return;
+        if (sourceDraft && canonical.revision === sourceDraft.revision) {
+          canonicalRows = canonical.transactions;
+        }
+      }
+      // Applying rules is an explicit user action over the current draft. A
+      // row marked protected because it was manually edited must still be
+      // eligible here: the manual product/counterparty value may be exactly
+      // what makes the row match a rule. Other batch operations continue to
+      // respect the protection set.
+      await previewOperation(
+        "apply-rules",
+        rows,
+        undefined,
+        { include_protected: true },
+        undefined,
+        sequence,
+        "direct",
+        canonicalRows
+      );
       if (isActiveMonth(sourceMonth)) setState({ kind: "idle" });
     } catch (error) {
       if (!isCurrentRequest(sequence, sourceDraft, sourceMonth)) return;
@@ -523,7 +631,7 @@ export function useTransactionOperations({
       new Notice(message);
       setState({ kind: "error", message });
     }
-  }, [app, draft, hostWindow, isActiveMonth, isCurrentRequest, month, nextRequestSequence, operationRows, previewOperation, setState]);
+  }, [api, app, draft, hostWindow, isActiveMonth, isCurrentRequest, month, nextRequestSequence, operationRows, previewOperation, setState]);
 
   const executeSelectedOperation = useCallback(async (
     operationType: TransactionOperationRequest["operation_type"],
@@ -742,6 +850,52 @@ export function useTransactionOperations({
     }).open();
   }, [api, app, applyOperationResultToDraft, categories, draft, ensureRequestContext, isCurrentRequest, month, nextRequestSequence, operationRequest, operationRows, setState]);
 
+  const openTagBatchEdit = useCallback((
+    operationType: Extract<TransactionOperationRequest["operation_type"], "bulk-add-tag" | "bulk-remove-tag" | "bulk-replace-tags">,
+    business: TransactionBusinessTab,
+    keys: ReadonlySet<TransactionKey>,
+    predicate: (row: Transaction) => boolean
+  ): void => {
+    if (!app) {
+      new Notice(t("当前窗口不支持批量标签窗口。", "This window does not support the batch tag modal."));
+      return;
+    }
+    new TransactionTagBatchEditModal({
+      app,
+      operationType,
+      tags,
+      onConfirm: async (value) => {
+        const sourceDraft = draft;
+        const sourceMonth = month;
+        const sequence = nextRequestSequence();
+        if (!isCurrentRequest(sequence, sourceDraft, sourceMonth)) return;
+        const selectedRows = operationRows(keys, predicate, business);
+        if (!selectedRows.length) {
+          throw new AssetTrackError({ code: "transaction.selection.no_editable_rows", status: 422 });
+        }
+        setState({ kind: "pending", message: t("正在准备标签批量预览…", "Preparing the batch tag preview…") });
+        try {
+          await previewOperation(
+            operationType,
+            selectedRows,
+            business,
+            value,
+            undefined,
+            sequence,
+            "modal"
+          );
+          if (isCurrentRequest(sequence, sourceDraft, sourceMonth)) setState({ kind: "idle" });
+        } catch (error) {
+          if (isCurrentRequest(sequence, sourceDraft, sourceMonth)) {
+            const message = messageFor(error);
+            setState({ kind: "error", message });
+          }
+          throw error;
+        }
+      }
+    }).open();
+  }, [app, draft, isCurrentRequest, month, nextRequestSequence, operationRows, previewOperation, setState, tags]);
+
   return {
     businessTab,
     selectedTransactionKeys,
@@ -755,6 +909,7 @@ export function useTransactionOperations({
     applyRules,
     executeSelectedOperation,
     executeAiClassification,
-    openBatchEdit
+    openBatchEdit,
+    openTagBatchEdit
   };
 }

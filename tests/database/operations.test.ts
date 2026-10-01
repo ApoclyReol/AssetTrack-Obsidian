@@ -548,4 +548,140 @@ it("only accepts operation logs with the transactions section", async () => {
       expect.objectContaining({ operation_id: preview.preview.operation_id })
     ]));
   });
+
+it("rejects a tag batch preview when its target is deactivated before save", async () => {
+    const { repository } = fixture();
+    const taxonomy = repository.taxonomy();
+    const withProject = await repository.saveTaxonomy(
+      taxonomy.attribute_revision,
+      taxonomy.groups,
+      taxonomy.options,
+      taxonomy.tag_revision,
+      [...taxonomy.tags, {
+        tag_key: "tag-project",
+        name: "项目",
+        description: "",
+        color: "#2563eb",
+        is_active: true,
+        sort_order: taxonomy.tags.length
+      }]
+    );
+    const initial = await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 100 }],
+      [{ account_key: "investment-default", principal: 0, market_value: 0, cash_balance: 0 }],
+      [{
+        transaction_date: "2026-01-01",
+        type: "支出",
+        category: "",
+        product: "项目费用",
+        amount: 20,
+        tag_keys: []
+      }],
+      []
+    );
+    const preview = previewTransactionOperation(initial.transactions, {
+      month: "2026-01",
+      operation_type: "bulk-add-tag",
+      transaction_ids: [initial.transactions[0].id!],
+      expected_revision: initial.revision,
+      source_page: "记录/流水",
+      target_tag_key: "tag-project"
+    });
+    await repository.saveTaxonomy(
+      withProject.attribute_revision,
+      withProject.groups,
+      withProject.options,
+      withProject.tag_revision,
+      withProject.tags.map((tag) => tag.tag_key === "tag-project"
+        ? { ...tag, is_active: false }
+        : tag)
+    );
+
+    await expect(repository.saveMonthSection("2026-01", {
+      expected_revision: initial.revision,
+      section: "transactions",
+      transactions: preview.rows,
+      operation_logs: [{
+        preview: preview.preview,
+        selection: [preview.preview.changes[0].transaction_key!]
+      }]
+    })).rejects.toMatchObject({ code: "transaction.tag.invalid_target" });
+    expect((await repository.getMonth("2026-01")).transactions[0].tag_keys).toEqual([]);
+  });
+
+it("persists add, remove, and replace tag operations through the month transaction", async () => {
+    const { repository } = fixture();
+    const taxonomy = repository.taxonomy();
+    await repository.saveTaxonomy(
+      taxonomy.attribute_revision,
+      taxonomy.groups,
+      taxonomy.options,
+      taxonomy.tag_revision,
+      [...taxonomy.tags, {
+        tag_key: "tag-project",
+        name: "项目",
+        description: "",
+        color: "#2563eb",
+        is_active: true,
+        sort_order: taxonomy.tags.length
+      }]
+    );
+    const initial = await repository.saveMonth(
+      "2026-01",
+      0,
+      [{ account_key: "cash-default", balance: 100 }],
+      [{ account_key: "investment-default", principal: 0, market_value: 0, cash_balance: 0 }],
+      [{
+        transaction_date: "2026-01-01",
+        type: "支出",
+        category: "",
+        product: "项目费用",
+        amount: 20,
+        tag_keys: ["tag-travel"]
+      }],
+      []
+    );
+    const saveOperation = async (
+      current: Awaited<ReturnType<typeof repository.getMonth>>,
+      operationType: "bulk-add-tag" | "bulk-remove-tag" | "bulk-replace-tags",
+      target: { target_tag_key?: string; target_tag_keys?: string[] }
+    ) => {
+      const preview = previewTransactionOperation(current.transactions, {
+        month: "2026-01",
+        operation_type: operationType,
+        transaction_ids: [current.transactions[0].id!],
+        expected_revision: current.revision,
+        source_page: "记录/流水",
+        ...target
+      });
+      return repository.saveMonthSection("2026-01", {
+        expected_revision: current.revision,
+        section: "transactions",
+        transactions: preview.rows,
+        operation_logs: [{
+          preview: preview.preview,
+          selection: [preview.preview.changes[0].transaction_key!]
+        }]
+      });
+    };
+
+    const afterAdd = await saveOperation(initial, "bulk-add-tag", { target_tag_key: "tag-project" });
+    expect(new Set(afterAdd.transactions[0].tag_keys)).toEqual(new Set(["tag-travel", "tag-project"]));
+    const afterRemove = await saveOperation(
+      afterAdd,
+      "bulk-remove-tag",
+      { target_tag_key: "tag-travel" }
+    );
+    expect(afterRemove.transactions[0].tag_keys).toEqual(["tag-project"]);
+    const afterReplace = await saveOperation(
+      afterRemove,
+      "bulk-replace-tags",
+      { target_tag_keys: [] }
+    );
+    expect(afterReplace.transactions[0].tag_keys).toEqual([]);
+    expect(repository.taxonomy().tags.find((tag) => tag.tag_key === "tag-project"))
+      .toMatchObject({ is_active: true });
+  });
 });
