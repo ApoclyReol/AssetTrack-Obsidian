@@ -39,8 +39,8 @@
 ## 更新日志
 
 每个发行版本新增一份 `docs/logs/release-vN.N.N.md`，记录用户可见变化、数据兼容
-边界、验证结果和后续 handoff。当前稳定版为 v1.9.0，schema 12 与流水标签/分类属性
-重构已在 v2.0.0 工作区实现，仍待单独发布；状态详见 [Release v2.0.0](logs/release-v2.0.0.md)，
+边界、验证结果和后续 handoff。当前稳定版为 v2.0.0，schema 12 与流水标签/分类属性
+重构已正式发布；状态详见 [Release v2.0.0](logs/release-v2.0.0.md)，
 历史索引见 [logs/README](logs/README.md)。
 
 ## 事实优先级

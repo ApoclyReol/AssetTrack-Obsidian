@@ -3,9 +3,9 @@
 > 文档角色：开发与维护。本文服务发布、安装验证和发行门禁；用户安装请按 README 或
 > [用户指南](02-user-guide.md)操作。
 
-当前稳定版为 v1.9.0；工作区已完成 v2.0.0 的 schema 12、流水标签与分类属性实现，
-但尚未创建版本 tag 或 GitHub Release，说明见 [Release v2.0.0](logs/release-v2.0.0.md)。
-v1.9.1 的维护内容仍作为历史待发布记录保留在 [Release v1.9.1](logs/release-v1.9.1.md)。
+当前稳定版为 v2.0.0，版本 tag 和 GitHub Release 已创建，说明见
+[Release v2.0.0](logs/release-v2.0.0.md)。v1.9.1 的维护内容作为历史记录保留在
+[Release v1.9.1](logs/release-v1.9.1.md)。
 
 正式发布版本的 tag 必须使用不带 `v` 的版本号，并与 `package.json`、`manifest.json` 和
 `versions.json` 完全一致。发布前除标准命令外，应在中英文界面检查金额设置、
@@ -15,7 +15,7 @@ v1.9.1 的维护内容仍作为历史待发布记录保留在 [Release v1.9.1](l
 
 当前版本要求 Obsidian `1.13.0` 或更高版本；发布声明必须要求用户先升级到当前
 最新的 `1.13.x` 桌面版，再安装或更新插件。当前发布文案见
-[Release v1.9.0](logs/release-v1.9.0.md)。
+[Release v2.0.0](logs/release-v2.0.0.md)。
 
 ## 安装产物
 
