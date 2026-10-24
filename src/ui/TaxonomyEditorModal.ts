@@ -1,4 +1,5 @@
-import { Modal, type App } from "obsidian";
+import { ManagedModal } from "./ManagedModal";
+import { type App } from "obsidian";
 import type { AttributeGroup, AttributeOption, TagDefinition } from "../types/configuration";
 import { t } from "../i18n";
 
@@ -37,7 +38,7 @@ type EditorOptions = EditorBase & ({
 });
 
 /** Compact editor for a value chip and destructive taxonomy confirmation. */
-export class TaxonomyEditorModal extends Modal {
+export class TaxonomyEditorModal extends ManagedModal {
   private optionDraft: AttributeOption | null = null;
 
   constructor(private readonly editor: EditorOptions) {
@@ -46,6 +47,7 @@ export class TaxonomyEditorModal extends Modal {
   }
 
   onOpen(): void {
+    this.installInteraction();
     this.modalEl.addClass("asset-track-native-modal", "asset-track-taxonomy-editor-modal");
     this.setTitle(this.editor.kind === "option"
       ? t("编辑属性值", "Edit attribute value")
@@ -81,7 +83,7 @@ export class TaxonomyEditorModal extends Modal {
     apply.type = "button";
     apply.addEventListener("click", () => {
       editor.onApply({ ...option, name: option.name.trim() }, []);
-      this.close();
+      this.completeClose();
     });
     const remove = actions.createEl("button", { text: t("移除", "Remove"), cls: "mod-warning" });
     remove.type = "button";
@@ -96,12 +98,12 @@ export class TaxonomyEditorModal extends Modal {
         .map((candidate) => ({ key: candidate.attribute_key, name: candidate.name })),
       (decision) => {
         editor.onApply(null, [{ kind: "option", key: option.attribute_key, decision }]);
-        this.close();
+        this.completeClose();
       }
     ));
     const cancel = actions.createEl("button", { text: t("取消", "Cancel") });
     cancel.type = "button";
-    cancel.addEventListener("click", () => this.close());
+    cancel.addEventListener("click", () => this.requestClose());
     input.focus();
   }
 
@@ -110,8 +112,8 @@ export class TaxonomyEditorModal extends Modal {
     if (editor.kind !== "group") return;
     const section = this.contentEl.createDiv({ cls: "asset-track-taxonomy-editor-section" });
     section.createEl("p", { text: t(
-      `移除属性名称“${editor.group.name || editor.group.group_key}”。已有分类中的属性将需要清理或转移到其他属性值。`,
-      `Remove “${editor.group.name || editor.group.group_key}”. Existing category attributes must be cleared or transferred to another value.`
+      `移除属性名称“${editor.group.name || editor.group.group_key}”。将清除所属属性值及分类关联，分类和流水保留。`,
+      `Remove “${editor.group.name || editor.group.group_key}”. Its values and category assignments will be cleared; categories and transactions are kept.`
     ) });
     const actions = this.contentEl.createDiv({ cls: "asset-track-rule-create-actions" });
     const remove = actions.createEl("button", { text: t("移除", "Remove"), cls: "mod-warning" });
@@ -121,20 +123,15 @@ export class TaxonomyEditorModal extends Modal {
       editor.group.name,
       editor.group.usage_count ?? 0,
       "attribute",
-      editor.options
-        .filter((candidate) => candidate.group_key !== editor.group.group_key && candidate.is_active)
-        .map((candidate) => ({
-          key: candidate.attribute_key,
-          name: `${editor.groups.find((group) => group.group_key === candidate.group_key)?.name ?? ""} · ${candidate.name}`
-        })),
+      [],
       (decision) => {
         editor.onApply(null, [], [{ kind: "group", key: editor.group.group_key, decision }]);
-        this.close();
+        this.completeClose();
       }
     ));
     const cancel = actions.createEl("button", { text: t("取消", "Cancel") });
     cancel.type = "button";
-    cancel.addEventListener("click", () => this.close());
+    cancel.addEventListener("click", () => this.requestClose());
   }
 
   private renderTagRemoval(): void {
@@ -158,12 +155,12 @@ export class TaxonomyEditorModal extends Modal {
         .map((candidate) => ({ key: candidate.tag_key, name: candidate.name })),
       (decision) => {
         editor.onApply(null, [{ kind: "tag", key: editor.tag.tag_key, decision }]);
-        this.close();
+        this.completeClose();
       }
     ));
     const cancel = actions.createEl("button", { text: t("取消", "Cancel") });
     cancel.type = "button";
-    cancel.addEventListener("click", () => this.close());
+    cancel.addEventListener("click", () => this.requestClose());
   }
 
   private confirmRemoval(
@@ -184,6 +181,7 @@ export class TaxonomyEditorModal extends Modal {
         ? `Remove “${name || key}”? Existing category attributes will be handled using the choice below. Changes take effect after saving.`
         : `Remove “${name || key}”? Existing transaction tags will be handled using the choice below. Changes take effect after saving.`
     ) });
+    box.createEl("p", { text: transferKind === "tag" ? t(`影响 ${count} 笔流水`, `${count} transactions affected`) : t(`影响 ${count} 个分类`, `${count} categories affected`) });
     if (count && targets.length) {
       const label = box.createEl("label", { text: transferKind === "attribute"
         ? t("原有属性转移到", "Transfer existing attributes to")
@@ -202,5 +200,5 @@ export class TaxonomyEditorModal extends Modal {
     cancel.addEventListener("click", () => box.remove());
   }
 
-  onClose(): void { this.contentEl.empty(); }
+  onClose(): void { super.onClose(); this.contentEl.empty(); }
 }

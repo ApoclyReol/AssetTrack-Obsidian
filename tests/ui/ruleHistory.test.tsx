@@ -12,6 +12,8 @@ import {
   HistoryBackfillContent,
   ProductRenameContent
 } from "../../src/ui/RuleHistoryModal";
+import { HistoryItemEditorContent } from "../../src/ui/HistoryItemEditorModal";
+import type { App } from "obsidian";
 import type { ConfigurationEditorPort } from "../../src/services/ports";
 import type {
   HistoricalProductStat
@@ -336,4 +338,51 @@ describe("rule history workspace loading", () => {
     }));
     expect(onClose).toHaveBeenCalled();
   });
+  it("shows a meaningful rule task for an already covered item", () => {
+    const group = {
+      transaction_type: "支出",
+      product_key: "拿铁大杯",
+      product: "拿铁大杯",
+      counterparty: "商户甲",
+      variants: ["拿铁大杯"],
+      counterparties: ["商户甲"],
+      counterparty_count: 1,
+      category_counts: [{
+        category_key: "food",
+        category: "餐饮",
+        occurrences: 1,
+        is_active: true
+      }],
+      recommended_category: "餐饮",
+      recommended_category_key: "food",
+      category_confidence: 1,
+      has_category_conflict: false,
+      category_status: "正常",
+      occurrences: 1,
+      months_count: 1,
+      total_amount: 20,
+      average_amount: 20,
+      latest_amount: 20,
+      last_date: "2026-01-01",
+      first_month: "2026-01",
+      last_month: "2026-01",
+      matching_rule_count: 1,
+      matching_rule_ids: [],
+      matching_rule_levels: [],
+      rule_coverage: "full",
+      matched_occurrences: 1,
+      unmatched_occurrences: 0,
+      conflicted_occurrences: 0,
+      rule_status: "已覆盖",
+      history_rule_mismatch: false
+    } satisfies HistoricalProductStat;
+    const api = configurationApi({ productHistory: vi.fn().mockResolvedValue({ rows: [], groups: [] }) });
+    render(<HistoryItemEditorContent options={{ app: {} as App, api, categories: [], group, groupBy: "product",
+      onSaved: vi.fn(), onDataChanged: vi.fn(), onCreateRule: vi.fn() }} hostWindow={window}
+      onSwitch={next => next()} onCommitted={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "匹配规则" }));
+    expect(screen.getByText("当前流水已全部命中规则。如需调整，请前往配置中的匹配规则。")).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: "修改为商品名称" })).toBeNull();
+  });
+
 });

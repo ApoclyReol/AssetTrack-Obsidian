@@ -685,3 +685,24 @@ it("persists add, remove, and replace tag operations through the month transacti
       .toMatchObject({ is_active: true });
   });
 });
+
+it("persists and audits multi-tag add and remove as one operation each", async () => {
+  const { repository } = fixture();
+  const taxonomy = repository.taxonomy();
+  const tags = [...taxonomy.tags, { tag_key: "tag-multi-project", name: "项目", description: "", color: "#123456", is_active: true, sort_order: 99 }];
+  await repository.saveTaxonomy(taxonomy.attribute_revision, taxonomy.groups, taxonomy.options, taxonomy.tag_revision, tags);
+  const keys = tags.slice(0, 2).map(tag => tag.tag_key);
+  expect(keys).toHaveLength(2);
+  let month = await repository.saveMonth("2026-01", 0,
+    [{ account_key: "cash-default", balance: 100 }],
+    [{ account_key: "investment-default", principal: 0, market_value: 0, cash_balance: 0 }],
+    [{ transaction_date: "2026-01-01", type: "支出", category: "", product: "多标签", amount: 10 }], []);
+  for (const operation_type of ["bulk-add-tag", "bulk-remove-tag"] as const) {
+    const result = previewTransactionOperation(month.transactions, { month: "2026-01", operation_type,
+      transaction_ids: [month.transactions[0].id!], expected_revision: month.revision,
+      source_page: "记录/流水", target_tag_keys: keys });
+    month = await repository.saveMonthSection("2026-01", { section: "transactions", expected_revision: month.revision,
+      transactions: result.rows, operation_logs: [{ preview: result.preview, selection: [result.preview.changes[0].transaction_key!] }] });
+    expect(new Set(month.transactions[0].tag_keys)).toEqual(new Set(operation_type === "bulk-add-tag" ? keys : []));
+  }
+});

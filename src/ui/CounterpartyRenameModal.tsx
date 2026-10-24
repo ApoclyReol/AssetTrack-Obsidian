@@ -1,4 +1,5 @@
-import { Modal, Notice, type App } from "obsidian";
+import { ManagedModal } from "./ManagedModal";
+import { Notice, type App } from "obsidian";
 import { createElement, useEffect, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type {
@@ -44,6 +45,7 @@ export function CounterpartyRenameContent({
   const [targetCounterparty, setTargetCounterparty] = useState(group.product);
   const [preview, setPreview] = useState<CounterpartyRenamePreview | null>(null);
   const [loading, setLoading] = useState(false);
+  const [committing, setCommitting] = useState(false);
   const [message, setMessage] = useState("");
   const mounted = useRef(true);
   const previewRequestSequence = useRef(0);
@@ -131,6 +133,7 @@ export function CounterpartyRenameContent({
     setLoading(true);
     setMessage(t("正在修改交易对手名称…", "Updating counterparty names…"));
     try {
+      setCommitting(true);
       const result = await api.applyCounterpartyRename({
         transaction_ids: preview.transaction_ids,
         target_counterparty: preview.target_counterparty,
@@ -149,11 +152,11 @@ export function CounterpartyRenameContent({
     } catch (error) {
       if (mounted.current && sequence === previewRequestSequence.current) setMessage(errorMessage(error));
     } finally {
-      if (mounted.current && sequence === previewRequestSequence.current) setLoading(false);
+      if (mounted.current && sequence === previewRequestSequence.current) { setLoading(false); setCommitting(false); }
     }
   };
 
-  return <div className="asset-track-counterparty-rename-content">
+  return <div className="asset-track-counterparty-rename-content" data-asset-track-busy={committing}>
     <p>{t(`当前交易对手：${group.product || "（空）"}。选择需要修改的流水，再填写新的交易对手名称。`, `Current counterparty: ${group.product || "(empty)"}. Select transactions to edit, then enter the new counterparty name.`)}</p>
     {message && <p className="asset-track-rule-history-message" role="status">{message}</p>}
     <div className="asset-track-rule-history-selection-actions">
@@ -192,7 +195,7 @@ export function CounterpartyRenameContent({
   </div>;
 }
 
-export class CounterpartyRenameModal extends Modal {
+export class CounterpartyRenameModal extends ManagedModal {
   private root: Root | null = null;
 
   constructor(private readonly options: CounterpartyRenameModalOptions) {
@@ -200,6 +203,7 @@ export class CounterpartyRenameModal extends Modal {
   }
 
   onOpen(): void {
+    this.installInteraction();
     this.setTitle(t("编辑交易对手", "Edit counterparty"));
     this.modalEl.addClass("asset-track-native-modal", "asset-track-product-rename-modal");
     const hostWindow = this.app.workspace.containerEl.ownerDocument.defaultView;
@@ -211,11 +215,12 @@ export class CounterpartyRenameModal extends Modal {
       hostWindow,
       onSaved: this.options.onSaved,
       onDataChanged: this.options.onDataChanged,
-      onClose: () => this.close()
+      onClose: () => this.completeClose()
     }));
   }
 
   onClose(): void {
+    super.onClose();
     this.root?.unmount();
     this.root = null;
     this.contentEl.empty();

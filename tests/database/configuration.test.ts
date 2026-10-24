@@ -117,7 +117,7 @@ describe("configuration repository", () => {
     expect(repository.taxonomy().groups.some((item) => item.group_key === group.group_key)).toBe(false);
   });
 
-  it("transfers a referenced attribute group to one target value and replaces target-group choices", async () => {
+  it("rejects cross-attribute group transfer without changing existing choices", async () => {
     const { repository } = fixture();
     const food = categoryKey("餐饮基础");
     await repository.saveMonth("2026-01", 0,
@@ -133,20 +133,19 @@ describe("configuration repository", () => {
       && before.options.some((option) => option.group_key === group.group_key))!;
     const targetOption = before.options.find((option) => option.group_key === targetGroup.group_key
       && option.is_active)!;
-    await repository.saveTaxonomy(before.attribute_revision,
+    const originalKeys = repository.categories().rows.find(row => row.category_key === food)?.attribute_keys;
+    await expect(repository.saveTaxonomy(before.attribute_revision,
       before.groups.filter((group) => group.group_key !== sourceGroup.group_key),
       before.options.filter((option) => option.group_key !== sourceGroup.group_key),
       before.tag_revision, before.tags, [{
         kind: "group", key: sourceGroup.group_key, action: "transfer", target_key: targetOption.attribute_key,
         expected_count: sourceGroup.usage_count!, expected_usage_revision: sourceGroup.usage_revision!,
         expected_target_group_usage_revision: targetGroup.usage_revision!
-      }]);
+      }])).rejects.toMatchObject({ code: "taxonomy.removal_invalid" });
     const keys = repository.categories().rows.find((row) => row.category_key === food)?.attribute_keys ?? [];
-    expect(keys).toContain(targetOption.attribute_key);
-    expect(keys.some((key) => before.options.some((option) => option.attribute_key === key
-      && option.group_key === sourceGroup.group_key))).toBe(false);
-    expect(keys.filter((key) => before.options.some((option) => option.attribute_key === key
-      && option.group_key === targetGroup.group_key))).toEqual([targetOption.attribute_key]);
+    expect(keys).toEqual(originalKeys);
+    expect(repository.taxonomy().groups.some(group => group.group_key === sourceGroup.group_key)).toBe(true);
+    expect(repository.categories().rows.find(row => row.category_key === food)?.attribute_keys).toContain(sourceOption.attribute_key);
   });
 
   it("saves taxonomy revisions and keeps referenced definitions inactive", async () => {

@@ -271,6 +271,7 @@ export function AssetTrackEditorApp({
   useEffect(() => {
     if (initialMonth) setMonth(initialMonth);
   }, [initialMonth]);
+  const [monthLoadError, setMonthLoadError] = useState("");
   const refreshMonths = useCallback(async () => {
     const sequence = ++monthRefreshSequence.current;
     try {
@@ -279,14 +280,18 @@ export function AssetTrackEditorApp({
       setMonths(response.months);
       setSavedMonths(response.saved_months ?? response.months);
       setMonthPolicy(response);
+      setMonthLoadError("");
       setMonth((current) => current || initialMonth || response.months.at(-1) || "");
+    } catch (error) {
+      if (sequence === monthRefreshSequence.current) setMonthLoadError(messageFor(error));
+      throw error;
     } finally {
       if (sequence === monthRefreshSequence.current) setInitializing(false);
     }
   }, [api, initialMonth]);
 
   useEffect(() => {
-    void refreshMonths().catch((error) => new Notice(messageFor(error)));
+    void refreshMonths().catch(() => undefined);
   }, [refreshMonths]);
   useEffect(() => {
     if (!initializing) {
@@ -299,7 +304,7 @@ export function AssetTrackEditorApp({
   useEffect(
     () => subscribeDataChanges(() => {
       setDataVersion((value) => value + 1);
-      void refreshMonths().catch((error) => new Notice(messageFor(error)));
+      void refreshMonths().catch(() => undefined);
     }),
     [refreshMonths, subscribeDataChanges]
   );
@@ -465,6 +470,8 @@ export function AssetTrackEditorApp({
 
   return (
     <div className="asset-track-app">
+      {monthLoadError && <div className="asset-track-status is-error" role="alert">{monthLoadError}
+        <button type="button" onClick={() => { void refreshMonths().catch(() => undefined); }}>{t("重试", "Retry")}</button></div>}
       <AssetTrackEditorToolbar
         mode={mode}
         analysisMode={analysisMode}

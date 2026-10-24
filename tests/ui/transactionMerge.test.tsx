@@ -35,30 +35,30 @@ describe("merge summary interactions", () => {
     const confirm = vi.fn<(value: MergePreviewResult) => Promise<void>>().mockResolvedValue(undefined);
     const onPreview = vi.fn(async (includeTagged: boolean) => previewTransactionMerge({ ...request, include_tagged: includeTagged }));
     render(<TransactionMergeContent result={result} onPreview={onPreview} tagNames={{ a: "旅行", b: "家庭" }} onConfirm={confirm} onClose={vi.fn()} />);
-    expect(screen.getByRole<HTMLButtonElement>("button", { name: "确认合并到草稿" }).disabled).toBe(true);
-    fireEvent.click(screen.getByRole("checkbox", { name: "将有标签的流水也参与合并" }));
-    await waitFor(() => expect(screen.getByRole<HTMLButtonElement>("button", { name: "确认合并到草稿" }).disabled).toBe(false));
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "合并到流水草稿" }).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: "包含有标签的流水" }));
+    await waitFor(() => expect(screen.getByRole<HTMLButtonElement>("button", { name: "合并到流水草稿" }).disabled).toBe(false));
     expect(screen.getAllByText("旅行 · 家庭").length).toBeGreaterThan(0); expect(onPreview).toHaveBeenCalledWith(true);
-    fireEvent.click(screen.getByRole("button", { name: "确认合并到草稿" }));
+    fireEvent.click(screen.getByRole("button", { name: "合并到流水草稿" }));
     await waitFor(() => expect(confirm).toHaveBeenCalledOnce());
     expect(confirm.mock.calls[0][0].groups[0].after).toMatchObject({ amount: 39.8, tag_keys: ["a", "b"] });
   });
   it("only offers per-row merging and always uses the entire visible summary group", () => {
     const merge = section(new Set([1]));
     expect(screen.queryByRole("button", { name: "合并选中项目" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "合并成一条" }));
+    fireEvent.click(screen.getByRole("button", { name: "合并此组" }));
     expect(merge).toHaveBeenCalledWith(expect.objectContaining({ indexes: [0, 1] }));
   });
   it("disables a singleton with a specific explanation", () => {
     section(new Set(), rows.slice(0, 1));
-    expect(screen.getByRole<HTMLButtonElement>("button", { name: "合并成一条" }).disabled).toBe(true);
-    expect(screen.getByRole("button", { name: "合并成一条" }).title).toContain("至少需要两笔");
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "合并此组" }).disabled).toBe(true);
+    expect(document.querySelector(".asset-track-button-question")?.getAttribute("aria-label")).toContain("至少需要两笔");
   });
   it("allows unmatched, conflicted, different-price and entirely tagged rows to open the preview", () => {
     for (const matchingRules of [[], [{ ...rule, match_amount_minor: null }, { ...rule, id: 2, match_amount_minor: null }]]) {
       const values = rows.map((row, index) => ({ ...row, amount: index ? 0.33 : 1.12, tag_keys: ["a"] }));
       const merge = section(new Set(), values, matchingRules);
-      const button = screen.getByRole<HTMLButtonElement>("button", { name: "合并成一条" });
+      const button = screen.getByRole<HTMLButtonElement>("button", { name: "合并此组" });
       expect(button.disabled).toBe(false); fireEvent.click(button);
       expect(merge).toHaveBeenCalledOnce(); cleanup();
     }
@@ -73,9 +73,9 @@ describe("merge summary interactions", () => {
     const result = previewTransactionMerge({ month: "2026-10", rows, group_by: "product", groups: [{ transaction_keys: ["id:1", "id:2"] }], expected_revision: 1 });
     const confirm = vi.fn().mockResolvedValue(undefined); const close = vi.fn();
     render(<TransactionMergeContent result={result} onConfirm={confirm} onClose={close} />);
-    expect(screen.getByText(/保存流水后将替换原逐笔记录/)).toBeTruthy();
-    expect(screen.getByText(/按完整标签组合分别处理/)).toBeTruthy(); expect(confirm).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "确认合并到草稿" }));
+    expect(screen.getByText(/保存后替换原记录/)).toBeTruthy();
+    expect(screen.getByText(/按分类和完整标签组合分别合并/)).toBeTruthy(); expect(confirm).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "合并到流水草稿" }));
     await waitFor(() => expect(close).toHaveBeenCalledTimes(1)); expect(confirm).toHaveBeenCalledTimes(1);
   });
   it("offers a single-transaction amount without enabling it automatically", async () => {
@@ -92,8 +92,8 @@ describe("merge summary interactions", () => {
     setTestLanguage("en");
     const result = previewTransactionMerge({ month: "2026-10", rows, group_by: "product", groups: [{ transaction_keys: ["id:1", "id:2"] }], expected_revision: 1 });
     render(<TransactionMergeContent result={result} onConfirm={vi.fn()} onClose={vi.fn()} />);
-    expect(screen.getByRole("button", { name: "Merge into draft" })).toBeTruthy();
-    expect(screen.getByText(/the plugin cannot split them back/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Merge into transaction draft" })).toBeTruthy();
+    expect(screen.getByText(/splitting is not supported/)).toBeTruthy();
   });
 });
 

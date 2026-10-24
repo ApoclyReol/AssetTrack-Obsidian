@@ -1,4 +1,5 @@
-import { Modal, type App } from "obsidian";
+import { ManagedModal } from "./ManagedModal";
+import { type App } from "obsidian";
 import { createElement, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { RuleAmountFields } from "../types/rules";
@@ -13,23 +14,23 @@ function AmountEditorContent({ value, onConfirm, onClose }: {
   const [draft, setDraft] = useState(value);
   return <div className="asset-track-rule-create-content">
     <RuleAmountConditionInput value={draft} onChange={setDraft} label={t("金额条件", "Amount condition")} />
-    <p>{t("精确金额优先于区间，区间优先于不限金额。同一文字条件的区间不能重叠。", "Exact amounts beat ranges, which beat unrestricted rules. Ranges for the same text condition must not overlap.")}</p>
     <div className="asset-track-section-actions">
       <button type="button" onClick={onClose}>{t("取消", "Cancel")}</button>
-      <button type="button" className="mod-cta" disabled={!ruleAmountBounds(draft)} onClick={() => { onConfirm(draft); onClose(); }}>{t("应用金额条件", "Apply amount condition")}</button>
+      <button type="button" className="mod-cta" disabled={!ruleAmountBounds(draft)} onClick={() => { onConfirm(draft); onClose(); }}>{t("应用到规则草稿", "Apply to rule draft")}</button>
     </div>
   </div>;
 }
-class RuleAmountModal extends Modal {
+class RuleAmountModal extends ManagedModal {
   private root: Root | null = null;
   constructor(app: App, private readonly value: RuleAmountFields, private readonly confirm: (value: RuleAmountFields) => void) { super(app); }
   onOpen(): void {
+    this.installInteraction();
     this.setTitle(t("编辑金额条件", "Edit amount condition"));
     this.modalEl.addClass("asset-track-native-modal", "asset-track-rule-create-modal");
     this.root = createRoot(this.contentEl);
-    this.root.render(createElement(AmountEditorContent, { value: this.value, onConfirm: this.confirm, onClose: () => this.close() }));
+    this.root.render(createElement(AmountEditorContent, { value: this.value, onConfirm: this.confirm, onClose: () => this.completeClose() }));
   }
-  onClose(): void { this.root?.unmount(); this.root = null; this.contentEl.empty(); }
+  onClose(): void { super.onClose(); this.root?.unmount(); this.root = null; this.contentEl.empty(); }
 }
 export function RuleAmountEditor({ app, value, onChange, label }: {
   app?: App; value: RuleAmountFields; onChange: (value: RuleAmountFields) => void; label: string;

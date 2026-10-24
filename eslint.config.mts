@@ -10,6 +10,7 @@ export default defineConfig(
     "package.json",
     "package-lock.json",
     "scripts/*.mjs",
+    "docs/temporary/ui-review/review.js",
     "esbuild.config.mjs",
     "versions.json"
   ]),

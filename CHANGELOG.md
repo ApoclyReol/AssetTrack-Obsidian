@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.2.0
+
+### English
+
+- **Batch editing and undo:** Preview field changes in the same dialog, select multiple tags to add or remove, and undo up to ten unsaved transaction operations.
+- **Category management:** Separate attribute editing from historical migration. Before deleting a referenced category, transfer its transactions and rules to another category of the same type, with an automatic protection backup.
+- **Clearer dialogs:** Protect unsaved input, keep actions visible, simplify merge previews, and separate historical name, category, and rule tasks.
+- **Fixes:** Improve action-column spacing, disabled-button explanations, dialog closing, historical rule empty states, and loading-error feedback.
+
+Updating from 2.1.0 does not require a ledger upgrade. Undo applies only to unsaved drafts; saving, reloading, or ordinary cell edits clear the undo history.
+
+### 中文
+
+- **批量编辑与撤回：** 字段修改在同一窗口预览，标签支持多选添加或移除；未保存的流水操作最多可以撤回十步。
+- **分类管理：** 属性编辑与历史迁移拆开。删除被引用的分类前，可将流水和规则一并转移到同类型分类，操作前自动创建保护备份。
+- **弹窗整理：** 保护未提交输入，保持操作按钮可见，精简合并预览；历史名称、分类和规则按任务分别处理。
+- **问题修复：** 改善操作列空间、禁用按钮说明、弹窗关闭、历史规则空状态和加载失败反馈。
+
+从 2.1.0 更新无需升级账本。撤回仅适用于未保存草稿；保存、重载或普通单元格编辑后，撤回记录会清空。
+
 ## 2.1.0
 
 ### English

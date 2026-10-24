@@ -297,7 +297,8 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
     setState,
     mark,
     pendingOperationLogsRef,
-    transactionResetVersion
+    transactionResetVersion,
+    dataVersion
   });
   const csv = useCsvImportSession({
     api,
@@ -457,11 +458,10 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
   };
 
   const deleteTransaction = (index: number) => {
+    const transactions = draft.transactions.filter((_, item) => item !== index);
+    operations.recordUndo(transactions);
     operations.invalidatePendingOperationLogs();
-    mark({
-      ...draft,
-      transactions: draft.transactions.filter((_, item) => item !== index)
-    }, "transactions");
+    mark({ ...draft, transactions }, "transactions");
   };
 
   const addTransaction = (title: string) => {
@@ -868,16 +868,8 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
                 (row) => row.type === "支出" || row.type === "收入" || row.type === "代付"
               )}
             >{t("移除标签", "Remove tag")}</button>
-            <button
-              type="button"
-              disabled={state.kind === "pending" || keys.size === 0}
-              onClick={() => operations.openTagBatchEdit(
-                "bulk-replace-tags",
-                currentTab,
-                keys,
-                (row) => row.type === "支出" || row.type === "收入" || row.type === "代付"
-              )}
-            >{t("替换标签", "Replace tags")}</button>
+            <button type="button" disabled={state.kind === "pending" || !operations.canUndo}
+              onClick={operations.undo}>{t("撤回", "Undo")}</button>
           </>}
           {currentTab === "incoming" && <>
             <button

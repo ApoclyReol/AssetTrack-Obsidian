@@ -1,3 +1,4 @@
+import { HoverHint } from "./HoverHint";
 import { reconciliationStatus } from "./analysisModel";
 import { businessLabel, t } from "../i18n";
 import { money } from "../domain/moneyFormat";
@@ -60,25 +61,9 @@ export function ReconciliationHint({
     ];
   }
 
-  return (
-    <details className="asset-track-reconciliation-hint">
-      <summary aria-label={summaryLabel} title={summaryLabel}>?</summary>
-      <div className="asset-track-reconciliation-hint-content" role="note">
-        <strong>{title}</strong>
-        <p>{description}</p>
-        {!unavailable && (
-          <p className="asset-track-reconciliation-hint-value">
-            {t("当前结果：", "Current result: ")}{money(numericDiscrepancy)}
-            {status && `（${businessLabel(status)}）`}
-          </p>
-        )}
-        {suggestions.length > 0 && (
-          <>
-            <strong>{t("建议检查", "Suggested checks")}</strong>
-            <ul>{suggestions.map((suggestion) => <li key={suggestion}>{suggestion}</li>)}</ul>
-          </>
-        )}
-      </div>
-    </details>
-  );
+  return <HoverHint className="asset-track-reconciliation-hint" content={<>
+    <strong>{title}</strong><p>{description}</p>
+    {!unavailable && <p>{money(numericDiscrepancy)}{status && `（${businessLabel(status)}）`}</p>}
+    {suggestions.length > 0 && <ul>{suggestions.map((suggestion) => <li key={suggestion}>{suggestion}</li>)}</ul>}
+  </>}><span className="asset-track-inline-question" tabIndex={0} aria-label={summaryLabel}>?</span></HoverHint>;
 }

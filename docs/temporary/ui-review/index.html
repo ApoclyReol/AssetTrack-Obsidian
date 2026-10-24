@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Asset Track · 交互审查稿</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="review.css">
+  <script src="review.js" defer></script>
+</head>
+<body>
+  <aside class="review-rail">
+    <a class="brand" href="#categories"><span class="brand-mark">A<span>↗</span></span><span>Asset Track<small>交互审查 · 01</small></span></a>
+    <div class="review-progress"><span>逐项审查</span><span id="review-count">0 / 0</span></div>
+    <nav id="scene-nav" aria-label="审查场景"></nav>
+    <div class="rail-bottom"><span class="demo-dot"></span>独立演示 · 不连接账本</div>
+  </aside>
+  <main class="review-main">
+    <header class="review-top">
+      <div><span class="overline">界面与操作</span><h1 id="review-title">分类表与操作空间</h1></div>
+      <div class="review-tools">
+        <label>画布<select id="canvas-size"><option value="wide">常规 · 1120</option><option value="compact">窄窗口 · 760</option><option value="small">小窗口 · 560</option></select></label>
+        <label>状态<select id="demo-state"><option value="normal">正常</option><option value="busy">处理中</option><option value="error">失败</option></select></label>
+        <label class="switch-label"><input id="long-content" type="checkbox">长内容</label>
+        <button id="theme-toggle" class="icon-btn" aria-label="切换深浅主题">◐</button>
+      </div>
+    </header>
+    <div class="review-context"><span id="scene-code" class="review-code">C-05</span><span id="scene-description"></span><button id="reopen" class="text-btn">重新打开</button></div>
+    <div class="stage-scroll"><div id="stage" class="stage" data-size="wide"><div id="product"></div><div id="modal-host"></div><div id="toast" class="toast" role="status"></div><div id="tooltip" class="tooltip" role="tooltip" hidden></div></div></div>
+    <section class="review-bottom">
+      <div class="review-decision"><span>本项意见</span><button id="approve-scene">✓ 通过</button><button id="revise-scene">需调整</button><span id="decision-state"></span></div>
+      <input id="review-note" aria-label="本项审查备注" placeholder="写下要调整的地方…">
+      <button id="export-review">导出审查意见</button>
+    </section>
+    <p class="review-foot">画布中的数据和操作均为演示。审查意见仅保存在当前浏览器；导出后可交回继续修改。</p>
+  </main>
+</body>
+</html>

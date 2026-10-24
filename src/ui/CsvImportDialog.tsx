@@ -335,6 +335,9 @@ export function CsvImportDialog({
     };
   }, [hostWindow]);
   const interactionBusy = busy || headerBusy || mappingBusy;
+  const [mappingEdited, setMappingEdited] = useState(false);
+  const [discardPrompt, setDiscardPrompt] = useState(false);
+  const requestCancel = () => { if (interactionBusy) return; if (mappingEdited) setDiscardPrompt(true); else onCancel(); };
   const headerStatus = activeInspection.header_status ?? "normal";
   const headerRow = activeInspection.header_row ?? 1;
   const headerCandidates = activeInspection.header_candidates ?? [];
@@ -512,7 +515,7 @@ export function CsvImportDialog({
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === "Escape" && !interactionBusy) {
       event.preventDefault();
-      onCancel();
+      requestCancel();
       return;
     }
     if (event.key !== "Tab") return;
@@ -540,7 +543,7 @@ export function CsvImportDialog({
       className="asset-track-modal-backdrop"
       role="presentation"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !interactionBusy) onCancel();
+        if (event.target === event.currentTarget && !interactionBusy && !mappingEdited) onCancel();
       }}
     >
       <section
@@ -551,7 +554,13 @@ export function CsvImportDialog({
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
         onKeyDown={handleKeyDown}
+        onChangeCapture={() => setMappingEdited(true)}
       >
+        {discardPrompt && <div className="asset-track-close-guard"><div className="asset-track-close-guard-card" role="alertdialog">
+          <h3>{t("放弃本次导入设置？", "Discard these import settings?")}</h3><div className="asset-track-rule-create-actions">
+            <button type="button" onClick={() => setDiscardPrompt(false)}>{t("继续编辑", "Keep editing")}</button>
+            <button type="button" className="mod-warning" onClick={onCancel}>{t("放弃修改", "Discard changes")}</button>
+          </div></div></div>}
         <header>
           <div>
             <h2 id={titleId}>{t("导入账单", "Import statement")}</h2>
@@ -559,7 +568,7 @@ export function CsvImportDialog({
               {activeInspection.filename} · {activeInspection.row_count} {t("行待检查", "rows to review")}
             </span>
           </div>
-          <button type="button" onClick={onCancel} disabled={interactionBusy}>
+          <button type="button" onClick={requestCancel} disabled={interactionBusy}>
             {t("关闭", "Close")}
           </button>
         </header>
@@ -1398,7 +1407,7 @@ export function CsvImportDialog({
         )}
 
         <footer className="asset-track-import-footer">
-          <button type="button" onClick={onCancel} disabled={interactionBusy}>
+          <button type="button" onClick={requestCancel} disabled={interactionBusy}>
             {t("取消", "Cancel")}
           </button>
           {page > 1 && (

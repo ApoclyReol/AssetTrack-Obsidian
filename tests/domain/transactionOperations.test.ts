@@ -423,3 +423,18 @@ describe("transaction operation previews", () => {
     expect(result.rows[0].category_key).toBe("cat-food");
   });
 });
+
+it("adds and removes several tags without replacing unrelated tags", () => {
+  const tagged = [{ ...rows[0], tag_keys: ["keep", "old"] }];
+  const added = previewTransactionOperation(tagged, request("bulk-add-tag", [1], { target_tag_keys: ["a", "b", "keep"] }));
+  expect(added.rows[0].tag_keys).toEqual(["keep", "old", "a", "b"]);
+  const removed = previewTransactionOperation(added.rows, request("bulk-remove-tag", [1], { target_tag_keys: ["old", "a"] }));
+  expect(removed.rows[0].tag_keys).toEqual(["keep", "b"]);
+});
+
+it("rejects invalid multi-tag selections", () => {
+  for (const keys of [[], [""], ["a", "a"]]) {
+    expect(validateTransactionOperationRequest(rows, request("bulk-add-tag", [1], { target_tag_keys: keys })))
+      .toEqual(expect.arrayContaining([expect.objectContaining({ code: "transaction.tag.invalid_target" })]));
+  }
+});

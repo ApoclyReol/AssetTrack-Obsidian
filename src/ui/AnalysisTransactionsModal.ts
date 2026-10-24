@@ -1,11 +1,12 @@
-import { Modal, type App } from "obsidian";
+import { ManagedModal } from "./ManagedModal";
+import { type App } from "obsidian";
 import type { EditorShellPort } from "../services/ports";
 import type { TransactionAnalysisDrilldown } from "../types/analysis";
 import { t } from "../i18n";
 import { money } from "../domain/moneyFormat";
 import { messageFor } from "./editorPrimitives";
 
-export class AnalysisTransactionsModal extends Modal {
+export class AnalysisTransactionsModal extends ManagedModal {
   private closed = false;
 
   constructor(app: App, private readonly api: EditorShellPort,
@@ -14,6 +15,7 @@ export class AnalysisTransactionsModal extends Modal {
   }
 
   onOpen(): void {
+    this.installInteraction();
     this.modalEl.addClass("asset-track-native-modal", "asset-track-analysis-transactions-modal");
     const month = this.month?.trim() || t("当前月份", "Current month");
     const label = this.drilldown.label?.trim() || this.drilldown.key?.trim() || t("相关流水", "Related transactions");
@@ -52,6 +54,7 @@ export class AnalysisTransactionsModal extends Modal {
   }
 
   onClose(): void {
+    super.onClose();
     this.closed = true;
     this.contentEl.empty();
   }

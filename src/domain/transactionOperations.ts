@@ -162,7 +162,11 @@ export function validateTransactionOperationRequest(
   }
 
   if (request.operation_type === "bulk-add-tag" || request.operation_type === "bulk-remove-tag") {
-    if (!request.target_tag_key?.trim()) {
+    const keys = request.target_tag_keys ?? [];
+    if (keys.some(key => !key.trim()) || new Set(keys.map(key => key.trim())).size !== keys.length) {
+      issues.push({ code: "transaction.tag.invalid_target", params: {} });
+    }
+    if (!request.target_tag_key?.trim() && !keys.length) {
       issues.push({ code: "transaction.tag.invalid_target", params: {} });
     }
   }
@@ -319,10 +323,11 @@ export function previewTransactionOperation(
       const currentTags = [...new Set(row.tag_keys ?? [])];
       const targetTag = request.target_tag_key?.trim() ?? "";
       const replacementTags = [...new Set((request.target_tag_keys ?? []).map((key) => key.trim()).filter(Boolean))];
+      const targets = replacementTags.length ? replacementTags : targetTag ? [targetTag] : [];
       const nextTags = request.operation_type === "bulk-add-tag"
-        ? (targetTag && !currentTags.includes(targetTag) ? [...currentTags, targetTag] : currentTags)
+        ? [...new Set([...currentTags, ...targets])]
         : request.operation_type === "bulk-remove-tag"
-          ? currentTags.filter((key) => key !== targetTag)
+          ? currentTags.filter((key) => !targets.includes(key))
           : replacementTags;
       const next = { ...row, tag_keys: nextTags };
       const changed = JSON.stringify(currentTags) !== JSON.stringify(nextTags);

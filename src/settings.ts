@@ -1,3 +1,4 @@
+import { DatabaseUpgradeModal } from "./ui/DatabaseUpgradeModal";
 import {
   App,
   Notice,
@@ -486,10 +487,11 @@ export class AssetTrackSettingTab extends PluginSettingTab {
   ): Promise<boolean> {
     const inspection = await this.plugin.inspectDataDirectory(directory);
     if (inspection.migration_required && (inspection.migration_impact?.from_schema ?? 0) >= 12) {
-      const confirmed = await confirmAction(this.app,
-        t("升级规则数据结构？", "Upgrade the rule schema?"),
-        t("本次升级规则，支持金额区间和明确的重写留空行为，旧规则默认保留原值；已有流水、规则、分类属性和标签保持不变。确认后先创建保护备份，再执行升级；取消不修改原文件。", "This adds amount ranges and explicit blank-rewrite behavior. Existing rules keep original values; transactions, rules, attributes and tags are preserved. A protection backup is created before upgrading. Cancel leaves the original unchanged."),
-        t("备份并升级", "Back up and upgrade"));
+      const impact = inspection.migration_impact;
+      if (!impact) return false;
+      const confirmed = await new Promise<boolean>(resolve => new DatabaseUpgradeModal({
+        app: this.app, directory, impact, onChoice: resolve
+      }).open());
       if (!confirmed) return false;
       choice = "preserve";
     } else if (inspection.migration_required) {
@@ -512,18 +514,7 @@ export class AssetTrackSettingTab extends PluginSettingTab {
         choice === "preserve" ? t("保留并迁移", "Preserve and migrate") : t("清除并迁移", "Clear and migrate")
       );
       if (!confirmed) return false;
-      if (choice === "clear") {
-        const clearedConfirmed = await confirmAction(
-          this.app,
-          t("再次确认清除旧属性？", "Confirm clearing legacy attributes again?"),
-          t(
-            "这会放弃旧分类的必要性、消费频率和大额标记映射；保护备份仍会保留，但迁移后不会自动恢复这些属性。继续清除？",
-            "This will discard the legacy necessity, frequency, and large-ticket mapping. The protection backup will remain, but these attributes will not be restored automatically after migration. Clear them anyway?"
-          ),
-          t("确认清除并迁移", "Clear and migrate")
-        );
-        if (!clearedConfirmed) return false;
-      }
+
     }
     // A ready plugin must switch through the serialized control plane. Directly
     // calling loadDatabase in that state is rejected by the lifecycle guard and

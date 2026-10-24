@@ -58,6 +58,7 @@ export function HistoryBackfillContent({
   const [scope, setScope] = useState<ReadWindow | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [targetCategoryKey, setTargetCategoryKey] = useState("");
+  const [committing, setCommitting] = useState(false);
   const [preview, setPreview] = useState<CategoryBackfillPreview | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -351,6 +352,7 @@ export function HistoryBackfillContent({
     const sequence = previewSequence + 1;
     requestSequence.current = sequence;
     setLoading(true);
+    setCommitting(true);
     setMessage(t("正在写入历史分类…", "Applying historical categories…"));
     try {
       const result = await api.applyCategoryBackfill({
@@ -371,7 +373,7 @@ export function HistoryBackfillContent({
     } catch (error) {
       if (sequence === requestSequence.current) setMessage(errorMessage(error));
     } finally {
-      if (sequence === requestSequence.current) setLoading(false);
+      if (sequence === requestSequence.current) { setLoading(false); setCommitting(false); }
     }
   };
 
@@ -421,7 +423,7 @@ export function HistoryBackfillContent({
     setLoading(false);
   };
 
-  return <div className="asset-track-rule-history-modal-content">
+  return <div className="asset-track-rule-history-modal-content" data-asset-track-busy={committing}>
     {mode === "product" && !detailOnly && (!embedded || overview) && <RuleHistoryFilters
       categories={categories}
       groupBy={groupBy}

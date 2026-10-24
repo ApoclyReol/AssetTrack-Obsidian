@@ -1,4 +1,6 @@
-import type { App } from "obsidian";
+import { CategoryMigrationModal } from "../CategoryMigrationModal";
+import { CategoryRemovalModal } from "../CategoryRemovalModal";
+import { Menu, Notice, type App } from "obsidian";
 import type { ConfigurationEditorPort } from "../../services/ports";
 import type {
   AttributeGroup,
@@ -36,6 +38,7 @@ export interface CategoryDefinitionsTableProps {
   onOpenRules: () => void;
   showSectionActions: boolean;
   dirty: boolean;
+  historyBlocked?: boolean;
   saveBlocked: boolean;
   pageState: OperationState;
   saveState: OperationState;
@@ -58,6 +61,7 @@ export function CategoryDefinitionsTable({
   onOpenRules,
   showSectionActions,
   dirty,
+  historyBlocked = false,
   saveBlocked,
   pageState,
   saveState,
@@ -70,6 +74,14 @@ export function CategoryDefinitionsTable({
     onChange(next);
   };
 
+  const openHistory = (category: CategoryDefinition, remove: boolean) => {
+    if (dirty || historyBlocked || editingBusy) {
+      new Notice(t("请先保存或放弃当前分类修改。", "Save or discard category changes first.")); return;
+    }
+    const options = { app, api, category, categories, onSaved: onSavedHistory, onDataChanged };
+    if (remove) new CategoryRemovalModal(options).open(); else new CategoryMigrationModal(options).open();
+  };
+  const editingBusy = saveBlocked || saveState.kind === "pending";
   const categoryView = sortRows(categories, sort, (row, key) => row[key as keyof CategoryDefinition]);
 
   return <Section>
@@ -125,13 +137,18 @@ export function CategoryDefinitionsTable({
             const keyText = typeof key === "string" ? key.trim() : "";
             return <span className="asset-track-taxonomy-chip" key={key} title={typeof groupName === "string" && groupName.trim() ? groupName.trim() : undefined}>{optionName || keyText || t("未命名", "Unnamed")}</span>;
           })}</div></td>
-          <td className="asset-track-category-actions asset-track-actions-cell"><button type="button" onClick={() => new CategoryEditorModal({
+          <td className="asset-track-category-actions asset-track-actions-cell"><div className="asset-track-category-action-group"><button type="button" onClick={() => new CategoryEditorModal({
             app, api, category: row, categories,
             groups: attributeGroups, options: attributeOptions,
             onApply: (next) => updateCategory(index, (category) => { Object.assign(category, next); }),
             onRemove: () => { void onRemove(row, index); },
             onSavedHistory, onDataChanged, onOpenRules
-          }).open()}>{t("编辑", "Edit")}</button></td>
+          }).open()}><span className="asset-track-action-full">{t("编辑属性", "Edit attributes")}</span><span className="asset-track-action-short">{t("属性", "Attributes")}</span></button>
+          <button type="button" disabled={editingDisabled} onClick={() => openHistory(row, false)}><span className="asset-track-action-full">{t("迁移流水", "Migrate transactions")}</span><span className="asset-track-action-short">{t("迁移", "Migrate")}</span></button>
+          <button type="button" disabled={editingDisabled} aria-label={t(`${rowLabel}更多操作`, `More actions for ${rowLabel}`)} onClick={event => {
+            new Menu().addItem(item => item.setTitle(t("删除分类", "Delete category")).setIcon("trash-2")
+              .onClick(() => openHistory(row, true))).showAtMouseEvent(event.nativeEvent);
+          }}>···</button></div></td>
         </tr>;
         })}</tbody>
       </table>

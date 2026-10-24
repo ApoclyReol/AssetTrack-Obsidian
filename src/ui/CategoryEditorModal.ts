@@ -1,10 +1,8 @@
-import { Modal, type App } from "obsidian";
-import { createElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { ManagedModal } from "./ManagedModal";
+import { type App } from "obsidian";
 import type { ConfigurationEditorPort } from "../services/ports";
 import type { AttributeGroup, AttributeOption, CategoryDefinition } from "../types/configuration";
 import { businessLabel, t } from "../i18n";
-import { HistoryBackfillContent } from "./configuration/RuleHistoryWorkspace";
 
 export interface CategoryEditorModalOptions {
   app: App;
@@ -21,8 +19,7 @@ export interface CategoryEditorModalOptions {
   isNew?: boolean;
 }
 
-export class CategoryEditorModal extends Modal {
-  private root: Root | null = null;
+export class CategoryEditorModal extends ManagedModal {
   private draft: CategoryDefinition;
   private closed = false;
 
@@ -32,6 +29,7 @@ export class CategoryEditorModal extends Modal {
   }
 
   onOpen(): void {
+    this.installInteraction();
     this.modalEl.addClass("asset-track-native-modal", "asset-track-category-editor-modal");
     this.setTitle(this.options.isNew ? t("新增分类", "Add category")
       : t(`编辑分类“${this.draft.name}”`, `Edit category “${this.draft.name}”`));
@@ -46,44 +44,8 @@ export class CategoryEditorModal extends Modal {
   }
 
   private render(): void {
-    this.root?.unmount();
-    this.root = null;
     this.contentEl.empty();
-    this.renderTabs("category");
     this.renderFields();
-  }
-
-  private renderTabs(active: "category" | "history"): void {
-    const tabs = this.contentEl.createDiv({ cls: "asset-track-editor-modal-tabs" });
-    tabs.setAttribute("role", "tablist");
-    const editor = tabs.createEl("button", { text: t("分类与属性", "Category and attributes") });
-    editor.type = "button";
-    editor.setAttribute("role", "tab");
-    editor.setAttribute("aria-selected", String(active === "category"));
-    editor.tabIndex = active === "category" ? 0 : -1;
-    if (active === "category") editor.addClass("is-active");
-    editor.addEventListener("click", () => this.render());
-    editor.addEventListener("keydown", (event) => {
-      if (this.options.isNew || (event.key !== "ArrowRight" && event.key !== "End")) return;
-      event.preventDefault();
-      this.renderHistory();
-      this.contentEl.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')?.focus();
-    });
-    if (!this.options.isNew) {
-      const history = tabs.createEl("button", { text: t("迁移历史流水", "Migrate history") });
-      history.type = "button";
-      history.setAttribute("role", "tab");
-      history.setAttribute("aria-selected", String(active === "history"));
-      history.tabIndex = active === "history" ? 0 : -1;
-      if (active === "history") history.addClass("is-active");
-      history.addEventListener("click", () => this.renderHistory());
-      history.addEventListener("keydown", (event) => {
-        if (event.key !== "ArrowLeft" && event.key !== "Home") return;
-        event.preventDefault();
-        this.render();
-        this.contentEl.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')?.focus();
-      });
-    }
   }
 
   private renderFields(): void {
@@ -140,69 +102,16 @@ export class CategoryEditorModal extends Modal {
     apply.type = "button";
     apply.addEventListener("click", () => {
       this.options.onApply({ ...this.draft, attribute_keys: [...(this.draft.attribute_keys ?? [])] });
-      this.close();
+      this.completeClose();
     });
-    if (!this.options.isNew) {
-      const remove = actions.createEl("button", { text: t("移除分类", "Remove category"), cls: "mod-warning" });
-      remove.type = "button";
-      remove.addEventListener("click", () => this.renderRemoval());
-    }
-  }
-
-  private renderRemoval(): void {
-    this.contentEl.querySelector(".asset-track-inline-confirmation")?.remove();
-    const confirmation = this.contentEl.createDiv({ cls: "asset-track-inline-confirmation" });
-    const transactionCount = this.options.category.transaction_count ?? 0;
-    const ruleCount = this.options.category.rule_count ?? 0;
-    confirmation.createEl("p", { text: transactionCount || ruleCount
-      ? t("此分类仍被历史流水或规则引用。请先处理关联后再移除。",
-        "This category is still used by historical transactions or rules. Resolve those references before removing it.")
-      : t(`确认移除分类“${this.draft.name || this.draft.category_key}”？保存分类后生效。`,
-        `Remove category “${this.draft.name || this.draft.category_key}”? It will take effect after saving categories.`) });
-    if (ruleCount) {
-      const rules = confirmation.createEl("button", { text: t("查看规则", "View rules") });
-      rules.type = "button";
-      rules.addEventListener("click", this.options.onOpenRules);
-    }
-    if (!transactionCount && !ruleCount) {
-      const confirm = confirmation.createEl("button", { text: t("确认移除", "Confirm removal"), cls: "mod-warning" });
-      confirm.type = "button";
-      confirm.addEventListener("click", () => { this.options.onRemove(); this.close(); });
-    }
-    const cancel = confirmation.createEl("button", { text: t("取消", "Cancel") });
+    const cancel = actions.createEl("button", { text: t("取消修改", "Cancel changes") });
     cancel.type = "button";
-    cancel.addEventListener("click", () => confirmation.remove());
-  }
-
-  private renderHistory(): void {
-    this.root?.unmount();
-    this.root = null;
-    this.contentEl.empty();
-    this.renderTabs("history");
-    const hostWindow = this.app.workspace.containerEl.ownerDocument.defaultView;
-    if (!hostWindow) return;
-    const host = this.contentEl.createDiv();
-    this.root = createRoot(host);
-    this.root.render(createElement(HistoryBackfillContent, {
-      api: this.options.api,
-      categories: this.options.categories,
-      mode: "category",
-      embedded: true,
-      initialQuery: { category_key: this.options.category.category_key },
-      hostWindow,
-      confirmAction: async () => true,
-      onSaved: () => {
-        this.options.onSavedHistory();
-        hostWindow.setTimeout(() => this.close(), 0);
-      },
-      onDataChanged: this.options.onDataChanged
-    }));
+    cancel.addEventListener("click", () => this.requestClose());
   }
 
   onClose(): void {
+    super.onClose();
     this.closed = true;
-    this.root?.unmount();
-    this.root = null;
     this.contentEl.empty();
   }
 }

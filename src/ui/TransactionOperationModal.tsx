@@ -1,4 +1,5 @@
-import { Modal, type App } from "obsidian";
+import { ManagedModal } from "./ManagedModal";
+import { type App } from "obsidian";
 import { createElement, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type {
@@ -20,6 +21,7 @@ export interface TransactionOperationModalOptions {
     includeProtected: boolean,
     replacement?: { preview: OperationPreview; rows: Transaction[] }
   ) => void | Promise<void>;
+  onProtectedChange?: (include: boolean) => Promise<{ preview: OperationPreview; rows: Transaction[] }>;
   onRetry?: (
     statuses: Array<AiBatchResult["rows"][number]["status"]>
   ) => Promise<{ preview: OperationPreview; rows: Transaction[] }>;
@@ -97,9 +99,12 @@ function OperationPreviewContent({
   preview,
   onConfirm,
   onRetry,
+  onProtectedChange,
   onClose
 }: Omit<TransactionOperationModalOptions, "app"> & { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const [includeProtected, setIncludeProtected] = useState(false);
   const [current, setCurrent] = useState(preview);
   const [currentRows, setCurrentRows] = useState<Transaction[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -145,7 +150,7 @@ function OperationPreviewContent({
       setBusy(false);
     }
   };
-  const samples = current.changes.slice(0, 8);
+  const samples = showAll ? current.changes : current.changes.slice(0, 8);
   const isTypeConversion = current.operation_type === "income-to-daifu"
     || current.operation_type === "daifu-to-income";
   const isAiClassification = current.operation_type === "ai-classification";
@@ -156,7 +161,7 @@ function OperationPreviewContent({
   const ruleConflictCount = isRuleApplication
     ? current.changes.filter((change) => change.status === "failure" || (change.reason ?? "").includes("冲突")).length
     : 0;
-  return <div className="asset-track-operation-preview">
+  return <div className="asset-track-operation-preview" data-asset-track-busy={busy}>
     {error && <p role="alert" className="asset-track-operation-error">{error}</p>}
     <p>{isRuleApplication
       ? t("规则会检查当前月份的支出、收入和代付流水，并只把预览中确认的变化放入草稿。不会自动保存或改写其他月份。", "Rules will check this month's expense, income, and paid-on-behalf transactions. Only confirmed preview changes enter the draft; other months are not changed and nothing is saved automatically.")
@@ -182,7 +187,11 @@ function OperationPreviewContent({
     {isTypeConversion && <p className="asset-track-operation-preview-note">
       {t("互转会清空分类字段。", "Converting between income and paid-on-behalf clears the category field.")}
     </p>}
-    {current.protected_count ? <p>{t(`默认保护 ${current.protected_count} 条已人工修改流水。`, `${current.protected_count} manually edited rows are protected by default.`)}</p> : null}
+    {Boolean(preview.protected_count) && onProtectedChange && <label className="asset-track-merge-tag-option"><input type="checkbox" disabled={busy} checked={includeProtected} onChange={event => {
+      const next = event.target.checked; setBusy(true); setError(null);
+      void onProtectedChange(next).then(result => { setCurrent(result.preview); setCurrentRows(result.rows); setIncludeProtected(next); })
+        .catch(reason => setError(messageFor(reason))).finally(() => setBusy(false));
+    }} />{t("包含已人工修改的流水", "Include manually edited transactions")}</label>}
     {aiRows.length > 0 && <div className="asset-track-ai-result-summary" role="status">
       <strong>{t("AI 建议结果", "AI suggestion results")}</strong>
       <div>{aiStatusCounts.map(({ status, count }) => <span key={status}>{aiStatusLabel(status)}：{count}</span>)}</div>
@@ -195,6 +204,7 @@ function OperationPreviewContent({
         {change.reason && <small>{displayError(change.reason)}</small>}
       </div>)}
     </div>}
+    {current.changes.length > 8 && <button type="button" onClick={() => setShowAll(!showAll)}>{showAll ? t("收起", "Collapse") : t("查看全部变化", "View all changes")}</button>}
     {onRetry && availableRetryStatuses.length > 0 && <div className="asset-track-operation-retry-actions">
       <strong>{t("按结果重试", "Retry by result")}</strong>
       {availableRetryStatuses.map((status) => <button
@@ -209,21 +219,14 @@ function OperationPreviewContent({
         type="button"
         disabled={busy}
         aria-label={t("确认修改，并跳过已保护的流水", "Confirm changes and skip protected transactions")}
-        onClick={() => void confirm(false)}
-      >{t("确认修改（跳过保护流水）", "Confirm changes (skip protected)")}</button>
-      {Boolean(current.protected_count) && <button
-        type="button"
-        className="mod-warning"
-        disabled={busy}
-        aria-label={t("确认修改，并包含已保护的流水", "Confirm changes including protected transactions")}
-        onClick={() => void confirm(true)}
-      >{t("包含保护流水并修改", "Include protected and modify")}</button>}
+        onClick={() => void confirm(includeProtected)}
+      >{t("应用到流水草稿", "Apply to transaction draft")}</button>
       <button type="button" disabled={busy} onClick={onClose}>{t("取消", "Cancel")}</button>
     </div>
   </div>;
 }
 
-export class TransactionOperationModal extends Modal {
+export class TransactionOperationModal extends ManagedModal {
   private root: Root | null = null;
 
   constructor(private readonly options: TransactionOperationModalOptions) {
@@ -231,6 +234,7 @@ export class TransactionOperationModal extends Modal {
   }
 
   onOpen(): void {
+    this.installInteraction();
     this.setTitle(t("流水操作预览", "Transaction operation preview"));
     this.modalEl.addClass("asset-track-native-modal", "asset-track-operation-preview-modal");
     this.root = createRoot(this.contentEl);
@@ -238,11 +242,13 @@ export class TransactionOperationModal extends Modal {
       preview: this.options.preview,
       onConfirm: this.options.onConfirm,
       onRetry: this.options.onRetry,
-      onClose: () => this.close()
+      onProtectedChange: this.options.onProtectedChange,
+      onClose: () => this.completeClose()
     }));
   }
 
   onClose(): void {
+    super.onClose();
     this.root?.unmount();
     this.root = null;
     this.contentEl.empty();

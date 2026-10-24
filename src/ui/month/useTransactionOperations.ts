@@ -115,6 +115,9 @@ function operationSuccessNotice(
 }
 
 export interface TransactionOperations {
+  canUndo: boolean;
+  recordUndo: (nextRows: Transaction[]) => void;
+  undo: () => void;
   businessTab: TransactionBusinessTab;
   selectedTransactionKeys: Set<TransactionKey>;
   changeBusinessTab: (next: TransactionBusinessTab) => void;
@@ -166,7 +169,7 @@ export interface TransactionOperations {
     predicate: (row: Transaction) => boolean
   ) => void;
   openTagBatchEdit: (
-    operationType: Extract<TransactionOperationRequest["operation_type"], "bulk-add-tag" | "bulk-remove-tag" | "bulk-replace-tags">,
+    operationType: Extract<TransactionOperationRequest["operation_type"], "bulk-add-tag" | "bulk-remove-tag">,
     business: TransactionBusinessTab,
     keys: ReadonlySet<TransactionKey>,
     predicate: (row: Transaction) => boolean
@@ -188,6 +191,7 @@ export interface TransactionOperationsOptions {
   mark: (next: MonthWorkspace, section: "transactions") => void;
   pendingOperationLogsRef: MutableRefObject<PendingOperationLog[]>;
   transactionResetVersion: number;
+  dataVersion?: number;
 }
 
 export function countAssignedCategories(
@@ -288,7 +292,8 @@ export function useTransactionOperations({
   setState,
   mark,
   pendingOperationLogsRef,
-  transactionResetVersion
+  transactionResetVersion,
+  dataVersion = 0
 }: TransactionOperationsOptions): TransactionOperations {
   const [businessTab, setBusinessTab] = useState<TransactionBusinessTab>("outgoing");
   const [selectedTransactionKeys, setSelectedTransactionKeys] = useState<Set<TransactionKey>>(
@@ -297,6 +302,36 @@ export function useTransactionOperations({
   const [protectedTransactionKeys, setProtectedTransactionKeys] = useState<Set<TransactionKey>>(
     () => new Set()
   );
+  const undoStack = useRef<Array<{ rows: Transaction[]; logs: PendingOperationLog[]; selected: Set<TransactionKey>; protected: Set<TransactionKey> }>>([]);
+  const expectedRows = useRef(draft?.transactions);
+  const [undoCount, setUndoCount] = useState(0);
+  const clearUndo = useCallback(() => { undoStack.current = []; setUndoCount(0); }, []);
+  const recordUndo = useCallback((nextRows: Transaction[]) => {
+    if (!draft || nextRows === draft.transactions) return;
+    undoStack.current.push({ rows: draft.transactions, logs: [...pendingOperationLogsRef.current],
+      selected: new Set(selectedTransactionKeys), protected: new Set(protectedTransactionKeys) });
+    if (undoStack.current.length > 10) undoStack.current.shift();
+    expectedRows.current = nextRows;
+    setUndoCount(undoStack.current.length);
+  }, [draft, pendingOperationLogsRef, protectedTransactionKeys, selectedTransactionKeys]);
+  const undo = useCallback(() => {
+    if (!draft || expectedRows.current !== draft.transactions) return;
+    const previous = undoStack.current.pop();
+    if (!previous) return;
+    requestSequence.current++;
+    expectedRows.current = previous.rows;
+    pendingOperationLogsRef.current = previous.logs;
+    setSelectedTransactionKeys(previous.selected);
+    setProtectedTransactionKeys(previous.protected);
+    setUndoCount(undoStack.current.length);
+    mark({ ...draft, transactions: previous.rows }, "transactions");
+    new Notice(t("已撤回上一步草稿操作。", "Undid the last draft operation."));
+  }, [draft, mark, pendingOperationLogsRef]);
+  useEffect(() => {
+    if (expectedRows.current !== draft?.transactions) clearUndo();
+    expectedRows.current = draft?.transactions;
+  }, [draft, clearUndo]);
+  useEffect(() => { clearUndo(); }, [month, transactionResetVersion, dataVersion, clearUndo]);
   const draftIdentity = useRef(draft);
   const draftGeneration = useRef(0);
   const mounted = useRef(true);
@@ -446,6 +481,7 @@ export function useTransactionOperations({
       row,
       indexByRow.get(row) ?? -1
     ));
+    recordUndo(result.rows);
     pendingOperationLogsRef.current = [
       ...pendingOperationLogsRef.current,
       { preview: result.preview, selection }
@@ -454,7 +490,7 @@ export function useTransactionOperations({
     const message = operationSuccessNotice(request, result.preview);
     new Notice(message);
     setState({ kind: "success", message });
-  }, [draft, ensureRequestContext, mark, month, pendingOperationLogsRef, setState]);
+  }, [draft, ensureRequestContext, mark, month, pendingOperationLogsRef, recordUndo, setState]);
 
   const applyOperationPreview = useCallback(async (
     request: MonthOperationRequest,
@@ -476,7 +512,7 @@ export function useTransactionOperations({
       includeProtected: boolean,
       replacement?: OperationPreviewResult
     ): Promise<void> => {
-      if (replacement && !includeProtected) {
+      if (replacement) {
         apply(replacement);
         return;
       }
@@ -501,7 +537,13 @@ export function useTransactionOperations({
       apply({ preview, rows: nextRows });
     };
     if (app) {
-      new TransactionOperationModal({ app, preview, onConfirm: confirm, onRetry: retry }).open();
+      new TransactionOperationModal({ app, preview, onConfirm: confirm, onRetry: retry,
+        onProtectedChange: rerun ? async include => {
+          if (!ensureRequestContext(trackedRequest, sourceDraft, sourceMonth)) throw new AssetTrackError({ code: "operation.preview_draft_mismatch", status: 409 });
+          const result = await rerun(include);
+          if (!ensureRequestContext(trackedRequest, sourceDraft, sourceMonth)) throw new AssetTrackError({ code: "operation.preview_draft_mismatch", status: 409 });
+          return result;
+        } : undefined }).open();
     } else if (hostWindow.confirm(t(
       `将变更 ${preview.change_count} 条流水，确认进入草稿？`,
       `Apply ${preview.change_count} transaction changes to the draft?`
@@ -597,6 +639,7 @@ export function useTransactionOperations({
           return next;
         }, onConfirm: async (isOpen, confirmedResult) => {
           if (!isOpen() || !isCurrentRequest(sequence, sourceDraft, sourceMonth)) throw new AssetTrackError({ code: "operation.preview_draft_mismatch", status: 409 });
+          recordUndo(confirmedResult.rows);
           pendingOperationLogsRef.current.push({ preview: confirmedResult.preview, selection: confirmedResult.groups.flatMap((group) => group.source_keys) });
           mark({ ...sourceDraft, transactions: confirmedResult.rows }, "transactions");
           setSelectedTransactionKeys(new Set());
@@ -851,6 +894,12 @@ export function useTransactionOperations({
       transactionType,
       categorySelectionConflict,
       categorySelectionConflictTypes,
+      onPreview: async value => {
+        if (contextRef.current.draft !== draft) throw new AssetTrackError({ code: "operation.preview_draft_mismatch", status: 409 });
+        const selectedRows = operationRows(keys, predicate, business);
+        const request = operationRequest(operationType, selectedRows, business, false, value);
+        return (await api.previewTransactionOperation({ ...request, rules: [] })).preview;
+      },
       onConfirm: async (value) => {
         const sourceDraft = draft;
         const sourceMonth = month;
@@ -890,7 +939,7 @@ export function useTransactionOperations({
   }, [api, app, applyOperationResultToDraft, categories, draft, ensureRequestContext, isCurrentRequest, month, nextRequestSequence, operationRequest, operationRows, setState]);
 
   const openTagBatchEdit = useCallback((
-    operationType: Extract<TransactionOperationRequest["operation_type"], "bulk-add-tag" | "bulk-remove-tag" | "bulk-replace-tags">,
+    operationType: Extract<TransactionOperationRequest["operation_type"], "bulk-add-tag" | "bulk-remove-tag">,
     business: TransactionBusinessTab,
     keys: ReadonlySet<TransactionKey>,
     predicate: (row: Transaction) => boolean
@@ -903,6 +952,12 @@ export function useTransactionOperations({
       app,
       operationType,
       tags,
+      onPreview: async value => {
+        if (!value.target_tag_keys.length) return { operation_id: "empty-tags", operation_type: operationType, source_page: "记录/流水", total_count: 0, change_count: 0, skipped_count: 0, failure_count: 0, protected_count: 0, changes: [] };
+        if (contextRef.current.draft !== draft) throw new AssetTrackError({ code: "operation.preview_draft_mismatch", status: 409 });
+        const request = operationRequest(operationType, operationRows(keys, predicate, business), business, false, value);
+        return (await api.previewTransactionOperation({ ...request, rules: [] })).preview;
+      },
       onConfirm: async (value) => {
         const sourceDraft = draft;
         const sourceMonth = month;
@@ -921,7 +976,7 @@ export function useTransactionOperations({
             value,
             undefined,
             sequence,
-            "modal"
+            "direct"
           );
           if (isCurrentRequest(sequence, sourceDraft, sourceMonth)) setState({ kind: "idle" });
         } catch (error) {
@@ -936,6 +991,7 @@ export function useTransactionOperations({
   }, [app, draft, isCurrentRequest, month, nextRequestSequence, operationRows, previewOperation, setState, tags]);
 
   return {
+    canUndo: undoCount > 0, recordUndo, undo,
     mergeGroup,
     businessTab,
     selectedTransactionKeys,

@@ -1,4 +1,7 @@
-import { Modal, type App } from "obsidian";
+import { BatchPreview, useBatchPreview } from "./BatchPreview";
+import type { OperationPreview } from "../types/operations";
+import { ManagedModal } from "./ManagedModal";
+import { type App } from "obsidian";
 import { createElement, useMemo, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type {
@@ -19,6 +22,7 @@ export interface TransactionBatchEditModalOptions {
   transactionType?: "支出" | "收入";
   categorySelectionConflict?: boolean;
   categorySelectionConflictTypes?: string[];
+  onPreview?: (value: { target_value: string; target_category_key?: string | null }) => Promise<OperationPreview>;
   onConfirm: (value: { target_value: string; target_category_key?: string | null }) => void | Promise<void>;
 }
 
@@ -35,6 +39,7 @@ function BatchEditContent({
   categorySelectionConflict = false,
   categorySelectionConflictTypes = [],
   onConfirm,
+  onPreview,
   onClose
 }: Omit<TransactionBatchEditModalOptions, "app"> & { onClose: () => void }) {
   const [value, setValue] = useState("");
@@ -51,6 +56,9 @@ function BatchEditContent({
     [categories, transactionType]
   );
 
+  const previewTarget = { target_value: isCategory ? availableCategories.find(row => row.category_key === categoryKey)?.name ?? "" : value.trim(),
+    ...(isCategory ? { target_category_key: categoryKey === UNCATEGORIZED_CATEGORY_KEY ? null : categoryKey || undefined } : {}) };
+  const previewState = useBatchPreview(previewTarget, isCategory && !categoryKey ? undefined : onPreview);
   const confirm = async () => {
     if (categoryEditBlocked) return;
     const isUncategorized = isCategory && categoryKey === UNCATEGORIZED_CATEGORY_KEY;
@@ -82,7 +90,7 @@ function BatchEditContent({
     }
   };
 
-  return <div className="asset-track-batch-edit-modal-content">
+  return <div ref={previewState.host} className="asset-track-batch-edit-modal-content" data-asset-track-busy={busy}>
     <p>{isCategory
       ? t("选择目标分类；选择“未分类”可以清空分类。确认后直接进入当前月份草稿，保存流水后才会写入数据库。", "Choose a target category. Choose “Uncategorized” to clear the category. Confirmation changes the current-month draft; save transactions to persist it.")
       : t("输入目标值；留空可以清空商品或交易对手。确认后会进入当前月份草稿；保存流水后才会写入数据库。", "Enter a target value. Leave it empty to clear the item or counterparty. Confirmation changes the current-month draft; save transactions to persist it.")}</p>
@@ -113,16 +121,17 @@ function BatchEditContent({
         onChange={(event) => setValue(event.target.value)}
       />
     </label>}
+    {onPreview && <BatchPreview {...previewState} />}
     <div className="asset-track-rule-create-actions">
-      <button type="button" className="mod-cta" disabled={busy || categoryEditBlocked} onClick={() => void confirm()}>
-        {busy ? t("正在修改…", "Applying changes…") : t("确认修改", "Confirm changes")}
+      <button type="button" className="mod-cta" disabled={busy || categoryEditBlocked || Boolean(onPreview && (previewState.pending || !previewState.preview))} onClick={() => void confirm()}>
+        {busy ? t("正在修改…", "Applying changes…") : t("应用到流水草稿", "Apply to transaction draft")}
       </button>
       <button type="button" disabled={busy} onClick={onClose}>{t("取消", "Cancel")}</button>
     </div>
   </div>;
 }
 
-export class TransactionBatchEditModal extends Modal {
+export class TransactionBatchEditModal extends ManagedModal {
   private root: Root | null = null;
 
   constructor(private readonly options: TransactionBatchEditModalOptions) {
@@ -130,6 +139,7 @@ export class TransactionBatchEditModal extends Modal {
   }
 
   onOpen(): void {
+    this.installInteraction();
     this.setTitle(titleFor(this.options.operationType));
     this.modalEl.addClass("asset-track-native-modal", "asset-track-batch-edit-modal");
     this.root = createRoot(this.contentEl);
@@ -140,11 +150,13 @@ export class TransactionBatchEditModal extends Modal {
       categorySelectionConflict: this.options.categorySelectionConflict,
       categorySelectionConflictTypes: this.options.categorySelectionConflictTypes,
       onConfirm: this.options.onConfirm,
-      onClose: () => this.close()
+      onPreview: this.options.onPreview,
+      onClose: () => this.completeClose()
     }));
   }
 
   onClose(): void {
+    super.onClose();
     this.root?.unmount();
     this.root = null;
     this.contentEl.empty();

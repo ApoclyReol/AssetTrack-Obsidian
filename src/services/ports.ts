@@ -56,6 +56,7 @@ import type {
 } from "../types/transactions";
 import type { AnalysisRuntimeSettings } from "../types/settings";
 import type { RuleRow } from "../domain/rules";
+import type { CategoryRemovalPreview } from "../types/categoryRemoval";
 import type {
   BackupRestoreResult,
   BackupValidation
@@ -123,6 +124,8 @@ export interface MonthEditorPort extends RuleLookupPort, RuleWritePort {
 }
 
 export interface ConfigurationEditorPort extends RuleLookupPort, RuleWritePort {
+  previewCategoryRemoval?: (sourceKey: string, targetKey?: string) => Promise<CategoryRemovalPreview>;
+  applyCategoryRemoval?: (preview: CategoryRemovalPreview) => Promise<void>;
   taxonomy?: () => Promise<TaxonomyWorkspace>;
   /** Create a local SQLite safety snapshot before destructive taxonomy edits. */
   createProtectionBackup?: (prefix?: string) => Promise<string>;

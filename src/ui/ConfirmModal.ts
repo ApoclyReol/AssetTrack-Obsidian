@@ -34,7 +34,7 @@ class ConfirmationModal extends Modal {
         button.setButtonText(t("取消", "Cancel")).onClick(() => this.finish(false))
       )
       .addButton((button) => {
-        button.buttonEl.addClass("mod-warning");
+        if (/(删除|清除|清空|放弃|恢复|移除|delete|clear|discard|restore|remove)/i.test(this.title)) button.buttonEl.addClass("mod-warning");
         button
           .setCta()
           .setButtonText(this.confirmText)

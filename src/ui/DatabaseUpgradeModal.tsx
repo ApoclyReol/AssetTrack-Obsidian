@@ -1,4 +1,5 @@
-import { Modal, type App } from "obsidian";
+import { ManagedModal } from "./ManagedModal";
+import { type App } from "obsidian";
 import { createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { DatabaseMigrationImpact } from "../database/DatabaseManager";
@@ -29,12 +30,13 @@ export function DatabaseUpgradeContent({ directory, impact, onChoice }: Omit<Upg
   </div>;
 }
 
-export class DatabaseUpgradeModal extends Modal {
+export class DatabaseUpgradeModal extends ManagedModal {
   private root: Root | null = null;
   private settled = false;
   constructor(private readonly options: UpgradeOptions) { super(options.app); }
 
   onOpen(): void {
+    this.installInteraction();
     this.setTitle(t("升级现有账本", "Upgrade existing ledger"));
     this.modalEl.addClass("asset-track-native-modal", "asset-track-confirmation-modal");
     this.root = createRoot(this.contentEl);
@@ -45,10 +47,11 @@ export class DatabaseUpgradeModal extends Modal {
     if (this.settled) return;
     this.settled = true;
     this.options.onChoice(choice);
-    this.close();
+    this.completeClose();
   }
 
   onClose(): void {
+    super.onClose();
     this.root?.unmount(); this.root = null; this.contentEl.empty();
     if (!this.settled) { this.settled = true; this.options.onChoice(false); }
   }

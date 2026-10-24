@@ -456,7 +456,7 @@ export class MonthWriteRepository {
         rows(db.prepare("SELECT tag_key,is_active FROM tags").all())
           .map((row) => [text(row.tag_key), boolean(row.is_active)] as const)
       );
-      const targetKeys = operationType === "bulk-replace-tags"
+      const targetKeys = operationType === "bulk-replace-tags" || (Array.isArray(metadata.target_tag_keys) && metadata.target_tag_keys.length > 0)
         ? [...new Set((Array.isArray(metadata.target_tag_keys) ? metadata.target_tag_keys : [])
             .map((value) => text(value)).filter(Boolean))]
         : [text(metadata.target_tag_key)];
@@ -471,9 +471,9 @@ export class MonthWriteRepository {
         const before = operationTagKeys(change.before.tag_keys);
         const after = operationTagKeys(change.after.tag_keys);
         const expected = operationType === "bulk-add-tag"
-          ? [...new Set([...before, targetKeys[0]])]
+          ? [...new Set([...before, ...targetKeys])]
           : operationType === "bulk-remove-tag"
-            ? before.filter((key) => key !== targetKeys[0])
+            ? before.filter((key) => !targetKeys.includes(key))
             : targetKeys;
         if ([...after].some((key) => !tags.has(key))
           || !sameStringSet(new Set(after), new Set(expected))) {

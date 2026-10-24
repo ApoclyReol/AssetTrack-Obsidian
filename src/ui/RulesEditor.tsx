@@ -286,7 +286,7 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
     if (occurrences > 0) {
       const confirmed = await confirmAction(
         t("确认删除规则？", "Confirm rule deletion?"),
-        t(`规则 #${rule.id ?? "新建"} 有历史流水，是否确认删除？`, `Rule #${rule.id ?? "new"} has historical transactions. Delete it?`),
+        t("从规则草稿移除，已保存流水不受影响。", "Remove from the rule draft. Saved transactions are kept."),
         t("确认删除规则", "Delete rule")
       );
       if (!confirmed) return;
@@ -816,6 +816,7 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
       pageState={state}
       saveState={categoryState}
       onReload={reloadCurrentSection}
+      historyBlocked={categoryDirty || ruleDirty}
       dirty={categoryDirty && !saveBlocked}
       onSave={async () => {
         if (categoryDirty) await saveCategories();

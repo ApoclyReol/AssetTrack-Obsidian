@@ -1,3 +1,4 @@
+import { HintButton } from "./HoverHint";
 import { mergeEligibility } from "../domain/transactionMerge";
 import { AssetTrackError } from "../application/errors";
 import {
@@ -9,7 +10,7 @@ import {
   type CSSProperties,
   type ReactNode
 } from "react";
-import { Notice, type App } from "obsidian";
+import { type App } from "obsidian";
 import type {
   CategoryDefinition,
   InvestmentAccountBalance,
@@ -69,9 +70,11 @@ function TransactionTags({ app, label, selected, tags, loadTags, onApply }: {
 }) {
   const modalLabel = label?.trim() || t("编辑标签", "Edit tags");
   const [resolvedTags, setResolvedTags] = useState(tags);
+  const [tagLoadError, setTagLoadError] = useState("");
   useEffect(() => setResolvedTags(tags), [tags]);
   const openEditor = async (): Promise<void> => {
     if (!app) return;
+    setTagLoadError("");
     let available = tags;
     // The month snapshot is already the data rendered beside this button. Use
     // it first so an editor opened during a taxonomy refresh never replaces a
@@ -91,7 +94,7 @@ function TransactionTags({ app, label, selected, tags, loadTags, onApply }: {
         }
       } catch (error) {
         if (!available.length) {
-          new Notice(t(`无法加载流水标签：${displayError(error)}`, `Unable to load transaction tags: ${displayError(error)}`));
+          setTagLoadError(t(`无法加载流水标签：${displayError(error)}`, `Unable to load transaction tags: ${displayError(error)}`));
           return;
         }
       }
@@ -108,7 +111,8 @@ function TransactionTags({ app, label, selected, tags, loadTags, onApply }: {
       const keyText = typeof key === "string" ? key.trim() : "";
       return <span className="asset-track-taxonomy-chip" key={key}>{labelText || keyText || t("未命名标签", "Unnamed tag")}</span>;
     })}</div>
-    <button type="button" disabled={!app} aria-label={modalLabel} onClick={() => void openEditor()}>{t("编辑", "Edit")}</button>
+    <button type="button" disabled={!app} aria-label={modalLabel} onClick={() => void openEditor()}>{tagLoadError ? t("重试", "Retry") : t("编辑", "Edit")}</button>
+    {tagLoadError && <small role="alert">{tagLoadError}</small>}
   </div>;
 }
 
@@ -869,11 +873,11 @@ export function TransactionSummaryTable({
                   </td>
                   <td className="asset-track-actions-cell asset-track-summary-actions-cell">
                     <span className="asset-track-transaction-actions">
-                      {onMergeGroup && <button type="button"
+                      {onMergeGroup && <HintButton type="button"
                         disabled={mergeReason !== null}
-                        title={mergeReason ? displayError(new AssetTrackError({ code: "transaction.merge.invalid", params: { reason: mergeReason } }))
-                          : t("预览合并当前汇总组；按分类和标签组合分别处理。", "Preview merging this summary group, separately by category and complete tag set.")}
-                        onClick={() => onMergeGroup(group)}>{t("合并成一条", "Merge into one")}</button>}
+                        reason={mergeReason ? displayError(new AssetTrackError({ code: "transaction.merge.invalid", params: { reason: mergeReason } }))
+                          : undefined}
+                        onClick={() => onMergeGroup(group)}>{t("合并此组", "Merge this group")}</HintButton>}
 
                       <button type="button" onClick={() => onExpanded(expanded === groupViewKey ? "" : groupViewKey)}>
                         {expanded === groupViewKey ? t("收起", "Collapse") : t("展开逐项", "Expand items")}

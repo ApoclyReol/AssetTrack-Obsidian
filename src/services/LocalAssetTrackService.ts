@@ -285,7 +285,7 @@ export class LocalAssetTrackService implements AssetTrackService {
       || request.operation_type === "bulk-replace-tags") {
       const taxonomy = this.repository.taxonomy();
       const definitions = new Map(taxonomy.tags.map((tag) => [tag.tag_key, tag] as const));
-      const targetKeys = request.operation_type === "bulk-replace-tags"
+      const targetKeys = request.operation_type === "bulk-replace-tags" || Boolean(request.target_tag_keys?.length)
         ? [...new Set((request.target_tag_keys ?? []).map((key) => key.trim()).filter(Boolean))]
         : [request.target_tag_key?.trim() ?? ""];
       for (const targetKey of targetKeys) {
@@ -528,6 +528,17 @@ export class LocalAssetTrackService implements AssetTrackService {
       });
     }
     return target;
+  }
+
+  async previewCategoryRemoval(sourceKey: string, targetKey?: string) {
+    this.ready();
+    return this.repository.previewCategoryRemoval(sourceKey, targetKey);
+  }
+
+  async applyCategoryRemoval(preview: import("../types/categoryRemoval").CategoryRemovalPreview): Promise<void> {
+    this.ready();
+    await this.createProtectionBackup("before-category-removal");
+    await this.repository.applyCategoryRemoval(preview);
   }
 
   async saveCategories(

@@ -1,4 +1,5 @@
-import { Modal, type App } from "obsidian";
+import { ManagedModal } from "./ManagedModal";
+import { type App } from "obsidian";
 import {
   createElement,
   useState
@@ -120,7 +121,7 @@ export function RuleCreationContent({
     }
   };
 
-  return <div className="asset-track-rule-create-content">
+  return <div className="asset-track-rule-create-content" data-asset-track-busy={loading}>
     <p>{t("规则保存不会自动改写历史流水；如需使用，请在流水页单独应用规则。", "Saving a rule does not rewrite historical transactions. Apply it separately from the transaction page when needed.")}</p>
     {message && <p className="asset-track-rule-history-message" role="alert">{message}</p>}
     <label>{t("收支", "Type")}
@@ -165,7 +166,7 @@ export function RuleCreationContent({
   </div>;
 }
 
-export class RuleCreationModal extends Modal {
+export class RuleCreationModal extends ManagedModal {
   private root: Root | null = null;
 
   constructor(private readonly options: RuleCreationModalOptions) {
@@ -173,6 +174,7 @@ export class RuleCreationModal extends Modal {
   }
 
   onOpen(): void {
+    this.installInteraction();
     this.setTitle(this.options.initial.id
       ? t("编辑匹配规则", "Edit matching rule")
       : t("创建匹配规则", "Create matching rule"));
@@ -185,11 +187,12 @@ export class RuleCreationModal extends Modal {
       suggestedAmount: this.options.suggestedAmount,
       initial: this.options.initial,
       onConfirm: this.options.onConfirm,
-      onClose: () => this.close()
+      onClose: () => this.completeClose()
     }));
   }
 
   onClose(): void {
+    super.onClose();
     this.root?.unmount();
     this.root = null;
     this.contentEl.empty();

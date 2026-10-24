@@ -1,4 +1,5 @@
-import { Modal, type App } from "obsidian";
+import { ManagedModal } from "./ManagedModal";
+import { type App } from "obsidian";
 import { createElement, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { RuleRewriteFields } from "../types/rules";
@@ -17,7 +18,7 @@ export function RuleRewriteInputs({ value, onChange, disabled = false }: {
       <option value="preserve">{t("保留原值", "Keep original value")}</option>
       <option value="clear">{t("清空原值", "Clear original value")}</option>
     </select></label>
-    <p className="asset-track-modal-subtitle">{t("留空行为同时作用于交易对手和商品。已填写的重写值始终优先；仅在应用规则或合并确认后生效。", "The blank-value setting applies to both fields. Entered rewrites always take precedence; changes take effect only when applying rules or confirming a merge.")}</p>
+    <p className="asset-track-modal-subtitle">{t("应用规则时生效。", "Takes effect when applying rules.")}</p>
   </div>;
 }
 export function RuleRewriteContent({ value, onConfirm, onClose }: {
@@ -35,16 +36,17 @@ export function RuleRewriteContent({ value, onConfirm, onClose }: {
     </div>
   </div>;
 }
-class RuleRewriteModal extends Modal {
+class RuleRewriteModal extends ManagedModal {
   private root: Root | null = null;
   constructor(app: App, private readonly value: RuleRewriteFields, private readonly confirm: (value: RuleRewriteFields) => void) { super(app); }
   onOpen(): void {
+    this.installInteraction();
     this.setTitle(t("编辑重写信息", "Edit rewrites"));
     this.modalEl.addClass("asset-track-native-modal", "asset-track-rule-create-modal");
     this.root = createRoot(this.contentEl);
-    this.root.render(createElement(RuleRewriteContent, { value: this.value, onConfirm: this.confirm, onClose: () => this.close() }));
+    this.root.render(createElement(RuleRewriteContent, { value: this.value, onConfirm: this.confirm, onClose: () => this.completeClose() }));
   }
-  onClose(): void { this.root?.unmount(); this.root = null; this.contentEl.empty(); }
+  onClose(): void { super.onClose(); this.root?.unmount(); this.root = null; this.contentEl.empty(); }
 }
 export function RuleRewriteEditor({ app, value, label, onChange }: {
   app?: App; value: RuleRewriteFields; label: string; onChange: (value: RuleRewriteFields) => void;

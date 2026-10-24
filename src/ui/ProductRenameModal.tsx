@@ -1,4 +1,5 @@
-import { Modal, Notice, type App } from "obsidian";
+import { ManagedModal } from "./ManagedModal";
+import { Notice, type App } from "obsidian";
 import {
   createElement,
   useEffect,
@@ -52,6 +53,7 @@ export function ProductRenameContent({
   const [targetProduct, setTargetProduct] = useState(group.product);
   const [preview, setPreview] = useState<ProductRenamePreview | null>(null);
   const [loading, setLoading] = useState(false);
+  const [committing, setCommitting] = useState(false);
   const [message, setMessage] = useState("");
   const mounted = useRef(true);
   const previewRequestSequence = useRef(0);
@@ -144,6 +146,7 @@ export function ProductRenameContent({
     setLoading(true);
     setMessage(t("正在修改商品名称…", "Updating item names…"));
     try {
+      setCommitting(true);
       const result = await api.applyProductRename({
         transaction_ids: preview.transaction_ids,
         target_product: preview.target_product,
@@ -161,11 +164,11 @@ export function ProductRenameContent({
     } catch (error) {
       if (mounted.current && sequence === previewRequestSequence.current) setMessage(errorMessage(error));
     } finally {
-      if (mounted.current && sequence === previewRequestSequence.current) setLoading(false);
+      if (mounted.current && sequence === previewRequestSequence.current) { setLoading(false); setCommitting(false); }
     }
   };
 
-  return <div className="asset-track-product-rename-content">
+  return <div className="asset-track-product-rename-content" data-asset-track-busy={committing}>
     <p>{t(`当前商品名：${group.product || "（空商品）"}。选择需要修改的流水，再填写新的商品名。交易对手和分类只作为流水信息保留。`, `Current item name: ${group.product || "(empty item)"}. Select transactions to edit, then enter the new item name. Counterparties and categories remain transaction data.`)}</p>
     {message && <p className="asset-track-rule-history-message" role="status">{message}</p>}
     <div className="asset-track-rule-history-selection-actions">
@@ -205,7 +208,7 @@ export function ProductRenameContent({
   </div>;
 }
 
-export class ProductRenameModal extends Modal {
+export class ProductRenameModal extends ManagedModal {
   private root: Root | null = null;
 
   constructor(private readonly options: ProductRenameModalOptions) {
@@ -213,6 +216,7 @@ export class ProductRenameModal extends Modal {
   }
 
   onOpen(): void {
+    this.installInteraction();
     this.setTitle(t("编辑商品", "Edit item"));
     this.modalEl.addClass("asset-track-native-modal", "asset-track-product-rename-modal");
     const hostWindow = this.app.workspace.containerEl.ownerDocument.defaultView;
@@ -224,11 +228,12 @@ export class ProductRenameModal extends Modal {
       hostWindow,
       onSaved: this.options.onSaved,
       onDataChanged: this.options.onDataChanged,
-      onClose: () => this.close()
+      onClose: () => this.completeClose()
     }));
   }
 
   onClose(): void {
+    super.onClose();
     this.root?.unmount();
     this.root = null;
     this.contentEl.empty();

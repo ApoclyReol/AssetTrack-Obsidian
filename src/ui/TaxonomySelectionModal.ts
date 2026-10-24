@@ -1,4 +1,5 @@
-import { Modal, type App } from "obsidian";
+import { ManagedModal } from "./ManagedModal";
+import { type App } from "obsidian";
 import type { AttributeGroup, AttributeOption, TagDefinition } from "../types/configuration";
 import { displayError, t } from "../i18n";
 
@@ -10,12 +11,13 @@ type Selection = {
 } & ({ kind: "attributes"; groups: AttributeGroup[]; options: AttributeOption[] }
   | { kind: "tags"; tags: TagDefinition[] });
 
-export class TaxonomySelectionModal extends Modal {
+export class TaxonomySelectionModal extends ManagedModal {
   constructor(private readonly config: Selection) {
     super(config.app);
   }
 
   onOpen(): void {
+    this.installInteraction();
     const selection = this.config;
     this.modalEl.addClass("asset-track-native-modal", "asset-track-taxonomy-selection-modal");
     const title = typeof selection.title === "string" ? selection.title.trim() : "";
@@ -87,11 +89,11 @@ export class TaxonomySelectionModal extends Modal {
     apply.addEventListener("click", () => {
       const inputs = Array.from(controls.querySelectorAll<HTMLInputElement>("input:checked"));
       this.config.onApply(inputs.map((input) => input.value).filter(Boolean));
-      this.close();
+      this.completeClose();
     });
     const cancel = actions.createEl("button", { text: t("取消", "Cancel") });
     cancel.type = "button";
-    cancel.addEventListener("click", () => this.close());
+    cancel.addEventListener("click", () => this.requestClose());
     status.remove();
     } catch (error) {
       this.contentEl.empty();
@@ -103,6 +105,7 @@ export class TaxonomySelectionModal extends Modal {
   }
 
   onClose(): void {
+    super.onClose();
     this.contentEl.empty();
   }
 }

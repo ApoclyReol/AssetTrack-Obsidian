@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { CategoryRemovalPreview } from "../types/categoryRemoval";
 import type { DatabaseSync } from "node:sqlite";
 import type {
   AccountDefinition,
@@ -594,6 +595,62 @@ export class AssetTrackRepository {
     };
   }
 
+  previewCategoryRemoval(sourceKey: string, targetKey?: string, db = this.db()): CategoryRemovalPreview {
+    const categories = this.categories(db);
+    const source = categories.rows.find(row => row.category_key === sourceKey);
+    const target = categories.rows.find(row => row.category_key === targetKey);
+    if (!source || (targetKey && (!target || !target.is_active || targetKey === sourceKey
+      || target.transaction_type !== source.transaction_type))) {
+      throw new RepositoryValidationError({ code: "category.definition_invalid" });
+    }
+    const months = rows(db.prepare("SELECT DISTINCT month FROM transactions WHERE category_key=? ORDER BY month").all(sourceKey));
+    return { source_key: sourceKey, target_key: targetKey,
+      categories_revision: categories.revision, rules_revision: this.rules(db).revision,
+      transaction_count: Number((db.prepare("SELECT COUNT(*) AS count FROM transactions WHERE category_key=?").get(sourceKey) as Row).count),
+      rule_count: Number((db.prepare("SELECT COUNT(*) AS count FROM auto_rules WHERE category_key=?").get(sourceKey) as Row).count),
+      month_revisions: Object.fromEntries(months.map(row => [text(row.month), this.getRevision(text(row.month), db)])) };
+  }
+
+  async applyCategoryRemoval(preview: CategoryRemovalPreview): Promise<void> {
+    await this.manager.write(db => {
+      const current = this.previewCategoryRemoval(preview.source_key, preview.target_key, db);
+      if (current.categories_revision !== preview.categories_revision) {
+        throw new RevisionConflictError(preview.categories_revision, current.categories_revision);
+      }
+      if (current.rules_revision !== preview.rules_revision) throw new RevisionConflictError(preview.rules_revision, current.rules_revision);
+      const sameMonths = JSON.stringify(Object.entries(current.month_revisions).sort()) === JSON.stringify(Object.entries(preview.month_revisions).sort());
+      if (!sameMonths || current.transaction_count !== preview.transaction_count || current.rule_count !== preview.rule_count) {
+        throw new RevisionConflictError(preview.transaction_count, current.transaction_count);
+      }
+      if ((current.transaction_count || current.rule_count) && !preview.target_key) {
+        throw new RepositoryValidationError({ code: "category.delete_referenced", params: { name: preview.source_key,
+          transaction_count: current.transaction_count, rule_count: current.rule_count } });
+      }
+      const beforeCategories = rows(db.prepare("SELECT * FROM category_definitions ORDER BY category_key").all());
+      const beforeRules = rows(db.prepare("SELECT * FROM auto_rules ORDER BY id").all());
+      const before = rows(db.prepare("SELECT * FROM transactions WHERE category_key=? ORDER BY id").all(preview.source_key));
+      if (preview.target_key) {
+        const target = this.categories(db).rows.find(row => row.category_key === preview.target_key);
+        if (!target) throw new RepositoryValidationError({ code: "category.definition_invalid" });
+        db.prepare("UPDATE transactions SET category_key=?,category=? WHERE category_key=?").run(target.category_key, target.name, preview.source_key);
+        db.prepare("UPDATE auto_rules SET category_key=?,category=? WHERE category_key=?").run(target.category_key, target.name, preview.source_key);
+      }
+      db.prepare("DELETE FROM category_definitions WHERE category_key=?").run(preview.source_key);
+      Object.keys(current.month_revisions).forEach(month => this.bumpMonthRevision(db, month));
+      const after = this.historicalTransactionRows(db, before.map(row => Number(row.id)));
+      const operation = this.historyOperation(before, after, "history-category-backfill", { source_page: "配置/删除分类" },
+        { source_category_key: preview.source_key, target_category_key: preview.target_key ?? null, category_removed: true });
+      this.operations.write(db, operation, before.map(row => `id:${Number(row.id)}`));
+      for (const [entity, oldRows, newRows, kind] of [
+        ["rule", beforeRules, rows(db.prepare("SELECT * FROM auto_rules ORDER BY id").all()), "save-rules"],
+        ["category", beforeCategories, rows(db.prepare("SELECT * FROM category_definitions ORDER BY category_key").all()), "save-categories"]
+      ] as const) {
+        const audit = this.entityOperation(oldRows, newRows, entity, kind, { source_page: "配置/删除分类" });
+        this.operations.write(db, audit, audit.changes.map(change => change.transaction_key ?? ""));
+      }
+    });
+  }
+
   async saveCategories(
     expectedRevision: number,
     input: CategoryDefinition[],
@@ -875,27 +932,7 @@ export class AssetTrackRepository {
             JOIN category_attributes ca ON ca.attribute_key=o.attribute_key
             JOIN transactions t ON t.category_key=ca.category_key WHERE o.group_key=?`).all(removal.key))
             .forEach((row) => affectedMonths.add(text(row.month)));
-          if (removal.action === "transfer") {
-            const target = options.find((item) => item.attribute_key === removal.target_key);
-            const targetGroup = target && currentGroups.get(target.group_key);
-            if (!target || !target.is_active || target.group_key === removal.key
-              || !targetGroup || !groups.find((group) => group.group_key === target.group_key)?.is_active
-              || targetGroup.usage_revision !== removal.expected_target_group_usage_revision) {
-              throw new RepositoryValidationError({ code: "taxonomy.removal_invalid" });
-            }
-            const sourceCategories = rows(db.prepare(`SELECT DISTINCT ca.category_key
-              FROM category_attributes ca JOIN attribute_options o ON o.attribute_key=ca.attribute_key
-              WHERE o.group_key=?`).all(removal.key)).map((row) => text(row.category_key));
-            const deleteTarget = db.prepare(`DELETE FROM category_attributes WHERE category_key=?
-              AND attribute_key IN (SELECT attribute_key FROM attribute_options WHERE group_key=?)`);
-            const insertTarget = db.prepare("INSERT INTO category_attributes(category_key,attribute_key) VALUES (?,?)");
-            sourceCategories.forEach((categoryKey) => {
-              deleteTarget.run(categoryKey, target.group_key);
-              insertTarget.run(categoryKey, target.attribute_key);
-            });
-          } else if (removal.action !== "clear") {
-            throw new RepositoryValidationError({ code: "taxonomy.removal_invalid" });
-          }
+          if (removal.action !== "clear") throw new RepositoryValidationError({ code: "taxonomy.removal_invalid" });
           db.prepare(`DELETE FROM category_attributes WHERE attribute_key IN
             (SELECT attribute_key FROM attribute_options WHERE group_key=?)`).run(removal.key);
         }
