@@ -1,3 +1,4 @@
+import type { MergeTransactionsRequest, MergePreviewResult } from "../domain/transactionMerge";
 import type {
   AccountDefinition,
   AttributeGroup,
@@ -92,6 +93,7 @@ export interface MonthEditorPort extends RuleLookupPort, RuleWritePort {
     month: string,
     rows: Transaction[]
   ): Promise<{ issues: Array<Record<string, unknown>> }>;
+  previewTransactionMerge(request: MergeTransactionsRequest): Promise<MergePreviewResult>;
   previewTransactionOperation(
     request: TransactionOperationPreviewRequest
   ): Promise<{ preview: OperationPreview; rows: Transaction[] }>;

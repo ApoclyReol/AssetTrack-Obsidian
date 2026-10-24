@@ -168,6 +168,7 @@ function monthApi(overrides: Partial<MonthEditorPort> = {}): MonthEditorPort {
     saveMonth: vi.fn().mockResolvedValue(monthWorkspace(1)),
     saveMonthSection: vi.fn().mockResolvedValue(monthWorkspace(1)),
     validateTransactions: vi.fn().mockResolvedValue({ issues: [] }),
+    previewTransactionMerge: vi.fn(),
     previewTransactionOperation: vi.fn(),
     inspectCsv: vi.fn(),
     previewMappedCsv: vi.fn(),

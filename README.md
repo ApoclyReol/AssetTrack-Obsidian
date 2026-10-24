@@ -13,9 +13,9 @@ focused monthly review: import what already exists, resolve the few things that 
 judgment, check the result, and move on.
 
 > [!IMPORTANT]
-> Current recommended version: **2.0.0**. This release adds category attributes and transaction tags,
-> and refines categories, rules, analysis, and monthly transaction editing. Existing databases may need
-> a schema 12 upgrade on first load; the plugin shows the migration impact and never upgrades silently.
+> Current recommended version: **2.1.0**. This release adds transaction merging and exact or range
+> amount rules, with improvements to rule editing and previews. Open Asset Track after updating and
+> choose **Back up and upgrade** when prompted; the plugin creates a protection backup before upgrading.
 
 ## Why Asset Track
 
@@ -65,6 +65,8 @@ Asset Track is a good fit if you:
 - reconciliation between transactions and asset changes;
 - local backup, restore, and data-directory migration.
 
+Version 2.1.0 supports exact amounts, inequalities, and ranges with inclusive or exclusive endpoints. Exact amounts take priority over ranges and unrestricted rules; overlapping ranges for the same text condition are rejected. Each item/counterparty summary has a merge action that works without matching rules. Merging uses current draft values, keeps categories and complete tag sets separate, and excludes tagged rows by default. It keeps the summary name and clears the other name only when original names differ, as shown in the preview. Saving replaces each eligible partition with one first-day transaction; no split-back operation is provided. Rules have explicit keep-or-clear behavior for blank rewrites, a compact toolbar and conflict details. Open the plugin after updating and choose Back up and upgrade when prompted; a local protection backup is created first.
+
 ## Installation
 
 1. Install **Asset Track** from **Settings → Community plugins → Browse**.
@@ -106,7 +108,7 @@ you explicitly choose a backup export destination or restoration file.
 ## Compatibility
 
 - Desktop Obsidian only: macOS, Windows, and Linux.
-- Version 2.0.0 requires Obsidian 1.13.0 or later. Update to the latest available 1.13.x desktop release before installing or updating.
+- Version 2.1.0 requires Obsidian 1.13.0 or later. Update to the latest available 1.13.x desktop release before installing or updating.
 - The plugin does not require Python, a separate Node.js installation, or a sidecar.
 
 ## Read more

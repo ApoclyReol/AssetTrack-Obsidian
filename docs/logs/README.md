@@ -3,7 +3,10 @@
 本目录按版本保存已经完成的更新记录。日志用于 handoff 和追溯，不替代
 `docs/00-reading-guide.md` 所列的当前长期文档。
 
+- [Release v2.1.0](release-v2.1.0.md)：以已发布 v2.0.0 为基准，汇总金额规则、实际合并与规则编辑更新；schema 13 / 备份格式 12，本次发行记录。
+- [本地迭代归档](development-amount-rules-merge.md)：保留原 2.1.0～2.4.0 本地标记的设计、验证和安装追溯；全部归入 v2.1.0，不是正式发行历史。
 - [Release v2.0.0](release-v2.0.0.md)：schema 12 流水标签与分类属性重构，以及 X1 体验/并发/备份硬化，已正式发布。
+- [Maintenance audit 2026-10-01](maintenance-audit-2026-10-01.md)：记录 v2.0.0 后的模块规模、架构边界、兼容入口和后续拆分候选；本次不改代码。
 - [Release v1.9.1](release-v1.9.1.md)：历史维护记录，内容已并入 v2.0.0 发布线。
 - [Maintenance audit 2026-09-16](maintenance-audit-2026-09-16.md)：修复数据目录切换时的完整设置持久化，收紧备份/规则类型契约，拆分编辑器工具栏，并补记 v1.9.0 真实 Obsidian 验收。
 - [Release v1.9.0](release-v1.9.0.md)：以易用性和界面整理为主，重组账单导入、流水提醒、月度引导、汇总视图、规则应用和对账说明，并保持财务口径与数据结构不变。

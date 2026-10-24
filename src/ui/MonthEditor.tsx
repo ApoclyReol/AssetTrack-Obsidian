@@ -516,7 +516,8 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
   const openRuleCreationForRow = (
     row: Transaction,
     rowIndex: number,
-    preferredScope?: "product" | "merchant" | "merchant_product"
+    preferredScope?: "product" | "merchant" | "merchant_product",
+    suggestedAmount: number | null = Math.round(row.amount * 100)
   ) => {
     if (!app || (row.type !== "支出" && row.type !== "收入" && row.type !== "代付")) return;
     const ruleTransactionType = row.type;
@@ -526,6 +527,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
       ?? (row.counterparty?.trim() ? "merchant_product" : "product");
     new RuleCreationModal({
       app,
+      suggestedAmount,
       categories,
       initial: {
         transaction_type: ruleTransactionType,
@@ -576,7 +578,8 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
     openRuleCreationForRow(
       row,
       rowIndex,
-      group.groupBy === "product" ? "product" : "merchant"
+      group.groupBy === "product" ? "product" : "merchant",
+      group.indexes.every((index) => Math.round(draft.transactions[index].amount * 100) === Math.round(row.amount * 100)) ? Math.round(row.amount * 100) : null
     );
   };
 
@@ -804,6 +807,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
         onViewModeChange={setTransactionViewMode}
         selectedTransactionKeys={operations.selectedTransactionKeys}
         onSelectedTransactionKeysChange={operations.onSelectedTransactionKeysChange}
+        onMergeGroup={(group) => void operations.mergeGroup(group)}
         onCreateRule={openRuleCreationForGroup}
         renderBatchActions={({ businessTab: currentTab, selectedTransactionKeys: keys }) => <>
           {(currentTab === "outgoing" || currentTab === "incoming") && <button

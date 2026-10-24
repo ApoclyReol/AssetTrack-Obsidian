@@ -16,6 +16,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { DatabaseManager } from "../database/DatabaseManager";
 import {
   BACKUP_FORMAT_VERSION,
+  CURRENT_SCHEMA_VERSION,
   REQUIRED_TABLES
 } from "../database/schema";
 import { AssetTrackError } from "../application/errors";
@@ -86,8 +87,9 @@ const CONFIG = [
     filename: "auto_rules_backup.csv",
     columns: [
       "id", "transaction_type", "match_scope", "counterparty", "product",
-      "match_counterparty_key", "match_product_key", "rewrite_merchant",
-      "rewrite_product", "category_key", "category"
+      "match_counterparty_key", "match_product_key", "match_amount_minor", "match_amount_key",
+      "match_amount_min_minor", "match_amount_max_minor", "match_amount_min_exclusive", "match_amount_max_exclusive", "match_amount_min_key", "match_amount_max_key", "rewrite_merchant",
+      "rewrite_product", "rewrite_empty_mode", "category_key", "category"
     ]
   },
   {
@@ -137,7 +139,10 @@ const CONFIG = [
 // Schema 11 complete backups contain the first ten tables. They remain
 // readable so a user can verify and restore an old backup through the same
 // protected migration path as an old live database.
-const LEGACY_CONFIG = CONFIG.slice(0, 10);
+const PRE_REWRITE_CONFIG = CONFIG.map((config) => ({ ...config, columns: config.columns.filter((column) => column !== "rewrite_empty_mode") }));
+const PRE_RANGE_CONFIG = PRE_REWRITE_CONFIG.map((config) => ({ ...config, columns: config.columns.filter((column) => !["match_amount_min_minor", "match_amount_max_minor", "match_amount_min_exclusive", "match_amount_max_exclusive", "match_amount_min_key", "match_amount_max_key"].includes(column)) }));
+const PRE_AMOUNT_CONFIG = PRE_RANGE_CONFIG.map((config) => ({ ...config, columns: config.columns.filter((column) => column !== "match_amount_minor" && column !== "match_amount_key") }));
+const LEGACY_CONFIG = PRE_AMOUNT_CONFIG.slice(0, 10);
 
 type Manifest = BackupManifest;
 
@@ -244,7 +249,9 @@ function numericIndexes(
   columns: readonly string[]
 ): Set<number> {
   const types = new Map(
-    (db.prepare(`PRAGMA table_info(${table})`).all() as Row[])
+    // Generated amount keys are included in CSVs too. table_info omits them,
+    // causing SQLite numbers and CSV strings to hash differently.
+    (db.prepare(`PRAGMA table_xinfo(${table})`).all() as Row[])
       .map((row) => [String(row.name), String(row.type).toUpperCase()])
   );
   return new Set(columns.flatMap((column, index) =>
@@ -691,14 +698,20 @@ export class BackupService {
           fail("backup.manifest_unreadable", { cause: String(error) });
         }
         if (manifest.format_version !== BACKUP_FORMAT_VERSION
+          && manifest.format_version !== 11
+          && manifest.format_version !== 10
+          && manifest.format_version !== 9
           && manifest.format_version !== 8) {
           fail("backup.format_unsupported", { version: manifest.format_version });
         }
       }
       const sourceInspection = DatabaseManager.inspect(databasePath);
       const legacyManifest = manifest?.format_version === 8
-        || (manifest === null && sourceInspection.migration_required === true);
-      const configs = legacyManifest ? LEGACY_CONFIG : CONFIG;
+        || (manifest === null && (sourceInspection.validation?.schema_version ?? CURRENT_SCHEMA_VERSION) < 12);
+      const configs = manifest === null && sourceInspection.valid ? CONFIG : legacyManifest ? LEGACY_CONFIG
+        : (manifest?.format_version === 9 || (manifest === null && sourceInspection.validation?.schema_version === 12)) ? PRE_AMOUNT_CONFIG
+        : (manifest?.format_version === 10 || (manifest === null && sourceInspection.validation?.schema_version === 13)) ? PRE_RANGE_CONFIG
+        : (manifest?.format_version === 11 || (manifest === null && sourceInspection.validation?.schema_version === 14)) ? PRE_REWRITE_CONFIG : CONFIG;
       const expectedTables = legacyManifest
         ? LEGACY_CONFIG.map((config) => config.name)
         : [...REQUIRED_TABLES];

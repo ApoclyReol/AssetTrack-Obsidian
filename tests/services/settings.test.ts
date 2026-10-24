@@ -103,7 +103,8 @@ describe("Obsidian 1.13 settings boundary", () => {
       readFileSync(resolve(root, "versions.json"), "utf8")
     ) as Record<string, string>;
 
-    expect(manifest.version).toBe("2.0.0");
+    const packageVersion = (JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")) as { version: string }).version;
+    expect(manifest.version).toBe(packageVersion);
     expect(manifest.minAppVersion).toBe("1.13.0");
     expect(versions[manifest.version]).toBe(manifest.minAppVersion);
   });

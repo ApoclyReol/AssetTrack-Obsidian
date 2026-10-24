@@ -1,3 +1,5 @@
+import { formatRuleAmount } from "../ruleAmountFormat";
+import { ruleAmountBounds } from "../../domain/ruleAmounts";
 import { inferRuleScopeFromConditions } from "../../domain/rules";
 import { scalarText } from "../../domain/text";
 import type {
@@ -69,23 +71,27 @@ export function matchesRule(rule: SavedRule, filters: RuleListFilters): boolean 
   const query = normalizedSearchText(filters.query);
   if (!query) return true;
   return [
+    rule.id == null ? "" : `#${rule.id}`,
     rule.transaction_type,
     rule.counterparty,
     rule.product,
     rule.rewrite_merchant,
     rule.rewrite_product,
+    formatRuleAmount(rule),
     rule.category
   ].some((value) => normalizedSearchText(value).includes(query));
 }
 
 export function ruleSortValue(rule: SavedRule, key: string): unknown {
   switch (key) {
+    case "match_amount_minor": return ruleAmountBounds(rule)?.min ?? -1;
     case "status":
       return STATUS_RANK[ruleListStatus(rule)];
     case "match_scope": {
       const scope = ruleScope(rule);
       return scope ? SCOPE_RANK[scope] : SCOPE_RANK.merchant + 1;
     }
+    case "rewrites": return `${rule.rewrite_merchant ?? ""} ${rule.rewrite_product ?? ""} ${rule.rewrite_empty_mode ?? "preserve"}`;
     case "category":
       return rule.category;
     case "last_used_date":

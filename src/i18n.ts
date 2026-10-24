@@ -129,9 +129,13 @@ function structuredErrorText(
         english: `Revision conflict: the draft is based on ${paramText(params, "expected")}, but the database is at ${paramText(params, "actual")}. Reload and try again.`
       };
     case "database.migration_confirmation_required":
+      if (Number(params.from_schema) >= 12) return {
+        chinese: "发现需要升级的账本。进入插件后选择“备份并升级”即可继续；原数据库尚未修改。",
+        english: "Your ledger needs an upgrade. Open the plugin and choose Back up and upgrade to continue. The original database is unchanged."
+      };
       return {
-        chinese: "发现旧版数据库。请先在插件设置中查看迁移影响，并选择保留、清除或取消；原数据库尚未打开。",
-        english: "An older database was found. Review its migration impact in plugin settings and choose preserve, clear, or cancel. The original database has not been opened."
+        chinese: "发现旧版账本。进入插件后确认保留并升级，或到设置中选择清除旧属性；未确认前原数据库保持不变。",
+        english: "An older ledger was found. Confirm an upgrade in the plugin to preserve its attributes, or choose to clear legacy attributes in settings. The original database is unchanged until confirmation."
       };
     case "rules.revision_conflict":
       return {
@@ -163,6 +167,17 @@ function structuredErrorText(
         chinese: "标签操作包含不存在或已停用的标签；添加和替换只能使用启用标签。",
         english: "The tag operation includes a missing or inactive tag. Add and replace operations require active tags."
       };
+    case "transaction.merge.invalid": {
+      switch (params.reason) {
+        case "single": return { chinese: "至少需要两笔流水，单条无需合并。", english: "At least two transactions are required; a single transaction does not need merging." };
+        case "month": return { chinese: "无法合并：包含不属于当前月份的流水。", english: "Cannot merge: some transactions are outside the current month." };
+        case "type": return { chinese: "无法合并：请分别处理支出、收入或代付流水，理财流水不支持合并。", english: "Cannot merge: expenses, income and paid-on-behalf transactions must be handled separately. Investment transactions cannot be merged." };
+        case "amount": return { chinese: "无法合并：金额无效或累计金额超出可处理范围，请先修正金额。", english: "Cannot merge: an amount is invalid or the total exceeds the supported range. Correct the amounts first." };
+        case "group": return { chinese: "无法合并：这些流水不属于同一个商品或交易对手汇总组。", english: "Cannot merge: these transactions do not belong to the same item or counterparty summary group." };
+        case "identity": return { chinese: "无法合并：流水标识缺失或重复，请重新加载后重试。", english: "Cannot merge: transaction identities are missing or duplicated. Reload and try again." };
+        default: return { chinese: "无法合并：请选择有效的商品或交易对手汇总组。", english: "Cannot merge: choose a valid item or counterparty summary group." };
+      }
+    }
     case "transaction.operation.unsupported":
       return {
         chinese: `不支持的流水操作：${paramText(params, "operation_type")}`,
@@ -460,16 +475,32 @@ function structuredErrorText(
       };
     case "rule.conflict":
     case "rule.impact_conflict":
+    {
+      const ids = Array.isArray(params.rule_ids) ? params.rule_ids.map((id) => `#${String(id)}`).join(", ") : "";
+      const rows = Array.isArray(params.rule_rows) ? params.rule_rows.join(", ") : "";
+      const chineseRefs = `${ids}${rows ? `（草稿第 ${rows} 项）` : ""}`;
+      const englishRefs = ids ? `${ids}${rows ? ` (draft rows ${rows})` : ""}` : rows;
+      if (params.conflict_kind === "amount-overlap") {
+        return {
+          chinese: `规则 ${chineseRefs} 的金额区间重叠：${(Number(params.overlap_min_minor) / 100).toFixed(2)} 至 ${params.overlap_max_minor == null ? "无上限" : (Number(params.overlap_max_minor) / 100).toFixed(2)}。请调整端点或匹配条件。`,
+          english: `Rules ${englishRefs} have overlapping amount ranges from ${(Number(params.overlap_min_minor) / 100).toFixed(2)} to ${params.overlap_max_minor == null ? "no upper limit" : (Number(params.overlap_max_minor) / 100).toFixed(2)}. Adjust endpoints or matching conditions.`
+        };
+      }
       return {
-        chinese: `规则冲突：${paramText(params, "description", "存在多个同等级规则")}`,
-        english: `Rule conflict: ${paramText(params, "description", "multiple rules have the same priority")}.`
+        chinese: `规则冲突 ${chineseRefs}：${paramText(params, "description", "存在多个同等级规则")}`,
+        english: `Rule conflict ${englishRefs}: ${params.conflict_kind === "duplicate" ? "duplicate matching conditions" : "identical matching conditions target different categories"}.`
       };
+    }
     case "rule.rewrite_chain":
     case "rule.impact_rewrite_chain":
+    {
+      const ids = Array.isArray(params.rule_ids) ? params.rule_ids.map((id) => `#${String(id)}`).join(", ") : "";
+      const rows = Array.isArray(params.rule_rows) ? params.rule_rows.join(", ") : "";
       return {
-        chinese: `规则重写链冲突：${paramText(params, "reason", "请修改重写字段")}`,
-        english: `Rule rewrite-chain conflict: ${paramText(params, "reason", "change the rewrite fields")}.`
+        chinese: `规则重写链冲突 ${ids}${rows ? `（草稿第 ${rows} 项）` : ""}：${paramText(params, "reason", "请修改重写字段")}`,
+        english: `Rule rewrite-chain conflict ${ids}${rows ? ` (draft rows ${rows})` : ""}. Change the rewrites or target categories.`
       };
+    }
     case "rule.impact_invalid":
       return {
         chinese: "规则影响预览失败，请检查规则字段。",

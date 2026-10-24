@@ -6,6 +6,27 @@ import { setTestLanguage } from "../mocks/obsidian";
 afterEach(() => setTestLanguage("zh-CN"));
 
 describe("locale selection", () => {
+  it("explains the specific merge boundary without requiring a rule", () => {
+    expect(displayError(new AssetTrackError({ code: "transaction.merge.invalid", params: { reason: "single" } }))).toContain("至少需要两笔");
+    setTestLanguage("en");
+    expect(displayError(new AssetTrackError({ code: "transaction.merge.invalid", params: { reason: "month" } }))).toContain("outside the current month");
+    expect(displayError(new AssetTrackError({ code: "transaction.merge.invalid", params: { reason: "group" } }))).toContain("same item or counterparty summary group");
+  });
+  it("identifies both saved IDs and new draft positions for duplicate and rewrite conflicts", () => {
+    const params = { conflict_kind: "duplicate", rule_ids: [13, 27], rule_rows: [2, 4], description: "同一精确条件存在重复规则" };
+    const chinese = displayError(new AssetTrackError({ code: "rule.conflict", params }));
+    expect(chinese).toContain("#13"); expect(chinese).toContain("#27"); expect(chinese).toContain("第 2, 4 项");
+    setTestLanguage("en");
+    const english = displayError(new AssetTrackError({ code: "rule.conflict", params }));
+    expect(english).toContain("#13, #27"); expect(english).toContain("duplicate matching conditions");
+    expect(displayError(new AssetTrackError({ code: "rule.rewrite_chain", params }))).toContain("#13, #27");
+  });
+  it("explains amount intersections with rows and bounds in English", () => {
+    setTestLanguage("en");
+    expect(displayError(new AssetTrackError({ code: "rule.conflict", params: {
+      conflict_kind: "amount-overlap", rule_rows: [1, 2], overlap_min_minor: 5000, overlap_max_minor: 5000
+    } }))).toBe("Rules 1, 2 have overlapping amount ranges from 50.00 to 50.00. Adjust endpoints or matching conditions.");
+  });
   it.each(["zh", "zh-CN", "zh-TW", "ZH-hant"])(
     "uses Chinese for %s",
     (language) => {

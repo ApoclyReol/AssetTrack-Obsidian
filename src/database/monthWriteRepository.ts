@@ -1,3 +1,4 @@
+import { validateMergeLogs } from "./mergeWriteValidation";
 import type { DatabaseSync } from "node:sqlite";
 import type {
   CashAccountBalance,
@@ -268,6 +269,21 @@ export class MonthWriteRepository {
              COALESCE((SELECT json_group_array(tag_key) FROM transaction_tags tt WHERE tt.transaction_id=transactions.id),'[]') AS tag_keys
       FROM transactions WHERE month=? ORDER BY id
     `).all(month)).map(transactionFromRow);
+    if (logs.some((entry) => entry.preview.operation_type === "merge-transactions")) {
+      // Validate ordinary operation targets even when their rows are consumed by a later merge.
+      for (const entry of logs) {
+        this.validateOperationTarget(db, entry.preview.operation_type, entry.preview.metadata ?? {}, entry.preview.changes);
+        if (entry.preview.operation_type === "merge-transactions") {
+          const before = entry.preview.metadata?.draft_before;
+          if (!Array.isArray(before) || this.normalizedTransactions(db, month, before as Transaction[]).issues.some((issue) => issue.blocking)) {
+            throw new RepositoryValidationError({ code: "transaction.validation_failed" });
+          }
+        }
+      }
+      return validateMergeLogs(month, current, input, logs,
+        this.context.rules(db).revision,
+        this.context.getRevision(month, db));
+    }
     const currentById = new Map(current.flatMap((row) =>
       typeof row.id === "number" ? [[row.id, row] as const] : []
     ));
@@ -516,7 +532,8 @@ export class MonthWriteRepository {
   private saveTransactionRows(
     db: DatabaseSync,
     month: string,
-    input: Transaction[]
+    input: Transaction[],
+    identityMap?: Map<string, number>
   ): Transaction[] {
     const normalized = this.normalizedTransactions(db, month, input);
     if (normalized.issues.some((issue) => issue.blocking)) {
@@ -553,6 +570,7 @@ export class MonthWriteRepository {
         submitted.add(id);
         update.run(...values, id, month);
       }
+      if (row.client_id) identityMap?.set(row.client_id, Number(row.id));
       const transactionId = Number(row.id);
       deleteTags.run(transactionId);
       (row.tag_keys ?? []).forEach((tagKey) => insertTag.run(transactionId, tagKey));
@@ -577,7 +595,8 @@ export class MonthWriteRepository {
     debts?: {
       expected_revision: number;
       rows: DebtRecord[];
-    }
+    },
+    identityMap?: Map<string, number>
   ): number {
     if (this.context.monthStatus(db, month)?.status === "locked") {
       throw new RepositoryValidationError({ code: "month.locked", params: { month } });
@@ -585,12 +604,12 @@ export class MonthWriteRepository {
     const current = this.context.checkMonthRevision(db, month, expectedRevision);
     if (debts) this.saveMonthDebtRows(db, month, debts.expected_revision, debts.rows);
     this.saveAccountBalances(db, month, cashAccounts, investmentAccounts);
-    this.saveTransactionRows(db, month, transactions);
+    this.saveTransactionRows(db, month, transactions, identityMap);
     this.saveFixedAssets(db, month, fixedAssets);
     return this.context.touchMonth(db, month, current, 1);
   }
 
-  saveMonthSection(db: DatabaseSync, month: string, payload: MonthSectionSaveRequest): number {
+  saveMonthSection(db: DatabaseSync, month: string, payload: MonthSectionSaveRequest, identityMap?: Map<string, number>): number {
     if (this.context.monthStatus(db, month)?.status === "locked") {
       throw new RepositoryValidationError({ code: "month.locked", params: { month } });
     }
@@ -600,7 +619,7 @@ export class MonthWriteRepository {
         this.saveAccountBalances(db, month, payload.cash_accounts, payload.investment_accounts);
         break;
       case "transactions":
-        this.saveTransactionRows(db, month, payload.transactions);
+        this.saveTransactionRows(db, month, payload.transactions, identityMap);
         break;
       case "debts":
         this.saveMonthDebtRows(db, month, payload.debt_revision, payload.debts);

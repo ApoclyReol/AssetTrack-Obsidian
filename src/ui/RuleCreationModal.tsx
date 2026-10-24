@@ -8,8 +8,13 @@ import type {
   CategoryDefinition
 } from "../types/configuration";
 import type {
-  SavedRule
+  SavedRule,
+  RuleAmountFields
 } from "../types/rules";
+import { RuleAmountConditionInput } from "./RuleAmountConditionInput";
+import { RuleRewriteInputs } from "./RuleRewriteEditor";
+import type { RuleRewriteFields } from "../types/rules";
+import { EMPTY_RULE_AMOUNT, readRuleAmountFields, ruleAmountBounds } from "../domain/ruleAmounts";
 import { AssetTrackError } from "../application/errors";
 import { businessLabel, displayError, t } from "../i18n";
 import { inferRuleScopeFromConditions, ruleCategoryType } from "../domain/rules";
@@ -17,9 +22,10 @@ import { inferRuleScopeFromConditions, ruleCategoryType } from "../domain/rules"
 export interface RuleCreationModalOptions {
   app: App;
   categories: CategoryDefinition[];
+  suggestedAmount?: number | null;
   initial: Pick<SavedRule, "transaction_type" | "product" | "category_key" | "category">
     & Partial<Pick<SavedRule, "id">>
-    & Partial<Pick<SavedRule, "match_scope" | "counterparty" | "rewrite_merchant" | "rewrite_product">>;
+    & Partial<Pick<SavedRule, "match_scope" | "counterparty">> & RuleAmountFields & RuleRewriteFields;
   onConfirm: (rule: SavedRule) => void | Promise<void>;
 }
 
@@ -43,14 +49,16 @@ function scopeLabel(value: SavedRule["match_scope"] | null): string {
 export function RuleCreationContent({
   categories,
   initial,
+  suggestedAmount,
   onConfirm,
   onClose
 }: Omit<RuleCreationModalOptions, "app"> & { onClose: () => void }) {
+  const [matchAmount, setMatchAmount] = useState<RuleAmountFields>(() => readRuleAmountFields({ ...initial }));
   const [transactionType, setTransactionType] = useState(initial.transaction_type);
   const [counterparty, setCounterparty] = useState(initial.counterparty ?? "");
   const [product, setProduct] = useState(initial.product);
-  const [rewriteMerchant, setRewriteMerchant] = useState(initial.rewrite_merchant ?? "");
-  const [rewriteProduct, setRewriteProduct] = useState(initial.rewrite_product ?? "");
+  const [rewrites, setRewrites] = useState<RuleRewriteFields>({ rewrite_merchant: initial.rewrite_merchant ?? "",
+    rewrite_product: initial.rewrite_product ?? "", rewrite_empty_mode: initial.rewrite_empty_mode ?? "preserve" });
   const [categoryKey, setCategoryKey] = useState(initial.category_key);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
@@ -63,6 +71,10 @@ export function RuleCreationContent({
   );
 
   const buildRule = (): SavedRule | null => {
+    if (!ruleAmountBounds(matchAmount)) {
+      setMessage(t("请输入有效金额或区间，最多两位小数。", "Enter a valid amount or range with up to two decimals."));
+      return null;
+    }
     const nextCounterparty = counterparty.trim();
     const nextProduct = product.trim();
     const nextMatchScope = inferRuleScopeFromConditions({
@@ -80,14 +92,16 @@ export function RuleCreationContent({
     }
     return {
       ...(initial.id ? { id: initial.id } : {}),
+      ...matchAmount,
       transaction_type: transactionType,
       match_scope: nextMatchScope,
       counterparty: nextCounterparty,
       product: nextProduct,
       category_key: category.category_key,
       category: category.name,
-      rewrite_merchant: rewriteMerchant.trim(),
-      rewrite_product: rewriteProduct.trim()
+      rewrite_merchant: rewrites.rewrite_merchant?.trim() ?? "",
+      rewrite_product: rewrites.rewrite_product?.trim() ?? "",
+      rewrite_empty_mode: rewrites.rewrite_empty_mode ?? "preserve"
     };
   };
 
@@ -129,12 +143,15 @@ export function RuleCreationContent({
     <label>{t("商品", "Item")}
       <input disabled={loading} value={product} onChange={(event) => setProduct(event.target.value)} />
     </label>
-    <label>{t("重写交易对手（可选）", "Rewrite counterparty (optional)")}
-      <input disabled={loading} value={rewriteMerchant} onChange={(event) => setRewriteMerchant(event.target.value)} />
-    </label>
-    <label>{t("重写商品（可选）", "Rewrite item (optional)")}
-      <input disabled={loading} value={rewriteProduct} onChange={(event) => setRewriteProduct(event.target.value)} />
-    </label>
+    <div className="asset-track-amount-field"><span>{t("金额条件（可选）", "Amount condition (optional)")}</span>
+      <RuleAmountConditionInput value={matchAmount} onChange={setMatchAmount} label={t("金额条件", "Amount condition")} />
+    </div>
+    {suggestedAmount != null && Number.isSafeInteger(suggestedAmount) && suggestedAmount >= 0 && <button type="button" disabled={loading} onClick={() => setMatchAmount({ ...EMPTY_RULE_AMOUNT, match_amount_minor: suggestedAmount })}>
+      {t(`使用当前单笔金额 ${(suggestedAmount / 100).toFixed(2)}`, `Use current transaction amount ${(suggestedAmount / 100).toFixed(2)}`)}
+    </button>}
+    <fieldset className="asset-track-editor-modal-section"><legend>{t("重写信息", "Rewrites")}</legend>
+      <RuleRewriteInputs value={rewrites} onChange={setRewrites} disabled={loading} />
+    </fieldset>
     <label>{t("目标分类", "Target category")}
       <select disabled={loading} value={categoryKey} onChange={(event) => setCategoryKey(event.target.value)}>
         <option value="">{t("请选择分类", "Choose category")}</option>
@@ -165,6 +182,7 @@ export class RuleCreationModal extends Modal {
     this.root = createRoot(this.contentEl);
     this.root.render(createElement(RuleCreationContent, {
       categories: this.options.categories,
+      suggestedAmount: this.options.suggestedAmount,
       initial: this.options.initial,
       onConfirm: this.options.onConfirm,
       onClose: () => this.close()

@@ -833,6 +833,7 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
       />
     </div>
     {(section === undefined || section === "matching") && <MatchingRulesTable
+      app={app}
       rules={workspace.rules}
       categories={workspace.categories}
       sort={ruleSort}

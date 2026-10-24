@@ -43,7 +43,7 @@ bash scripts/smoke_test_plugin.sh build
 
 ```text
 src/domain/                             财务计算、账单解析、规则和校验
-src/database/                           schema 11、连接管理和 Repository
+src/database/                           schema 13、连接管理和 Repository
 src/services/                           本地 Service、备份恢复
 src/ui/、src/views/                     React 界面与 ItemView
 scripts/                                插件构建、安装和冒烟
@@ -51,7 +51,15 @@ tests/                                  按 domain/database/import/ui/services/p
 docs/                                   当前架构、用户、开发与发行文档
 ```
 
-## 当前 handoff
+## 当前开发状态
+
+- v2.1.0：以 v2.0.0 为基准汇总金额规则、重写留空设置和独立于规则的汇总合并；当前 schema 13 / 备份格式 12。
+- 当前规则精确金额 > 区间 > 不限金额，同档组合 > 商品 > 交易对手；同一文字条件的区间交集阻止保存。合并先进入草稿、月份事务实际替换，不提供拆分还原。
+- 重写默认保留原值，可显式选择清空；合并只保留单组入口，按当前分类和完整标签组合分别处理，默认排除有标签流水。汇总字段保留，另一名称相同则保留，不同则留空。
+- 维护者已确认推送并发布 v2.1.0；发行、实装、兼容及验收记录见 `docs/logs/release-v2.1.0.md`。
+- 下列 v1.9.0 handoff 为历史背景；当前源码、schema 常量和编号文档优先。
+
+## 历史 handoff
 
 - Asset Track 已在 Community Plugins 上线，社区目录是推荐安装与更新方式；
   v1.9.0 是当前稳定版，要求 Obsidian 1.13.0+，并在发布声明中要求用户使用当前最新的

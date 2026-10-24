@@ -6,6 +6,8 @@ import type {
   Transaction
 } from "../types/transactions";
 import { RuleMatcher } from "../domain/rules";
+import { normalizeTransactionLabel } from "../domain/transactionLabels";
+export { normalizeTransactionLabel } from "../domain/transactionLabels";
 
 export type TransactionGroupBy = "product" | "counterparty";
 export type TransactionKey = number | string;
@@ -52,13 +54,6 @@ export function transactionKey(
   if (typeof row.id === "number" && Number.isFinite(row.id)) return row.id;
   const clientId = row.client_id?.trim();
   return clientId ? clientId : null;
-}
-
-export function normalizeTransactionLabel(value: string): string {
-  return value
-    .normalize("NFKC")
-    .toLocaleLowerCase("zh-CN")
-    .replace(/[\s\p{P}]+/gu, "");
 }
 
 export function normalizeProduct(value: string): string {

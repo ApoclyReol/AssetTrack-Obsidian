@@ -1,5 +1,31 @@
 # Changelog
 
+## 2.1.0
+
+### English
+
+Compared with 2.0.0:
+
+- **Transaction merging:** Merge recurring items directly from item or counterparty summaries. Preview first, keep categories and complete tag sets separate, and opt tagged transactions in when needed. Confirmation updates the draft; saving replaces the original records.
+- **Amount rules:** Identify transactions by an exact amount, comparisons or ranges, with independently inclusive or exclusive endpoints. Combine amounts with item or counterparty conditions to distinguish different purchases on the same platform.
+- **Fixes and improvements:** Identify conflicting rules while editing, simplify rule filters and header sorting, clarify blank rewrite behavior, remove the empty category editor section, and improve merge previews and backup validation.
+
+After updating, open Asset Track and choose **Back up and upgrade** when prompted. The plugin creates a local protection backup and upgrades your existing ledger automatically. Existing data is preserved; choosing **Later** leaves it unchanged.
+
+Minimum Obsidian version: 1.13.0. Use the latest 1.13.x desktop version before updating.
+
+### 中文
+
+相对 v2.0.0，本次更新包括：
+
+- **流水合并：** 在商品或交易对手汇总中，将重复项目实际合并。先预览，按分类和完整标签组合分别处理，有标签流水可主动选择参与。确认后进入草稿，保存时替换原逐笔记录。
+- **金额规则：** 支持精确金额、低于／不超过、高于／至少及区间，可独立设置是否包含端点。与商品或交易对手条件组合，区分同一平台上的不同消费。
+- **问题修复与体验优化：** 编辑规则时指出具体冲突，精简筛选与表头排序，明确重写留空行为，移除分类编辑空区域，改善合并预览和备份校验。
+
+更新后直接打开 Asset Track，在提示中选择 **备份并升级**。插件先创建本地保护备份，再自动升级现有账本，已有数据保留；选择 **稍后** 不会修改数据库。
+
+最低支持 Obsidian 1.13.0，更新前请使用当前最新的 1.13.x 桌面版。
+
 ## 2.0.0
 
 ### 中文更新

@@ -1,3 +1,4 @@
+import { readRuleAmountFields } from "../domain/ruleAmounts";
 import type { DatabaseSync } from "node:sqlite";
 import type {
   AccountDefinition,
@@ -227,9 +228,14 @@ export class ConfigurationWriteRepository {
       const category = byKey.get(text(source.category_key))
         ?? byName.get(text(source.category));
       const type = text(source.transaction_type) || text(category?.transaction_type);
+      if ([source.match_amount_min_exclusive, source.match_amount_max_exclusive]
+        .some((flag) => flag != null && ![false, true, 0, 1].includes(flag as boolean))) {
+        throw new RepositoryValidationError({ code: "rule.definition_invalid", params: { row: index + 1 } });
+      }
       const result = normalizeRuleDefinition({
         id: source.id === undefined || source.id === null ? undefined : Number(source.id),
         transaction_type: type,
+        ...readRuleAmountFields({ ...source }),
         match_scope: inferredScope as "product" | "merchant" | "merchant_product" | undefined,
         // Legacy callers used counterparty as transaction context for
         // product-only rules. New UI callers provide the inferred scope.
@@ -238,7 +244,8 @@ export class ConfigurationWriteRepository {
         category_key: category?.category_key ?? text(source.category_key),
         category: category?.name ?? text(source.category),
         rewrite_merchant: text(source.rewrite_merchant),
-        rewrite_product: text(source.rewrite_product)
+        rewrite_product: text(source.rewrite_product),
+        rewrite_empty_mode: source.rewrite_empty_mode as SavedRule["rewrite_empty_mode"]
       });
       if (!result.value) {
         throw new RepositoryValidationError({
@@ -271,7 +278,8 @@ export class ConfigurationWriteRepository {
       const conflict = conflicts[0];
       throw new RepositoryValidationError({
         code: "rule.conflict",
-        params: { description: conflict.description, rule_ids: conflict.rule_ids }
+        params: { description: conflict.description, rule_ids: conflict.rule_ids, conflict_kind: conflict.kind,
+          overlap_min_minor: conflict.overlap_min_minor, overlap_max_minor: conflict.overlap_max_minor, rule_rows: conflict.rule_rows }
       });
     }
     const chains = detectRewriteChains(normalized).filter((chain) => chain.category_conflict);
@@ -279,28 +287,31 @@ export class ConfigurationWriteRepository {
       const chain = chains[0];
       throw new RepositoryValidationError({
         code: "rule.rewrite_chain",
-        params: { reason: chain.reason, rule_id: chain.rule_id ?? null }
+        params: { reason: chain.reason, rule_id: chain.rule_id ?? null,
+          rule_ids: [chain.rule_id, ...chain.target_rule_ids].filter((id) => id != null),
+          rule_rows: [chain.rule_row, ...(chain.target_rule_rows ?? [])] }
       });
     }
     const insert = db.prepare(`
       INSERT INTO auto_rules
         (transaction_type,match_scope,counterparty,product,
-         category_key,category,
-         rewrite_merchant,rewrite_product)
-      VALUES (?,?,?,?,?,?,?,?)
+         category_key,category,match_amount_minor,match_amount_min_minor,match_amount_max_minor,match_amount_min_exclusive,match_amount_max_exclusive,
+         rewrite_merchant,rewrite_product,rewrite_empty_mode)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `);
     const update = db.prepare(`
       UPDATE auto_rules SET
         transaction_type=?,match_scope=?,counterparty=?,product=?,
-        category_key=?,category=?,rewrite_merchant=?,rewrite_product=?
+        category_key=?,category=?,match_amount_minor=?,match_amount_min_minor=?,match_amount_max_minor=?,match_amount_min_exclusive=?,match_amount_max_exclusive=?,rewrite_merchant=?,rewrite_product=?,rewrite_empty_mode=?
       WHERE id=?
     `);
     for (const rule of normalized) {
       if (rule.id === undefined || rule.id === null) {
         insert.run(
           rule.transaction_type, rule.match_scope, rule.counterparty, rule.product,
-          rule.category_key, rule.category,
-          rule.rewrite_merchant, rule.rewrite_product
+          rule.category_key, rule.category, rule.match_amount_minor ?? null,
+          rule.match_amount_min_minor ?? null, rule.match_amount_max_minor ?? null, Number(rule.match_amount_min_exclusive), Number(rule.match_amount_max_exclusive),
+          rule.rewrite_merchant, rule.rewrite_product, rule.rewrite_empty_mode ?? "preserve"
         );
       } else {
         const id = Number(rule.id);
@@ -310,8 +321,9 @@ export class ConfigurationWriteRepository {
         submitted.add(id);
         update.run(
           rule.transaction_type, rule.match_scope, rule.counterparty, rule.product,
-          rule.category_key, rule.category, rule.rewrite_merchant, rule.rewrite_product,
-          id
+          rule.category_key, rule.category, rule.match_amount_minor ?? null,
+          rule.match_amount_min_minor ?? null, rule.match_amount_max_minor ?? null, Number(rule.match_amount_min_exclusive), Number(rule.match_amount_max_exclusive), rule.rewrite_merchant, rule.rewrite_product,
+          rule.rewrite_empty_mode ?? "preserve", id
         );
       }
     }

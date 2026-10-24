@@ -1,3 +1,4 @@
+import { previewTransactionMerge, type MergeTransactionsRequest, type MergePreviewResult } from "../domain/transactionMerge";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -207,6 +208,20 @@ export class LocalAssetTrackService implements AssetTrackService {
   }> {
     this.ready();
     return this.repository.rulesPreview(month, rows);
+  }
+
+  async previewTransactionMerge(request: MergeTransactionsRequest): Promise<MergePreviewResult> {
+    this.ready();
+    const workspace = await this.repository.getMonth(request.month);
+    if (request.expected_revision !== workspace.revision) {
+      throw new AssetTrackError({ code: "revision_conflict", status: 409 });
+    }
+    const result = previewTransactionMerge(request);
+    const issues = this.repository.validateTransactionRows(request.month, request.rows);
+    if (issues.some((issue) => issue.blocking)) throw new AssetTrackError({ code: "transaction.validation_failed", status: 422 });
+    const mergedIssues = this.repository.validateTransactionRows(request.month, result.rows);
+    if (mergedIssues.some((issue) => issue.blocking)) throw new AssetTrackError({ code: "transaction.validation_failed", status: 422 });
+    return result;
   }
 
   async previewTransactionOperation(

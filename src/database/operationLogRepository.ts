@@ -18,7 +18,8 @@ export class OperationLogRepository {
   write(
     db: DatabaseSync,
     result: OperationPreview | OperationResult,
-    selection: string[]
+    selection: string[],
+    identityMap?: Map<string, number>
   ): void {
     const completedAt = "completed_at" in result ? result.completed_at : new Date().toISOString();
     const successCount = "success_count" in result
@@ -49,7 +50,9 @@ export class OperationLogRepository {
         changes: result.changes,
         protected_count: result.protected_count ?? 0,
         rule_ids: result.rule_ids ?? [],
-        metadata: result.metadata ?? {}
+        metadata: { ...result.metadata,
+          ...(result.operation_type === "merge-transactions" ? { result_ids: Object.fromEntries(identityMap ?? []) } : {})
+        }
       })
     );
   }

@@ -2,6 +2,7 @@ import type { SavedRule } from "./rules";
 import type { Transaction } from "./transactions";
 
 export type OperationKind =
+  | "merge-transactions"
   | "apply-rules"
   | "bulk-edit-counterparty"
   | "bulk-edit-product"

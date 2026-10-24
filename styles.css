@@ -1726,6 +1726,8 @@
 }
 
 .asset-track-rules-toolbar {
+  container-type: inline-size;
+  container-name: asset-track-rule-toolbar;
   margin-bottom: 12px;
   padding: 12px;
   border: 1px solid var(--background-modifier-border);
@@ -1750,17 +1752,18 @@
 }
 
 .asset-track-rules-filter-grid {
+  grid-template-columns: minmax(180px, 1.8fr) minmax(104px, 1fr) minmax(92px, 0.8fr) minmax(104px, 0.95fr) minmax(148px, 1.2fr) minmax(140px, 1.25fr);
   margin-bottom: 0;
+  gap: 8px;
 }
 
-.asset-track-rules-advanced-filter-grid {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--background-modifier-border);
+@container asset-track-rule-toolbar (max-width: 820px) {
+  .asset-track-rules-filter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
-.asset-track-rules-filter-grid .asset-track-rules-sort-direction {
-  align-self: end;
+@container asset-track-rule-toolbar (max-width: 520px) {
+  .asset-track-rules-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .asset-track-rules-filter-grid > label:first-child { grid-column: 1 / -1; }
 }
 
 .asset-track-rules-filter-note {
@@ -2286,7 +2289,7 @@
 }
 
 .asset-track-table-scroll.asset-track-rule-table-scroll .asset-track-rules-table {
-  min-width: 0;
+  min-width: 1100px;
   width: 100%;
   max-width: 100%;
 }
@@ -2302,40 +2305,57 @@
 
 .asset-track-rules-table th:nth-child(1),
 .asset-track-rules-table td:nth-child(1) {
-  width: 72px;
+  width: 5%;
 }
 
 .asset-track-rules-table th:nth-child(2),
 .asset-track-rules-table td:nth-child(2) {
-  width: 10%;
+  width: 9%;
 }
 
 .asset-track-rules-table th:nth-child(3),
-.asset-track-rules-table td:nth-child(3),
+.asset-track-rules-table td:nth-child(3) {
+  width: 6%;
+}
+
 .asset-track-rules-table th:nth-child(4),
-.asset-track-rules-table td:nth-child(4),
+.asset-track-rules-table td:nth-child(4) {
+  width: 13%;
+}
+
 .asset-track-rules-table th:nth-child(5),
-.asset-track-rules-table td:nth-child(5),
+.asset-track-rules-table td:nth-child(5) {
+  width: 13%;
+}
+
 .asset-track-rules-table th:nth-child(6),
-.asset-track-rules-table td:nth-child(6),
+.asset-track-rules-table td:nth-child(6) {
+  width: 10%;
+}
+
 .asset-track-rules-table th:nth-child(7),
 .asset-track-rules-table td:nth-child(7) {
-  width: 11%;
+  width: 10%;
 }
 
 .asset-track-rules-table th:nth-child(8),
 .asset-track-rules-table td:nth-child(8) {
-  width: 14%;
+  width: 11%;
 }
 
 .asset-track-rules-table th:nth-child(9),
 .asset-track-rules-table td:nth-child(9) {
-  width: 7%;
+  width: 6%;
 }
 
 .asset-track-rules-table th:nth-child(10),
 .asset-track-rules-table td:nth-child(10) {
-  width: 16%;
+  width: 10%;
+}
+
+.asset-track-rules-table th:nth-child(11),
+.asset-track-rules-table td:nth-child(11) {
+  width: 7%;
 }
 
 .asset-track-rules-table th,
@@ -3236,6 +3256,64 @@
   display: grid;
   gap: 5px;
   margin-bottom: 10px;
+}
+
+.asset-track-rule-conflicts {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-red);
+  border-radius: var(--radius-s);
+  color: var(--text-error);
+  overflow-wrap: anywhere;
+}
+.asset-track-rule-conflicts ul { margin: 6px 0 0; padding-left: 20px; }
+.asset-track-rule-conflicts li + li { margin-top: 5px; }
+.asset-track-rules-table .asset-track-rule-conflict-row td { background: rgba(var(--color-red-rgb), 0.07); }
+.asset-track-rewrite-trigger { display: grid; gap: 3px; width: 100%; height: auto; padding: 5px 8px; white-space: normal; }
+.asset-track-rewrite-trigger small { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.asset-track-rewrite-fields { display: grid; gap: 12px; }
+.asset-track-rewrite-fields > p { margin: 0; }
+
+.asset-track-merge-modal { width: min(860px, 94vw); max-width: 94vw; }
+.asset-track-merge-content { display: grid; gap: 16px; }
+.asset-track-merge-content .asset-track-editor-modal-section,
+.asset-track-merge-content .asset-track-rule-create-actions { margin: 0; }
+.asset-track-merge-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.asset-track-merge-summary > div { display: grid; gap: 4px; padding: 12px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); }
+.asset-track-merge-summary strong { color: var(--text-normal); font-size: 1.35em; font-variant-numeric: tabular-nums; }
+.asset-track-merge-summary span,
+.asset-track-merge-options p,
+.asset-track-merge-options small { color: var(--text-muted); font-size: var(--font-ui-small); }
+.asset-track-merge-options legend { padding: 0 6px; font-weight: var(--font-semibold); }
+.asset-track-merge-options p { margin: 8px 0 0; line-height: 1.5; }
+.asset-track-merge-tag-option { display: flex; align-items: center; gap: 8px; font-weight: var(--font-medium); }
+.asset-track-merge-tag-option input { flex: 0 0 auto; width: 18px; height: 18px; }
+.asset-track-merge-tag-option input[type="checkbox"] { accent-color: var(--interactive-accent); }
+.asset-track-merge-results { display: grid; gap: 12px; }
+.asset-track-merge-result > header { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+.asset-track-merge-result > header span { color: var(--text-muted); font-size: var(--font-ui-small); }
+.asset-track-merge-result > p { margin: 6px 0 12px; }
+.asset-track-merge-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; margin: 0 0 12px; }
+.asset-track-merge-fields > div { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 6px; }
+.asset-track-merge-fields dt { color: var(--text-muted); font-size: var(--font-ui-small); }
+.asset-track-merge-fields dd { margin: 0; overflow-wrap: anywhere; }
+.asset-track-merge-fields .asset-track-merge-tags { grid-column: 1 / -1; }
+.asset-track-merge-amount { font-weight: var(--font-semibold); font-variant-numeric: tabular-nums; }
+.asset-track-merge-notice,
+.asset-track-merge-empty { margin: 0; padding: 10px 12px; background: var(--background-secondary); border-radius: var(--radius-s); color: var(--text-muted); font-size: var(--font-ui-small); line-height: 1.5; }
+.asset-track-merge-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: grid;
+  gap: 12px;
+  padding-top: 12px;
+  background: var(--background-primary);
+}
+.asset-track-merge-content .asset-track-rule-create-actions { justify-content: flex-end; padding: 0; border: 0; }
+@media (max-width: 600px) {
+  .asset-track-merge-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .asset-track-merge-fields { grid-template-columns: minmax(0, 1fr); }
 }
 
 .asset-track-taxonomy-editor-modal input:not([type="color"]),
@@ -5151,4 +5229,56 @@
   .asset-track-taxonomy-panels--split {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* Actual merge confirmation uses the shared native modal surface. */
+.asset-track-merge-modal section + section {
+  margin-top: var(--size-4-4);
+  padding-top: var(--size-4-3);
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.asset-track-merge-modal .asset-track-table-scroll {
+  max-height: 40vh;
+  overflow: auto;
+}
+
+.asset-track-merge-modal table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-ui-small);
+}
+
+.asset-track-merge-modal th,
+.asset-track-merge-modal td {
+  padding: var(--size-2-2);
+  text-align: left;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.asset-track-amount-field,
+.asset-track-amount-condition {
+  display: grid;
+  gap: var(--size-2-2);
+}
+
+.asset-track-amount-condition > label {
+  display: grid;
+  gap: var(--size-2-1);
+}
+
+.asset-track-amount-condition > .asset-track-amount-endpoint {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-2);
+}
+
+.asset-track-amount-condition > small {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.asset-track-amount-condition > small[role="alert"] {
+  color: var(--text-error);
 }

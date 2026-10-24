@@ -182,13 +182,17 @@ export class AssetTrackEditorView extends ItemView {
       this.root = null;
       this.contentEl.empty();
       const guide = this.contentEl.createDiv("asset-track-setup-guide");
+      const needsUpgrade = this.plugin.databaseState === "migration-required";
+      const configured = Boolean(this.plugin.settings.dataDirectory);
       guide.createEl("h2", {
-        text: t("Asset Track 尚未配置", "Asset Track is not configured")
+        text: needsUpgrade ? t("现有账本需要升级", "Your ledger needs an upgrade")
+          : configured ? t("账本尚未载入", "Ledger not loaded") : t("Asset Track 尚未配置", "Asset Track is not configured")
       });
       guide.createEl("p", {
         text: this.plugin.databaseState === "initializing"
           ? t("正在初始化数据库……", "Initializing the database…")
-          : t(
+          : needsUpgrade ? t("选择备份并升级即可继续，稍后再处理也不会修改原数据。", "Choose Back up and upgrade to continue. Leaving this for later keeps the original data unchanged.")
+          : configured ? t("可以重新载入现有账本，或在设置中检查数据目录。", "Reload your existing ledger, or check its data directory in settings.") : t(
               "请先在插件设置中选择当前 Vault 内的 Asset-track 数据目录，然后创建或载入数据库。",
               "Choose an Asset Track data directory inside the current vault in plugin settings, then create or load a database."
             )
@@ -200,6 +204,12 @@ export class AssetTrackEditorView extends ItemView {
             `Database not loaded; original files were not changed: ${displayError(this.plugin.databaseError)}`
           )
         });
+      }
+      if (configured && this.plugin.databaseState !== "initializing") {
+        const retry = guide.createEl("button", {
+          text: needsUpgrade ? t("继续升级", "Continue upgrade") : t("重新载入账本", "Reload ledger")
+        });
+        this.registerDomEvent(retry, "click", () => { void this.plugin.prepareDatabaseOnViewOpen(); });
       }
       const button = guide.createEl("button", {
         text: t("打开插件设置", "Open plugin settings")

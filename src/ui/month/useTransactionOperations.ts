@@ -1,3 +1,5 @@
+import { TransactionMergeModal } from "../TransactionMergeModal";
+import type { TransactionGroup } from "../transactionGrouping";
 import {
   useCallback,
   useEffect,
@@ -144,6 +146,7 @@ export interface TransactionOperations {
     rerun?: (includeProtected: boolean) => Promise<OperationPreviewResult>,
     retry?: (statuses: AiRetryStatus[]) => Promise<OperationPreviewResult>
   ) => Promise<void>;
+  mergeGroup: (group: TransactionGroup) => Promise<void>;
   applyRules: () => Promise<void>;
   executeSelectedOperation: (
     operationType: TransactionOperationRequest["operation_type"],
@@ -567,8 +570,44 @@ export function useTransactionOperations({
   const invalidatePendingOperationLogs = useCallback((): void => {
     // Manual edits change the final draft by user intent, so an older preview
     // no longer describes the operation that will be persisted.
-    pendingOperationLogsRef.current = [];
+    pendingOperationLogsRef.current = pendingOperationLogsRef.current.filter((entry) => entry.preview.operation_type === "merge-transactions");
   }, [pendingOperationLogsRef]);
+
+  const mergeGroup = useCallback(async (group: TransactionGroup): Promise<void> => {
+    if (!app || !draft) return;
+    const sourceDraft = draft;
+    const sourceMonth = month;
+    const sequence = nextRequestSequence();
+    setState({ kind: "pending", message: t("正在预览合并…", "Preparing merge preview…") });
+    try {
+      const request = {
+        month, expected_revision: draft.revision,
+        group_by: group.groupBy, rows: draft.transactions,
+        groups: [{ transaction_keys: group.indexes.map((index) => operationTransactionKey(draft.transactions[index], index)) }]
+      };
+      const result = await api.previewTransactionMerge(request);
+      if (!isCurrentRequest(sequence, sourceDraft, sourceMonth)) return;
+      setState({ kind: "idle" });
+      const tagDefinitions = tags.length ? tags : (await api.taxonomy?.())?.tags ?? [];
+      if (!isCurrentRequest(sequence, sourceDraft, sourceMonth)) return;
+      new TransactionMergeModal({ app, result, tagNames: Object.fromEntries(tagDefinitions.map((tag) => [tag.tag_key, tag.name])),
+        onPreview: async (includeTagged) => {
+          const next = await api.previewTransactionMerge({ ...request, include_tagged: includeTagged });
+          if (!isCurrentRequest(sequence, sourceDraft, sourceMonth)) throw new AssetTrackError({ code: "operation.preview_draft_mismatch", status: 409 });
+          return next;
+        }, onConfirm: async (isOpen, confirmedResult) => {
+          if (!isOpen() || !isCurrentRequest(sequence, sourceDraft, sourceMonth)) throw new AssetTrackError({ code: "operation.preview_draft_mismatch", status: 409 });
+          pendingOperationLogsRef.current.push({ preview: confirmedResult.preview, selection: confirmedResult.groups.flatMap((group) => group.source_keys) });
+          mark({ ...sourceDraft, transactions: confirmedResult.rows }, "transactions");
+          setSelectedTransactionKeys(new Set());
+          new Notice(t("合并已进入草稿，保存流水后生效。", "Merge added to the draft. Save transactions to persist it."));
+        } }).open();
+    } catch (error) {
+      if (isCurrentRequest(sequence, sourceDraft, sourceMonth)) {
+        new Notice(messageFor(error)); setState({ kind: "error", message: messageFor(error) });
+      }
+    }
+  }, [app, api, draft, month, nextRequestSequence, setState, isCurrentRequest, pendingOperationLogsRef, mark, tags]);
 
   const applyRules = useCallback(async (): Promise<void> => {
     const rows = operationRows(
@@ -897,6 +936,7 @@ export function useTransactionOperations({
   }, [app, draft, isCurrentRequest, month, nextRequestSequence, operationRows, previewOperation, setState, tags]);
 
   return {
+    mergeGroup,
     businessTab,
     selectedTransactionKeys,
     changeBusinessTab,

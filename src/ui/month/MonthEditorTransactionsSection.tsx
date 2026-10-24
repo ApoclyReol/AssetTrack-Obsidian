@@ -98,6 +98,7 @@ export interface MonthEditorTransactionsSectionProps {
   selectedTransactionKeys?: ReadonlySet<TransactionKey>;
   onSelectedTransactionKeysChange?: (keys: Set<TransactionKey>) => void;
   renderBatchActions?: (context: TransactionBatchActionsContext) => ReactNode;
+  onMergeGroup?: (group: TransactionGroup) => void;
   onCreateRule?: (group: TransactionGroup) => void;
   renderRuleControls?: MonthEditorRuleControls;
   renderTransactionActions?: MonthEditorTransactionActions;
@@ -133,6 +134,7 @@ export function MonthEditorTransactionsSection({
   onSelectedTransactionKeysChange,
   renderBatchActions,
   onCreateRule,
+  onMergeGroup,
   renderRuleControls,
   renderTransactionActions,
   showBusinessTabs = true,
@@ -389,6 +391,8 @@ export function MonthEditorTransactionsSection({
           selectedTransactionKeys={effectiveSelectedKeys}
           onToggleTransaction={toggleTransaction}
           onToggleGroup={toggleTransactionKeys}
+          onMergeGroup={onMergeGroup}
+          mergeMonth={month}
           onCreateRule={onCreateRule}
           renderRuleControls={tableRuleControls}
           renderTransactionActions={tableTransactionActions}

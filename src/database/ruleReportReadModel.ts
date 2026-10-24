@@ -1,3 +1,5 @@
+import { readRuleRewriteMode } from "../domain/ruleRewrites";
+import { readRuleAmountFields } from "../domain/ruleAmounts";
 import type { DatabaseSync } from "node:sqlite";
 import type {
   CategoryDefinition
@@ -16,6 +18,8 @@ import {
   detectRewriteChains,
   findRuleConflicts,
   ruleConditionKey,
+  rulePriority,
+  matchesRuleAmount,
   normalizeProductKey,
   normalizeRuleDefinition,
   RuleMatcher,
@@ -73,7 +77,7 @@ export class RuleReportReadModel {
     `).all());
     const windowPredicate = window ? transactionWindowPredicate(window) : null;
     const transactions = knownTransactions ?? (window && windowPredicate ? rows(db.prepare(`
-      SELECT t.month,t.transaction_date,t.type,t.counterparty,t.product FROM transactions t
+      SELECT t.month,t.transaction_date,t.type,t.counterparty,t.product,t.amount FROM transactions t
       JOIN month_status m ON m.month=t.month AND m.status IN ('saved','locked')
       WHERE t.type IN ('支出','收入','代付')
         AND ${windowPredicate.sql}
@@ -94,6 +98,7 @@ export class RuleReportReadModel {
     const data = this.rules(db, window, knownTransactions);
     const ruleRows = data.rows.map((row) => ({
       id: Number(row.id),
+      ...readRuleAmountFields(row),
       transaction_type: text(row.transaction_type),
       match_scope: text(row.match_scope) as RuleRow["match_scope"],
       counterparty: text(row.counterparty),
@@ -102,6 +107,7 @@ export class RuleReportReadModel {
       category: text(row.category),
       category_active: row.category_active === undefined ? undefined : Boolean(row.category_active),
       rewrite_merchant: text(row.rewrite_merchant),
+      rewrite_empty_mode: readRuleRewriteMode(row.rewrite_empty_mode),
       rewrite_product: text(row.rewrite_product)
     } satisfies RuleRow));
     return {
@@ -125,6 +131,7 @@ export class RuleReportReadModel {
     const ruleReport = this.rules(db);
     const resolvedRules = ruleReport.rows.map((row) => ({
       id: Number(row.id),
+      ...readRuleAmountFields(row),
       transaction_type: text(row.transaction_type),
       counterparty: text(row.counterparty),
       product: text(row.product),
@@ -133,6 +140,7 @@ export class RuleReportReadModel {
       category_active: row.category_active === undefined ? undefined : Boolean(row.category_active),
       match_scope: text(row.match_scope) as RuleRow["match_scope"],
       rewrite_merchant: text(row.rewrite_merchant),
+      rewrite_empty_mode: readRuleRewriteMode(row.rewrite_empty_mode),
       rewrite_product: text(row.rewrite_product)
     }));
     const result = applyRulesWithIssues(input, resolvedRules);
@@ -180,7 +188,8 @@ export class RuleReportReadModel {
       const conflict = conflicts[0];
       throw new RepositoryValidationError({
         code: "rule.impact_conflict",
-        params: { description: conflict.description, rule_ids: conflict.rule_ids }
+        params: { description: conflict.description, rule_ids: conflict.rule_ids, conflict_kind: conflict.kind,
+          overlap_min_minor: conflict.overlap_min_minor, overlap_max_minor: conflict.overlap_max_minor, rule_rows: conflict.rule_rows }
       });
     }
     const chains = detectRewriteChains(candidateSet).filter((chain) => chain.category_conflict);
@@ -188,7 +197,9 @@ export class RuleReportReadModel {
       const chain = chains[0];
       throw new RepositoryValidationError({
         code: "rule.impact_rewrite_chain",
-        params: { reason: chain.reason, rule_id: chain.rule_id ?? null }
+        params: { reason: chain.reason, rule_id: chain.rule_id ?? null,
+          rule_ids: [chain.rule_id, ...chain.target_rule_ids].filter((id) => id != null),
+          rule_rows: [chain.rule_row, ...(chain.target_rule_rows ?? [])] }
       });
     }
     const conditionKey = ruleConditionKey(candidate);
@@ -203,7 +214,7 @@ export class RuleReportReadModel {
     }
     const historyWindow = window ? transactionWindowPredicate(window) : null;
     const historyRows = window && historyWindow ? rows(db.prepare(`
-      SELECT t.month,t.type,t.counterparty,t.product,t.category_key,t.category
+      SELECT t.month,t.type,t.counterparty,t.product,t.amount,t.category_key,t.category
       FROM transactions t
       JOIN month_status m ON m.month=t.month AND m.status IN ('saved','locked')
       WHERE t.type IN ('支出','收入','代付') AND ${historyWindow.sql}
@@ -223,8 +234,9 @@ export class RuleReportReadModel {
       transaction_type: text(row.type),
       match_scope: candidate.match_scope,
       counterparty: text(row.counterparty),
-      product: text(row.product)
-    }) === conditionKey);
+      product: text(row.product),
+      ...readRuleAmountFields({ ...candidate })
+    }) === conditionKey && matchesRuleAmount(candidate, row.amount));
     const counts = new Map<string, { category_key: string | null; category: string; occurrences: number }>();
     affected.forEach((row) => {
       const key = text(row.category_key) || "__uncategorized__";
@@ -236,15 +248,14 @@ export class RuleReportReadModel {
       current.occurrences += 1;
       counts.set(key, current);
     });
-    const priority: Record<string, number> = { merchant_product: 3, product: 2, merchant: 1 };
-    const candidateLevel = priority[candidate.match_scope] ?? 0;
+    const candidateLevel = rulePriority(candidate);
     const higherPriority = affected.filter((row) => ruleData.matcher.matchingRules({
       type: text(row.type),
       counterparty: text(row.counterparty),
-      product: text(row.product)
+      product: text(row.product),
+      amount: Number(row.amount)
     }).some((candidate) => {
-      const level = ruleMatchLevel(candidate);
-      return level && (priority[level] ?? 0) > candidateLevel;
+      return rulePriority(candidate) > candidateLevel;
     })).length;
     return {
       transaction_count: affected.length,
@@ -321,6 +332,7 @@ export class RuleReportReadModel {
       const matchLevel = text(row.match_level);
       const savedRule: SavedRule = {
         id: Number(row.id),
+        ...readRuleAmountFields(row),
         transaction_type: text(row.transaction_type) as RuleTransactionType,
         match_scope: text(row.match_scope) as "product" | "merchant" | "merchant_product",
         counterparty: text(row.match_scope) === "product" ? "" : text(row.counterparty),
@@ -329,7 +341,8 @@ export class RuleReportReadModel {
         category: text(row.category),
         category_active: row.category_active === undefined ? undefined : Boolean(row.category_active),
         rewrite_merchant: text(row.rewrite_merchant),
-        rewrite_product: text(row.rewrite_product),
+        rewrite_empty_mode: readRuleRewriteMode(row.rewrite_empty_mode),
+      rewrite_product: text(row.rewrite_product),
         rule_status: ["正常", "重复", "冲突"].includes(ruleStatus)
           ? ruleStatus as SavedRule["rule_status"]
           : undefined,

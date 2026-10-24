@@ -87,15 +87,13 @@ export class CategoryEditorModal extends Modal {
   }
 
   private renderFields(): void {
-    const form = this.contentEl.createDiv({ cls: "asset-track-category-editor-fields asset-track-editor-modal-section" });
     if (this.options.isNew) {
+      const form = this.contentEl.createDiv({ cls: "asset-track-category-editor-fields asset-track-editor-modal-section" });
       const basics = form.createDiv({ cls: "asset-track-category-editor-basic-grid" });
       const name = basics.createEl("label", { text: t("分类名称", "Category name") });
       const nameInput = name.createEl("input", { type: "text" });
       nameInput.value = this.draft.name;
       nameInput.addEventListener("input", () => { this.draft.name = nameInput.value; });
-    }
-    if (this.options.isNew) {
       const core = form.createDiv({ cls: "asset-track-category-editor-core-grid" });
       const kind = core.createEl("label", { text: t("收支", "Type") });
       const kindInput = kind.createEl("select");

@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { inflateRawSync } from "node:zlib";
+import type { BackupManifest } from "../../src/types/backup";
 import {
   existsSync,
   mkdtempSync,
@@ -46,7 +49,19 @@ describe("current backup service", () => {
     const legacy = new DatabaseSync(legacyPath);
     createSchema(legacy);
     legacy.exec(`
-      DROP TABLE transaction_tags;
+
+    DROP INDEX idx_auto_rules_match;
+    ALTER TABLE auto_rules DROP COLUMN rewrite_empty_mode;
+    ALTER TABLE auto_rules DROP COLUMN match_amount_min_key;
+    ALTER TABLE auto_rules DROP COLUMN match_amount_max_key;
+    ALTER TABLE auto_rules DROP COLUMN match_amount_max_exclusive;
+    ALTER TABLE auto_rules DROP COLUMN match_amount_min_exclusive;
+    ALTER TABLE auto_rules DROP COLUMN match_amount_max_minor;
+    ALTER TABLE auto_rules DROP COLUMN match_amount_min_minor;
+    ALTER TABLE auto_rules DROP COLUMN match_amount_key;
+    ALTER TABLE auto_rules DROP COLUMN match_amount_minor;
+    CREATE UNIQUE INDEX idx_auto_rules_match ON auto_rules(transaction_type,match_scope,match_counterparty_key,match_product_key);
+    DROP TABLE transaction_tags;
       DROP TABLE category_attributes;
       DROP TABLE tags;
       DROP TABLE attribute_options;
@@ -56,7 +71,7 @@ describe("current backup service", () => {
     legacy.close();
     const validation = await backup.validate(legacyPath);
     expect(validation.valid).toBe(true);
-    expect(validation.schema.schema_version).toBe(12);
+    expect(validation.schema.schema_version).toBe(13);
     await expect(backup.restore(legacyPath)).resolves.toMatchObject({ mode: "sqlite" });
     expect(repository.accounts().rows).toHaveLength(2);
   });
@@ -219,4 +234,65 @@ describe("current backup service", () => {
     expect(results.every((result) => result.safety_snapshot)).toBe(true);
     expect((await repository.getMonth("2026-01")).cash_accounts[0].balance).toBe(111);
   });
+});
+
+it.each([{ version: 12, format: 9 }, { version: 13, format: 10 }, { version: 14, format: 11 }, { version: 15, format: 12 }])("restores schema $version with a format $format manifest", async ({ version, format }) => {
+  const { backup, root } = setup();
+  const exported = await backup.exportZip(root);
+  const directory = mkdtempSync(join(tmpdir(), `asset-track-format${format}-`));
+  const zip = readFileSync(exported.path);
+  let offset = 0;
+  while (zip.readUInt32LE(offset) === 0x04034b50) {
+    const size = zip.readUInt32LE(offset + 18);
+    const nameSize = zip.readUInt16LE(offset + 26);
+    const extraSize = zip.readUInt16LE(offset + 28);
+    const name = zip.subarray(offset + 30, offset + 30 + nameSize).toString("utf8");
+    const start = offset + 30 + nameSize + extraSize;
+    writeFileSync(join(directory, name), inflateRawSync(zip.subarray(start, start + size)));
+    offset = start + size;
+  }
+  const databasePath = join(directory, "accounting_system.db");
+  const db = new DatabaseSync(databasePath);
+  const rangeColumns = ["match_amount_min_key", "match_amount_max_key", "match_amount_max_exclusive", "match_amount_min_exclusive", "match_amount_max_minor", "match_amount_min_minor"];
+  const excluded = new Set(version === 15 ? [] : ["rewrite_empty_mode", ...(version < 14 ? rangeColumns : []), ...(version === 12 ? ["match_amount_key", "match_amount_minor"] : [])]);
+  db.exec(`DROP INDEX idx_auto_rules_match;
+    ${[...excluded].map((column) => `ALTER TABLE auto_rules DROP COLUMN ${column};`).join("\n")}
+    CREATE UNIQUE INDEX idx_auto_rules_match ON auto_rules(transaction_type,match_scope,match_counterparty_key,match_product_key${version === 13 ? ",match_amount_key" : version >= 14 ? ",match_amount_min_key,match_amount_max_key" : ""});
+    PRAGMA user_version=${version};`);
+  db.close();
+  const csvPath = join(directory, "auto_rules_backup.csv");
+  writeFileSync(csvPath, readFileSync(csvPath, "utf8").trim().split(",").filter((column) => !excluded.has(column)).join(",") + "\r\n");
+  const manifestPath = join(directory, "manifest.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as BackupManifest;
+  manifest.format_version = format; manifest.schema_version = version;
+  manifest.tables.auto_rules.columns = manifest.tables.auto_rules.columns.filter((name) => !excluded.has(name));
+  for (const name of ["accounting_system.db", "auto_rules_backup.csv"]) {
+    const data = readFileSync(join(directory, name));
+    manifest.files[name] = { ...manifest.files[name], size: data.length, sha256: createHash("sha256").update(data).digest("hex") };
+  }
+  writeFileSync(manifestPath, JSON.stringify(manifest));
+  expect((await backup.validate(directory)).schema.schema_version).toBe(13);
+  await expect(backup.restore(directory)).resolves.toBeTruthy();
+});
+
+it("round trips open and closed range endpoints in the format 12 backup", async () => {
+  const { repository, backup, root } = setup();
+  const saved = await repository.saveRules(repository.rules().revision, [{
+    transaction_type: "支出", match_scope: "merchant", counterparty: "平台", product: "",
+    category_key: categoryKey("订阅服务"), category: "订阅服务",
+    match_amount_min_minor: 200, match_amount_max_minor: 5000,
+    match_amount_min_exclusive: true, match_amount_max_exclusive: false, rewrite_empty_mode: "clear"
+  }, {
+    transaction_type: "支出", match_scope: "merchant", counterparty: "平台", product: "",
+    category_key: categoryKey("订阅服务"), category: "订阅服务", match_amount_minor: 1990
+  }]);
+  const exported = await backup.exportZip(root);
+  expect(exported.validation.manifest).toMatchObject({ format_version: 12, schema_version: 13 });
+  await repository.saveRules(saved.revision, []);
+  await backup.restore(exported.path);
+  expect(repository.ruleWorkspaceShell().rules[0]).toMatchObject({
+    match_amount_minor: null, match_amount_min_minor: 200, match_amount_max_minor: 5000,
+    match_amount_min_exclusive: true, match_amount_max_exclusive: false, rewrite_empty_mode: "clear"
+  });
+  expect(repository.ruleWorkspaceShell().rules[1]).toMatchObject({ match_amount_minor: 1990, match_amount_min_minor: null, match_amount_max_minor: null });
 });

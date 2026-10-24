@@ -9,9 +9,6 @@ import { dirname, join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import {
   CURRENT_SCHEMA_VERSION,
-  SCHEMA11_VERSION,
-  SCHEMA10_VERSION,
-  SCHEMA9_VERSION,
   REQUIRED_COLUMNS,
   REQUIRED_CHECK_CONSTRAINTS,
   REQUIRED_FOREIGN_KEYS,
@@ -184,7 +181,7 @@ function schemaValidation(db: DatabaseSync, full: boolean): SchemaValidation {
       }>;
       const invalid = columns.filter((column) => {
         const info = columnInfo.find((candidate) => candidate.name === column);
-        return !info || info.hidden !== 3;
+        return !info || info.hidden !== (column.startsWith("match_amount_") ? 2 : 3);
       });
       return invalid.length ? [[table, invalid]] : [];
     })
@@ -399,7 +396,7 @@ function validationError(validation: SchemaValidation): string {
   const columns = Object.entries(validation.missing_columns)
     .map(([table, missing]) => `${table}(${missing.join(",")})`)
     .join(";");
-  return `仅支持完整 schema ${CURRENT_SCHEMA_VERSION} 数据库（schema ${SCHEMA9_VERSION}/${SCHEMA10_VERSION}/${SCHEMA11_VERSION} 会在打开时迁移）；`
+  return `仅支持完整 schema ${CURRENT_SCHEMA_VERSION} 数据库（旧版及兼容的本地开发结构需确认后升级）；`
     + `版本=${validation.schema_version}，`
     + `缺少表=${validation.missing_tables.join(",") || "无"}，`
     + `缺少字段=${columns || "无"}，`
@@ -502,10 +499,6 @@ export class DatabaseManager {
     this.migrationOptions = { ...options };
   }
 
-  private canApplyMigrations(version: number): boolean {
-    return version === SCHEMA9_VERSION || version === SCHEMA10_VERSION || version === SCHEMA11_VERSION;
-  }
-
   open(migrationOptions: { preserveLegacyAttributes?: boolean } = {}): DatabaseSync {
     if (this.db) return this.db;
     if (!this.restoring) this.recoverRestoreArtifacts();
@@ -541,7 +534,7 @@ export class DatabaseManager {
           db.exec("ROLLBACK");
           throw error;
         }
-      } else if (this.canApplyMigrations(version)) {
+      } else if (canMigrateSchema(db)) {
         migrationProtectionBackup = this.createMigrationProtectionBackup(db, version);
         try {
           this.migrationReport = migrateSchemaToCurrent(db, {

@@ -1,9 +1,24 @@
 import type { CategoryDefinition } from "./configuration";
 import type { ReadWindow } from "./readWindows";
 
+export interface RuleAmountFields {
+  /** Legacy exact condition; mutually exclusive with range bounds. */
+  match_amount_minor?: number | null;
+  match_amount_min_minor?: number | null;
+  match_amount_max_minor?: number | null;
+  match_amount_min_exclusive?: boolean;
+  match_amount_max_exclusive?: boolean;
+}
+
 export type RuleMatchScope = "product" | "merchant" | "merchant_product";
 export type RuleMatchLevel = RuleMatchScope;
 export type RuleTransactionType = "支出" | "收入" | "代付";
+
+export interface RuleRewriteFields {
+  rewrite_merchant?: string;
+  rewrite_product?: string;
+  rewrite_empty_mode?: "preserve" | "clear";
+}
 
 export type ProductCategoryStatus = "正常" | "停用" | "未分类" | "混合";
 
@@ -23,6 +38,7 @@ export interface RuleMatchExplanation {
   category?: string;
   rewrite_merchant?: string | null;
   rewrite_product?: string | null;
+  rewrite_empty_mode?: "preserve" | "clear";
   covered_rule_ids?: number[];
   reason: string;
 }
@@ -37,6 +53,8 @@ export interface RuleApplicationIssue {
 
 export interface RuleChainIssue {
   rule_id: number | null;
+  rule_row?: number;
+  target_rule_rows?: number[];
   target_rule_ids: number[];
   fields: Array<"counterparty" | "product">;
   category_conflict: boolean;
@@ -127,7 +145,7 @@ export interface RuleHealthSummary {
   higher_priority_covered_transactions?: number;
 }
 
-export interface SavedRule {
+export interface SavedRule extends RuleAmountFields, RuleRewriteFields {
   id?: number;
   transaction_type: RuleTransactionType;
   match_scope?: RuleMatchScope;
@@ -148,7 +166,7 @@ export interface SavedRule {
   match_level?: RuleMatchLevel;
 }
 
-export type RuleConflictKind = "duplicate" | "same-condition" | "rewrite-chain";
+export type RuleConflictKind = "duplicate" | "same-condition" | "amount-overlap" | "rewrite-chain";
 
 export interface RuleConflictGroup {
   conflict_key: string;

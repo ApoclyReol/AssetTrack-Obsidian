@@ -557,7 +557,7 @@ it("summarizes recurring expenses by product without changing schema", async () 
       latest_amount: 20,
       last_date: "2026-01-20"
     }]);
-    expect(manager.validate(false).schema_version).toBe(12);
+    expect(manager.validate(false).schema_version).toBe(13);
   });
 
 it("matches the frozen Python obsidian-v1 golden fixture", async () => {

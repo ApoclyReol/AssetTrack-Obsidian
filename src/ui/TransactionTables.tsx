@@ -1,3 +1,5 @@
+import { mergeEligibility } from "../domain/transactionMerge";
+import { AssetTrackError } from "../application/errors";
 import {
   Fragment,
   useEffect,
@@ -357,6 +359,8 @@ export interface TransactionSummaryTableProps {
   selectedTransactionKeys?: ReadonlySet<TransactionKey>;
   onToggleTransaction?: (key: TransactionKey) => void;
   onToggleGroup?: (keys: readonly TransactionKey[]) => void;
+  onMergeGroup?: (group: TransactionGroup) => void;
+  mergeMonth?: string;
   onCreateRule?: (group: TransactionGroup) => void;
   renderRuleControls?: TransactionRuleControls;
   renderTransactionActions?: TransactionRowActions;
@@ -737,6 +741,8 @@ export function TransactionSummaryTable({
   onToggleTransaction,
   onToggleGroup,
   onCreateRule,
+  onMergeGroup,
+  mergeMonth,
   renderRuleControls,
   renderTransactionActions
 }: TransactionSummaryTableProps) {
@@ -785,6 +791,8 @@ export function TransactionSummaryTable({
           <tbody>
             {groups.map(({ row: group }) => {
               const groupViewKey = stableGroupKey(group);
+              const mergeReason = onMergeGroup ? mergeEligibility(group.indexes.map((index) => rows[index]),
+                mergeMonth ?? rows[group.indexes[0]]?.transaction_date.slice(0, 7) ?? "").reason : null;
               return (
               <Fragment key={groupViewKey}>
                 <tr>
@@ -861,6 +869,12 @@ export function TransactionSummaryTable({
                   </td>
                   <td className="asset-track-actions-cell asset-track-summary-actions-cell">
                     <span className="asset-track-transaction-actions">
+                      {onMergeGroup && <button type="button"
+                        disabled={mergeReason !== null}
+                        title={mergeReason ? displayError(new AssetTrackError({ code: "transaction.merge.invalid", params: { reason: mergeReason } }))
+                          : t("预览合并当前汇总组；按分类和标签组合分别处理。", "Preview merging this summary group, separately by category and complete tag set.")}
+                        onClick={() => onMergeGroup(group)}>{t("合并成一条", "Merge into one")}</button>}
+
                       <button type="button" onClick={() => onExpanded(expanded === groupViewKey ? "" : groupViewKey)}>
                         {expanded === groupViewKey ? t("收起", "Collapse") : t("展开逐项", "Expand items")}
                       </button>

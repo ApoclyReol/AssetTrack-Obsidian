@@ -1,4 +1,5 @@
 import type {
+  RuleAmountFields,
   RuleApplicationIssue,
   RuleChainIssue,
   RuleMatchExplanation,
@@ -9,7 +10,10 @@ import type {
 import type {
   Transaction
 } from "../types/transactions";
+import { EMPTY_RULE_AMOUNT, amountRangesOverlap, matchesRuleAmount, ruleAmountBounds, ruleAmountSpecificity } from "./ruleAmounts";
+export { amountMinor, matchesRuleAmount } from "./ruleAmounts";
 import { scalarText } from "./text";
+import { rewriteRuleFields } from "./ruleRewrites";
 
 export const RULE_TYPES = new Set<RuleTransactionType>(["支出", "收入", "代付"]);
 export const RULE_SCOPES = new Set<RuleMatchScope>([
@@ -30,7 +34,7 @@ export function normalizeRuleKey(value: unknown): string {
 /** Kept as a compatibility alias for callers that still use product terminology. */
 export const normalizeProductKey = normalizeRuleKey;
 
-export interface RuleRow {
+export interface RuleRow extends RuleAmountFields {
   id?: number;
   transaction_type: string;
   match_scope?: RuleMatchScope;
@@ -41,6 +45,7 @@ export interface RuleRow {
   category_active?: boolean;
   rewrite_merchant?: string;
   rewrite_product?: string;
+  rewrite_empty_mode?: "preserve" | "clear";
 }
 
 export interface NormalizedRule extends RuleRow {
@@ -57,6 +62,8 @@ export interface NormalizedRule extends RuleRow {
 
 export interface RuleDefinitionIssue {
   code:
+    | "invalid_amount"
+    | "invalid_rewrite_mode"
     | "invalid_type"
     | "invalid_scope"
     | "missing_condition"
@@ -105,7 +112,7 @@ export function ruleMatchLevel(
   return inferRuleScope(rule);
 }
 
-export function ruleConditionKey(rule: Pick<RuleRow, "transaction_type" | "match_scope" | "counterparty" | "product">): string | null {
+export function ruleConditionKey(rule: Pick<RuleRow, "transaction_type" | "match_scope" | "counterparty" | "product"> & RuleAmountFields): string | null {
   const scope = inferRuleScope(rule);
   if (!scope || !RULE_TYPES.has(rule.transaction_type as RuleTransactionType)) return null;
   const counterparty = scope === "merchant" || scope === "merchant_product"
@@ -115,7 +122,9 @@ export function ruleConditionKey(rule: Pick<RuleRow, "transaction_type" | "match
   if (scope === "product" && !product) return null;
   if (scope === "merchant" && !counterparty) return null;
   if (scope === "merchant_product" && (!counterparty || !product)) return null;
-  return [rule.transaction_type, scope, counterparty, product].join("\u0000");
+  const amount = ruleAmountBounds(rule);
+  if (!amount) return null;
+  return [rule.transaction_type, scope, counterparty, product, amount.min, amount.max ?? "*"].join("\u0000");
 }
 
 export function normalizeRuleDefinition(source: Partial<RuleRow>): {
@@ -131,6 +140,12 @@ export function normalizeRuleDefinition(source: Partial<RuleRow>): {
   const rewriteMerchant = scalarText(source.rewrite_merchant).trim();
   const rewriteProduct = scalarText(source.rewrite_product).trim();
   const issues: RuleDefinitionIssue[] = [];
+  if (!ruleAmountBounds(source)) {
+    issues.push({ code: "invalid_amount", message: "金额条件须使用非负整数分，区间不能为空且上下限须有效" });
+  }
+  if (source.rewrite_empty_mode != null && !["preserve", "clear"].includes(source.rewrite_empty_mode)) {
+    issues.push({ code: "invalid_rewrite_mode", message: "重写留空行为只能是保留原值或清空原值" });
+  }
   if (!RULE_TYPES.has(transactionType as RuleTransactionType)) {
     issues.push({ code: "invalid_type", message: "规则收支类型只能是支出、收入或代付" });
   }
@@ -163,12 +178,18 @@ export function normalizeRuleDefinition(source: Partial<RuleRow>): {
       ...source,
       transaction_type: transactionType as RuleTransactionType,
       match_scope: scope,
+      match_amount_minor: source.match_amount_minor ?? null,
+      match_amount_min_minor: source.match_amount_min_minor ?? null,
+      match_amount_max_minor: source.match_amount_max_minor ?? null,
+      match_amount_min_exclusive: Boolean(source.match_amount_min_exclusive),
+      match_amount_max_exclusive: Boolean(source.match_amount_max_exclusive),
       counterparty,
       product,
       category_key: scalarText(source.category_key).trim(),
       category: scalarText(source.category).trim(),
       rewrite_merchant: rewriteMerchant,
       rewrite_product: rewriteProduct,
+      rewrite_empty_mode: source.rewrite_empty_mode ?? "preserve",
       counterparty_key: comparable(counterparty),
       product_key: comparable(product)
     },
@@ -206,6 +227,7 @@ function ruleName(level: RuleMatchLevel): string {
 
 type MatchableTransaction = Pick<Transaction, "type" | "product"> & {
   counterparty?: string;
+  amount?: number;
 };
 
 function ruleTypeForTransaction(type: string): string {
@@ -220,7 +242,7 @@ export class RuleMatcher {
 
   constructor(rules: readonly RuleRow[]) {
     rules.forEach((rule, order) => {
-      if (rule.category_active === false) return;
+      if ((rule.category_active != null && !rule.category_active)) return;
       const id = Number(rule.id);
       if (Number.isFinite(id) && id > 0) this.orderById.set(id, order);
       const scope = inferRuleScope(rule);
@@ -260,7 +282,8 @@ export class RuleMatcher {
       ...(product ? this.product.get(indexKey(transactionType, "", product)) ?? [] : []),
       ...(counterparty ? this.merchant.get(indexKey(transactionType, counterparty, "")) ?? [] : [])
     ];
-    return matches.sort(sortIndexed).map((candidate) => candidate.rule);
+    return matches.sort(sortIndexed).map((candidate) => candidate.rule)
+      .filter((rule) => matchesRuleAmount(rule, row.amount));
   }
 
   resolve(row: Transaction): RuleMatchExplanation {
@@ -273,16 +296,11 @@ export class RuleMatcher {
    * lookup twice for every historical transaction.
    */
   resolveWithMatches(row: Transaction, matches: readonly RuleRow[]): RuleMatchExplanation {
-    const grouped = new Map<RuleMatchLevel, RuleRow[]>();
-    for (const candidate of matches) {
-      const level = ruleMatchLevel(candidate);
+    const priorities = [...new Set(matches.map(rulePriority))].sort((a, b) => b - a);
+    for (const priority of priorities) {
+      const candidates = matches.filter((rule) => rulePriority(rule) === priority);
+      const level = ruleMatchLevel(candidates[0]);
       if (!level) continue;
-      appendToGroup(grouped, level, candidate);
-    }
-    const levels: RuleMatchLevel[] = ["merchant_product", "product", "merchant"];
-    for (const level of levels) {
-      const candidates = grouped.get(level) ?? [];
-      if (!candidates.length) continue;
       const ruleIds = candidates
         .map((candidate) => Number(candidate.id))
         .filter((id) => Number.isFinite(id) && id > 0);
@@ -300,11 +318,9 @@ export class RuleMatcher {
         };
       }
       const selected = candidates[0];
-      const lowerRuleIds = levels
-        .filter((candidateLevel) => candidateLevel !== level)
-        .flatMap((candidateLevel) => grouped.get(candidateLevel) ?? [])
-        .map((candidate) => Number(candidate.id))
-        .filter((id) => Number.isFinite(id) && id > 0);
+      const lowerRuleIds = matches.filter((rule) => rulePriority(rule) < priority)
+        .sort((a, b) => rulePriority(b) - rulePriority(a))
+        .map((rule) => Number(rule.id)).filter((id) => Number.isFinite(id) && id > 0);
       return {
         status: "matched",
         level,
@@ -314,6 +330,7 @@ export class RuleMatcher {
         category: selected.category,
         rewrite_merchant: scalarText(selected.rewrite_merchant).trim() || null,
         rewrite_product: scalarText(selected.rewrite_product).trim() || null,
+        rewrite_empty_mode: selected.rewrite_empty_mode ?? "preserve",
         covered_rule_ids: lowerRuleIds,
         reason: `${ruleName(level)}确定命中${lowerRuleIds.length ? `，覆盖 ${lowerRuleIds.join("、")} ` : ""}`
       };
@@ -334,10 +351,13 @@ export function rulesEquivalent(left: RuleRow, right: RuleRow): boolean {
 }
 
 export function findRuleConflicts(rules: readonly RuleRow[]): Array<{
-  kind: "duplicate" | "same-condition";
+  kind: "duplicate" | "same-condition" | "amount-overlap";
   rule_ids: number[];
   condition_key: string;
   description: string;
+  overlap_min_minor?: number;
+  overlap_max_minor?: number | null;
+  rule_rows?: number[];
 }> {
   const groups = new Map<string, RuleRow[]>();
   for (const rule of rules) {
@@ -345,76 +365,84 @@ export function findRuleConflicts(rules: readonly RuleRow[]): Array<{
     if (!key) continue;
     appendToGroup(groups, key, rule);
   }
-  return [...groups.entries()].flatMap(([conditionKey, group]) => {
+  const duplicates = [...groups.entries()].flatMap(([conditionKey, group]) => {
     if (group.length < 2) return [];
     const ids = group.map((rule) => Number(rule.id)).filter((id) => Number.isFinite(id) && id > 0);
     const categoryKeys = new Set(group.map((rule) => comparable(rule.category_key) || comparable(rule.category)));
     return [{
       kind: categoryKeys.size > 1 ? "same-condition" as const : "duplicate" as const,
       rule_ids: ids,
+      rule_rows: group.map((rule) => rules.indexOf(rule) + 1),
       condition_key: conditionKey,
       description: categoryKeys.size > 1 ? "同一精确条件指向多个分类" : "同一精确条件存在重复规则"
     }];
   });
+  const overlaps: ReturnType<typeof findRuleConflicts> = [];
+  const byText = new Map<string, RuleRow[]>();
+  for (const rule of rules) {
+    if (ruleAmountSpecificity(rule) !== 1) continue;
+    const key = ruleConditionKey({ ...rule, ...EMPTY_RULE_AMOUNT });
+    if (key) appendToGroup(byText, key, rule);
+  }
+  for (const [textKey, candidates] of byText) {
+    for (let i = 0; i < candidates.length; i++) {
+      for (let j = i + 1; j < candidates.length; j++) {
+        const a = candidates[i]; const b = candidates[j];
+        if (ruleConditionKey(a) === ruleConditionKey(b) || !amountRangesOverlap(a, b)) continue;
+        const left = ruleAmountBounds(a)!; const right = ruleAmountBounds(b)!;
+        const min = Math.max(left.min, right.min);
+        const max = Math.min(left.max ?? Infinity, right.max ?? Infinity);
+        overlaps.push({ kind: "amount-overlap", condition_key: textKey,
+          rule_ids: [a.id, b.id].filter((id): id is number => id != null),
+          overlap_min_minor: min, overlap_max_minor: Number.isFinite(max) ? max : null,
+          rule_rows: [rules.indexOf(a) + 1, rules.indexOf(b) + 1],
+          description: `第 ${rules.indexOf(a) + 1}、${rules.indexOf(b) + 1} 条规则的金额区间重叠：${(min / 100).toFixed(2)} 至 ${Number.isFinite(max) ? (max / 100).toFixed(2) : "无上限"}` });
+      }
+    }
+  }
+  return [...duplicates, ...overlaps];
 }
 
 export function detectRewriteChains(rules: readonly RuleRow[]): RuleChainIssue[] {
   const matcher = new RuleMatcher(rules);
   const issues: RuleChainIssue[] = [];
   for (const source of rules) {
-    const sourceId = Number(source.id);
-    const sourceHasId = Number.isFinite(sourceId) && sourceId > 0;
     const scope = inferRuleScope(source);
-    if (!scope) continue;
-    const baseCounterparty = scope === "merchant" || scope === "merchant_product"
-      ? scalarText(source.counterparty).trim() : "";
-    const baseProduct = scope === "product" || scope === "merchant_product"
-      ? scalarText(source.product).trim() : "";
-    const rewriteMerchant = scalarText(source.rewrite_merchant).trim();
-    const rewriteProduct = scalarText(source.rewrite_product).trim();
-    if (!rewriteMerchant && !rewriteProduct) continue;
-    const rewritten = {
-      ...({
-        transaction_date: "",
-        type: source.transaction_type,
-        category: source.category,
-        category_key: source.category_key ?? null,
-        product: rewriteProduct || baseProduct,
-        counterparty: rewriteMerchant || baseCounterparty,
-        amount: 0
-      } satisfies Transaction)
-    };
-    const targetRules = matcher.matchingRules(rewritten)
-      .filter((target) => target !== source && (!sourceHasId || Number(target.id) !== sourceId));
-    const targetResolution = matcher.resolveWithMatches(rewritten, targetRules);
-    if (targetResolution.status === "none" || !targetResolution.level) continue;
-    // Only the highest-priority target level is relevant. Lower levels are
-    // covered by the normal one-pass resolver and must not turn a harmless
-    // normalization chain into a false conflict.
-    const highestPriorityTargets = targetRules.filter((target) =>
-      ruleMatchLevel(target) === targetResolution.level
-    );
-    const targets = highestPriorityTargets
-      .map((target) => Number(target.id))
-      .filter((id) => Number.isFinite(id) && id > 0);
-    const sourceCategory = comparable(source.category_key) || comparable(source.category);
-    const categoryConflict = highestPriorityTargets.some((target) =>
-      (comparable(target.category_key) || comparable(target.category)) !== sourceCategory
-    );
-    if (!highestPriorityTargets.length) continue;
-    const targetLabel = targets.length
-      ? [...new Set(targets)].join("、")
-      : "新建规则";
-    issues.push({
-      rule_id: sourceHasId ? sourceId : null,
-      target_rule_ids: [...new Set(targets)],
-      fields: [
-        ...(rewriteMerchant ? ["counterparty" as const] : []),
-        ...(rewriteProduct ? ["product" as const] : [])
-      ],
-      category_conflict: categoryConflict,
-      reason: `重写结果会再次命中最高优先级规则 ${targetLabel}${categoryConflict ? "，且目标分类不同" : "，但分类相同"}`
-    });
+    if (!scope || (!source.rewrite_merchant && !source.rewrite_product)) continue;
+    const sourceBounds = ruleAmountBounds(source);
+    if (!sourceBounds) continue;
+    const prices = new Set([sourceBounds.min]);
+    for (const rule of rules) {
+      const bounds = ruleAmountBounds(rule);
+      if (!bounds) continue;
+      for (const boundary of [bounds.min, bounds.max == null ? null : bounds.max + 1]) {
+        if (boundary != null && Number.isSafeInteger(boundary) && boundary >= sourceBounds.min
+          && (sourceBounds.max == null || boundary <= sourceBounds.max)) prices.add(boundary);
+      }
+    }
+    const targets = new Map<RuleRow, boolean>();
+    for (const price of prices) {
+      const row: Transaction = {
+        transaction_date: "", type: source.transaction_type, category: source.category,
+        ...rewriteRuleFields(source, { product: scope !== "merchant" ? source.product ?? "" : "",
+          counterparty: scope !== "product" ? source.counterparty ?? "" : "" }),
+        amount: price / 100
+      };
+      const candidates = matcher.matchingRules(row)
+        .filter((target) => target !== source && (source.id == null || target.id !== source.id));
+      const max = Math.max(0, ...candidates.map(rulePriority));
+      candidates.filter((target) => rulePriority(target) === max).forEach((target) => {
+        targets.set(target, (comparable(target.category_key) || comparable(target.category))
+          !== (comparable(source.category_key) || comparable(source.category)));
+      });
+    }
+    if (!targets.size) continue;
+    const ids = [...targets.keys()].flatMap((rule) => rule.id ? [rule.id] : []);
+    issues.push({ rule_id: source.id ?? null, rule_row: rules.indexOf(source) + 1,
+      target_rule_rows: [...targets.keys()].map((rule) => rules.indexOf(rule) + 1), target_rule_ids: ids,
+      fields: [...(source.rewrite_merchant ? ["counterparty" as const] : []), ...(source.rewrite_product ? ["product" as const] : [])],
+      category_conflict: [...targets.values()].some(Boolean),
+      reason: `重写结果会再次命中最高优先级规则 ${ids.join("、") || "新建规则"}` });
   }
   return issues;
 }
@@ -444,8 +472,7 @@ export function applyRulesWithIssues(
     if (resolution.status !== "matched") return { ...row };
     return {
       ...row,
-      counterparty: resolution.rewrite_merchant || row.counterparty || "",
-      product: resolution.rewrite_product || row.product,
+      ...rewriteRuleFields(resolution, row),
       category_key: resolution.category_key ?? null,
       category: resolution.category ?? ""
     };
@@ -459,5 +486,5 @@ export function applyRules(rows: Transaction[], rules: RuleRow[]): Transaction[]
 
 export function rulePriority(rule: RuleRow): number {
   const level = ruleMatchLevel(rule);
-  return level === "merchant_product" ? 3 : level === "product" ? 2 : level === "merchant" ? 1 : 0;
+  return (ruleAmountSpecificity(rule) * 3) + (level === "merchant_product" ? 3 : level === "product" ? 2 : level === "merchant" ? 1 : 0);
 }

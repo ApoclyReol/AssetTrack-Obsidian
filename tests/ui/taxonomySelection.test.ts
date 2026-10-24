@@ -70,6 +70,7 @@ describe("taxonomy selection window", () => {
     Object.assign(modal, { contentEl, modalEl: fixtureDiv() });
     modal.onOpen();
     await vi.waitFor(() => expect(contentEl.textContent).toContain("必要性"));
+    expect(contentEl.querySelector(".asset-track-category-editor-fields")).toBeNull();
     expect(Array.from(contentEl.querySelectorAll<HTMLInputElement>('input[type="radio"]'))
       .find((input) => input.value === "necessary")?.checked).toBe(true);
   });

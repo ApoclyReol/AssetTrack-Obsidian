@@ -47,6 +47,7 @@ import {
   type AssetTrackViewState
 } from "./views/AssetTrackEditorView";
 import { AssetTrackError } from "./application/errors";
+import { DatabaseUpgradeModal } from "./ui/DatabaseUpgradeModal";
 import { t } from "./i18n";
 import {
   DRAFT_RECOVERY_EPHEMERAL_KEY,
@@ -85,7 +86,7 @@ function restoreSettings(
   Object.assign(target, snapshot);
 }
 
-export type DatabaseState = "unconfigured" | "initializing" | "ready" | "error";
+export type DatabaseState = "unconfigured" | "migration-required" | "initializing" | "ready" | "error";
 export type DirectorySwitchMode = "migrate" | "load";
 export type LegacyAttributeMigrationChoice = "preserve" | "clear";
 
@@ -112,8 +113,11 @@ export default class AssetTrackPlugin extends Plugin {
   private settingsWriteTail: Promise<void> = Promise.resolve();
   private databaseOperationTail: Promise<unknown> = Promise.resolve();
   private viewOpenDatabaseInitialization: Promise<void> | null = null;
+  private databaseUpgradeModal: DatabaseUpgradeModal | null = null;
+  private unloading = false;
 
   async onload(): Promise<void> {
+    this.unloading = false;
     const parsed = parseAssetTrackSettings(await this.loadData());
     this.settings = parsed.settings;
     this.settingsIssues = parsed.issues;
@@ -247,22 +251,28 @@ export default class AssetTrackPlugin extends Plugin {
       if (this.databaseState === "initializing") return;
       const dataDirectory = this.settings.dataDirectory;
       const inspectBeforeOpen = async (): Promise<void> => {
-        // View opening is automatic, so a legacy file must stop here and let
-        // the settings page show its read-only impact summary and choice.
-        // The app guard keeps lightweight test doubles on the old loader path.
+        // Inspect without opening a writable connection; upgrade only after the user's choice.
         if (this.app && typeof this.inspectDataDirectory === "function") {
           const inspection = await this.inspectDataDirectory(dataDirectory);
+          if (this.unloading || this.settings.dataDirectory !== dataDirectory || this.isDatabaseReady()) return;
           if (inspection.migration_required) {
-            this.databaseState = "error";
-            this.databaseError = new AssetTrackError({
-              code: "database.migration_confirmation_required",
-              status: 409,
-              params: { ...(inspection.migration_impact ?? {}) }
-            });
+            this.databaseState = "migration-required";
+            this.databaseError = null;
             await this.refreshViews();
+            const impact = inspection.migration_impact;
+            if (!impact || this.unloading || this.settings.dataDirectory !== dataDirectory || this.isDatabaseReady()) return;
+            const upgrade = await new Promise<boolean>((resolve) => {
+              this.databaseUpgradeModal = new DatabaseUpgradeModal({ app: this.app,
+                directory: dataDirectory, impact, onChoice: resolve });
+              this.databaseUpgradeModal.open();
+            });
+            this.databaseUpgradeModal = null;
+            if (!upgrade || this.unloading || this.settings.dataDirectory !== dataDirectory || this.isDatabaseReady()) return;
+            await this.loadDatabase(dataDirectory, "preserve");
             return;
           }
         }
+        if (this.unloading) return;
         await this.loadDatabase(dataDirectory);
       };
       this.viewOpenDatabaseInitialization = inspectBeforeOpen()
@@ -505,9 +515,11 @@ export default class AssetTrackPlugin extends Plugin {
     this.databaseState = "initializing";
     this.databaseError = null;
     await this.refreshViews();
+    if (this.unloading) return;
     let next: ServiceContext | null = null;
     try {
       const inspection = await this.inspectDataDirectory(dataDirectory);
+      if (this.unloading) return;
       if (!createIfMissing && !canLoadDatabase(inspection)) {
         throw inspection.exists || inspection.recovery_available
           ? new AssetTrackError({
@@ -519,7 +531,9 @@ export default class AssetTrackPlugin extends Plugin {
       }
       next = this.buildService(dataDirectory, migrationOptions);
       await next.api.meta();
+      if (this.unloading) { await next.api.close(); return; }
       await this.persistDataDirectorySettings(dataDirectory);
+      if (this.unloading) { await next.api.close(); return; }
       this.databaseManager = next.manager;
       this.api = next.api;
       this.databaseState = "ready";
@@ -652,6 +666,9 @@ export default class AssetTrackPlugin extends Plugin {
   }
 
   onunload(): void {
+    this.unloading = true;
+    this.databaseUpgradeModal?.close();
+    this.databaseUpgradeModal = null;
     this.draftRecoveries.clear();
     if (this.isDatabaseReady()) void this.api.close();
   }

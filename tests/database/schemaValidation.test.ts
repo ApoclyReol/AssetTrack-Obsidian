@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -106,8 +106,26 @@ function createSchema10Database(path: string): DatabaseSync {
   return db;
 }
 
+function downgradeToSchema12(db: DatabaseSync): void {
+  db.exec(`
+    DROP INDEX idx_auto_rules_match;
+    ALTER TABLE auto_rules DROP COLUMN rewrite_empty_mode;
+    ALTER TABLE auto_rules DROP COLUMN match_amount_min_key;
+    ALTER TABLE auto_rules DROP COLUMN match_amount_max_key;
+    ALTER TABLE auto_rules DROP COLUMN match_amount_max_exclusive;
+    ALTER TABLE auto_rules DROP COLUMN match_amount_min_exclusive;
+    ALTER TABLE auto_rules DROP COLUMN match_amount_max_minor;
+    ALTER TABLE auto_rules DROP COLUMN match_amount_min_minor;
+    ALTER TABLE auto_rules DROP COLUMN match_amount_key;
+    ALTER TABLE auto_rules DROP COLUMN match_amount_minor;
+    CREATE UNIQUE INDEX idx_auto_rules_match ON auto_rules(transaction_type,match_scope,match_counterparty_key,match_product_key);
+    PRAGMA user_version=12;
+  `);
+}
+
 function createSchema11Database(path: string): DatabaseSync {
   const db = createDatabase(path);
+  downgradeToSchema12(db);
   db.exec(`
     DROP TABLE transaction_tags;
     DROP TABLE category_attributes;
@@ -143,7 +161,7 @@ function insertLegacyRule(
 }
 
 describe("schema validation", () => {
-  it("accepts a complete schema 12 database", () => {
+  it("accepts a complete schema 13 database", () => {
     const path = databasePath();
     createDatabase(path).close();
     expect(DatabaseManager.inspect(path)).toMatchObject({
@@ -159,7 +177,7 @@ describe("schema validation", () => {
         foreign_key_violations: 0
       }
     });
-    expect(DatabaseManager.inspect(path).validation?.schema_version).toBe(12);
+    expect(DatabaseManager.inspect(path).validation?.schema_version).toBe(13);
   });
 
   it("marks a structurally valid schema 9 database for automatic migration without writing during inspection", () => {
@@ -410,7 +428,7 @@ describe("schema validation", () => {
     manager.close();
   });
 
-  it("migrates schema 10 through 12 and allows paid-on-behalf rules", () => {
+  it("migrates schema 10 through 13 and allows paid-on-behalf rules", () => {
     const path = databasePath();
     const db = createSchema10Database(path);
     const food = categoryKey("餐饮基础");
@@ -420,14 +438,14 @@ describe("schema validation", () => {
     const migrated = manager.open();
     expect(manager.validate(true).valid).toBe(true);
     expect((migrated.prepare("PRAGMA user_version").get() as { user_version: number }).user_version)
-      .toBe(12);
+      .toBe(13);
     expect(() => migrated.prepare(`
       INSERT INTO auto_rules
         (transaction_type,match_scope,counterparty,product,category_key,category)
       VALUES (?,?,?,?,?,?)
     `).run("代付", "product", "", "AA 回款", food, "餐饮基础")).not.toThrow();
     const backups = readdirSync(join(dirname(path), "backups"))
-      .filter((name) => name.startsWith("before-schema12-") && name.endsWith(".db"));
+      .filter((name) => name.startsWith("before-schema13-") && name.endsWith(".db"));
     expect(backups).toHaveLength(1);
     const protection = new DatabaseSync(join(dirname(path), "backups", backups[0]), {
       readOnly: true
@@ -438,7 +456,7 @@ describe("schema validation", () => {
     manager.close();
   });
 
-  it("migrates schema 9 through schema 12 and retains a validated protection backup", () => {
+  it("migrates schema 9 through schema 13 and retains a validated protection backup", () => {
     const path = databasePath();
     const db = createSchema9Database(path);
     insertLegacyRule(db, { product: "  Coffee   Beans " });
@@ -477,7 +495,7 @@ describe("schema validation", () => {
     const migrated = manager.open();
     expect(manager.validate(true).valid).toBe(true);
     expect((migrated.prepare("PRAGMA user_version").get() as { user_version: number }).user_version)
-      .toBe(12);
+      .toBe(13);
     expect(migrated.prepare(
       "SELECT description FROM category_definitions WHERE category_key=?"
     ).get(categoryKey("餐饮基础"))).toMatchObject({ description: "" });
@@ -548,7 +566,7 @@ describe("schema validation", () => {
       revision: 4
     }]);
     const backups = readdirSync(join(dirname(path), "backups"))
-      .filter((name) => name.startsWith("before-schema12-") && name.endsWith(".db"));
+      .filter((name) => name.startsWith("before-schema13-") && name.endsWith(".db"));
     expect(backups).toHaveLength(1);
     const protection = new DatabaseSync(join(dirname(path), "backups", backups[0]), {
       readOnly: true
@@ -645,5 +663,135 @@ describe("schema validation", () => {
     expect((unchanged.prepare("PRAGMA user_version").get() as { user_version: number }).user_version)
       .toBe(9);
     unchanged.close();
+  });
+});
+
+describe("schema 13 amount migration", () => {
+  it("migrates a real schema 12 with null amounts and preserves rule identities", () => {
+    const path = databasePath(); const db = createDatabase(path);
+    db.prepare("INSERT INTO auto_rules(transaction_type,match_scope,counterparty,product,category_key,category) VALUES ('支出','merchant','平台','',?,'订阅服务')").run(categoryKey("订阅服务"));
+    downgradeToSchema12(db);
+    db.close();
+    expect(DatabaseManager.inspect(path)).toMatchObject({ migration_required: true, valid: false });
+    const manager = new DatabaseManager(path); const migrated = manager.open();
+    expect(manager.validate(true).valid).toBe(true);
+    expect(manager.lastMigrationReport).toMatchObject({ from_version: 12, to_version: 13 });
+    expect(migrated.prepare("SELECT id,match_amount_minor,match_amount_key FROM auto_rules").get()).toEqual({ id: 1, match_amount_minor: null, match_amount_key: -1 });
+    expect(migrated.prepare("SELECT match_amount_min_minor,match_amount_max_minor,rewrite_empty_mode FROM auto_rules").get())
+      .toEqual({ match_amount_min_minor: null, match_amount_max_minor: null, rewrite_empty_mode: "preserve" });
+    expect(() => migrated.exec("UPDATE auto_rules SET match_amount_minor=-1")).toThrow();
+    expect(() => migrated.exec("UPDATE auto_rules SET match_amount_minor=1.5")).toThrow();
+    migrated.exec("UPDATE auto_rules SET match_amount_minor=0");
+    expect(migrated.prepare("SELECT match_amount_key FROM auto_rules").get()).toEqual({ match_amount_key: 0 });
+    expect(readdirSync(join(dirname(path), "backups")).some((name) => name.startsWith("before-schema13-"))).toBe(true);
+    manager.close();
+  });
+
+  it("rolls back an upgrade with broken references and retains the schema 12 protection backup", () => {
+    const path = databasePath(); const db = createDatabase(path);
+    downgradeToSchema12(db);
+    db.exec("PRAGMA foreign_keys=OFF");
+    db.prepare("INSERT INTO auto_rules(transaction_type,match_scope,product,category_key,category) VALUES ('支出','product','孤立规则','missing-category','缺失分类')").run();
+    const before = db.prepare("SELECT * FROM auto_rules").all();
+    db.close();
+
+    const manager = new DatabaseManager(path);
+    expect(() => manager.open()).toThrow("database.migration_validation_failed");
+    expect(manager.isOpen).toBe(false);
+    const snapshots = readdirSync(join(dirname(path), "backups"));
+    expect(snapshots).toHaveLength(1);
+    for (const copyPath of [path, join(dirname(path), "backups", snapshots[0])]) {
+      const copy = new DatabaseSync(copyPath, { readOnly: true });
+      expect(copy.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 12 });
+      expect(copy.prepare("SELECT * FROM auto_rules").all()).toEqual(before);
+      expect((copy.prepare("PRAGMA table_xinfo(auto_rules)").all() as Array<{ name: string }>).map((column) => column.name))
+        .not.toContain("match_amount_minor");
+      copy.close();
+    }
+    expect(existsSync(`${path}-wal`)).toBe(false);
+  });
+});
+
+describe("schema 14 range migration", () => {
+  it("recognizes full unpublished schema 15 and preserves all rule settings when normalizing to 13", () => {
+    const path = databasePath(); const db = createDatabase(path);
+    db.prepare("INSERT INTO auto_rules(transaction_type,match_scope,product,category_key,category,match_amount_min_minor,match_amount_max_minor,match_amount_min_exclusive,rewrite_product,rewrite_empty_mode) VALUES ('支出','product','会员',?,'订阅服务',200,5000,1,'月费','clear')").run(categoryKey("订阅服务"));
+    const before = db.prepare("SELECT * FROM auto_rules").all();
+    db.exec("PRAGMA user_version=15"); db.close();
+    const unchanged = readFileSync(path);
+    expect(DatabaseManager.inspect(path)).toMatchObject({ migration_required: true, validation: { schema_version: 15 } });
+    expect(readFileSync(path)).toEqual(unchanged);
+    const manager = new DatabaseManager(path); const normalized = manager.open();
+    expect(manager.validate(true)).toMatchObject({ valid: true, schema_version: 13 });
+    expect(manager.lastMigrationReport).toMatchObject({ from_version: 15, to_version: 13 });
+    expect(normalized.prepare("SELECT * FROM auto_rules").all()).toEqual(before);
+    manager.close();
+    const snapshots = readdirSync(join(dirname(path), "backups"));
+    expect(snapshots).toHaveLength(1);
+    expect(DatabaseManager.inspect(path)).toMatchObject({ valid: true, migration_required: false });
+    manager.open(); manager.close();
+    expect(readdirSync(join(dirname(path), "backups"))).toEqual(snapshots);
+  });
+  it("rejects incomplete current-schema layouts instead of treating them as an exact-only development database", () => {
+    const path = databasePath(); const db = createDatabase(path);
+    db.exec("DROP INDEX idx_auto_rules_match; ALTER TABLE auto_rules DROP COLUMN match_amount_min_key;"); db.close();
+    const before = readFileSync(path);
+    expect(DatabaseManager.inspect(path)).toMatchObject({ valid: false, migration_required: false });
+    const manager = new DatabaseManager(path);
+    expect(() => manager.open()).toThrow();
+    expect(readFileSync(path)).toEqual(before);
+    expect(existsSync(join(dirname(path), "backups"))).toBe(false);
+  });
+  it("normalizes unpublished schema 14 to final schema 13 with preserved rewrite behavior and a safety snapshot", () => {
+    const path = databasePath(); const db = createDatabase(path);
+    db.prepare("INSERT INTO auto_rules(transaction_type,match_scope,product,category_key,category,match_amount_min_minor,match_amount_max_minor) VALUES ('支出','product','会员',?,'订阅服务',200,5000)").run(categoryKey("订阅服务"));
+    db.exec("ALTER TABLE auto_rules DROP COLUMN rewrite_empty_mode; PRAGMA user_version=14;"); db.close();
+    expect(DatabaseManager.inspect(path)).toMatchObject({ valid: false, migration_required: true, validation: { schema_version: 14 } });
+    const unchanged = new DatabaseSync(path, { readOnly: true });
+    expect(unchanged.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 14 }); unchanged.close();
+    const manager = new DatabaseManager(path); const migrated = manager.open();
+    expect(manager.validate(true).valid).toBe(true);
+    expect(migrated.prepare("SELECT id,product,match_amount_min_minor,match_amount_max_minor,rewrite_empty_mode FROM auto_rules").get())
+      .toEqual({ id: 1, product: "会员", match_amount_min_minor: 200, match_amount_max_minor: 5000, rewrite_empty_mode: "preserve" });
+    expect(() => migrated.exec("UPDATE auto_rules SET rewrite_empty_mode='unknown'")).toThrow();
+    const snapshot = readdirSync(join(dirname(path), "backups")).find((name) => name.startsWith("before-schema13-"));
+    const protection = new DatabaseSync(join(dirname(path), "backups", snapshot!), { readOnly: true });
+    expect(protection.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 14 });
+    protection.close(); manager.close();
+  });
+  it("inspects a genuine schema 13 without writing, then preserves exact, zero and unrestricted rules", () => {
+    const path = databasePath();
+    const db = createDatabase(path);
+    const insert = db.prepare("INSERT INTO auto_rules(transaction_type,match_scope,counterparty,product,category_key,category,match_amount_minor) VALUES ('支出','merchant','平台','',?,'订阅服务',?)");
+    [null, 0, 1990].forEach((amount) => insert.run(categoryKey("订阅服务"), amount));
+    db.exec(`DROP INDEX idx_auto_rules_match;
+      ALTER TABLE auto_rules DROP COLUMN rewrite_empty_mode;
+    ALTER TABLE auto_rules DROP COLUMN match_amount_min_key;
+      ALTER TABLE auto_rules DROP COLUMN match_amount_max_key;
+      ALTER TABLE auto_rules DROP COLUMN match_amount_max_exclusive;
+      ALTER TABLE auto_rules DROP COLUMN match_amount_min_exclusive;
+      ALTER TABLE auto_rules DROP COLUMN match_amount_max_minor;
+      ALTER TABLE auto_rules DROP COLUMN match_amount_min_minor;
+      CREATE UNIQUE INDEX idx_auto_rules_match ON auto_rules(transaction_type,match_scope,match_counterparty_key,match_product_key,match_amount_key);
+      PRAGMA user_version=13;`);
+    db.close();
+    expect(DatabaseManager.inspect(path)).toMatchObject({ migration_required: true, valid: false, validation: { schema_version: 13 } });
+    const unchanged = new DatabaseSync(path, { readOnly: true });
+    expect(unchanged.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 13 });
+    unchanged.close();
+    const manager = new DatabaseManager(path);
+    const migrated = manager.open();
+    expect(manager.validate(true).valid).toBe(true);
+    expect(migrated.prepare("SELECT id,match_amount_minor,match_amount_min_minor,match_amount_max_minor,match_amount_min_key,match_amount_max_key FROM auto_rules ORDER BY id").all()).toEqual([
+      { id: 1, match_amount_minor: null, match_amount_min_minor: null, match_amount_max_minor: null, match_amount_min_key: 0, match_amount_max_key: -1 },
+      { id: 2, match_amount_minor: 0, match_amount_min_minor: null, match_amount_max_minor: null, match_amount_min_key: 0, match_amount_max_key: 0 },
+      { id: 3, match_amount_minor: 1990, match_amount_min_minor: null, match_amount_max_minor: null, match_amount_min_key: 1990, match_amount_max_key: 1990 }
+    ]);
+    const backupName = readdirSync(join(dirname(path), "backups")).find((name) => name.startsWith("before-schema13-"));
+    expect(backupName).toBeTruthy();
+    const protection = new DatabaseSync(join(dirname(path), "backups", backupName!), { readOnly: true });
+    expect(protection.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 13 });
+    expect(protection.prepare("SELECT COUNT(*) AS count FROM auto_rules").get()).toMatchObject({ count: 3 });
+    protection.close(); manager.close();
   });
 });

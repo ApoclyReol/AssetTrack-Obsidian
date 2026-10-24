@@ -3,9 +3,15 @@
 > 文档角色：开发与维护。本文服务发布、安装验证和发行门禁；用户安装请按 README 或
 > [用户指南](02-user-guide.md)操作。
 
-当前稳定版为 v2.0.0，版本 tag 和 GitHub Release 已创建，说明见
-[Release v2.0.0](logs/release-v2.0.0.md)。v1.9.1 的维护内容作为历史记录保留在
+当前发行版本为 v2.1.0，发布说明与验证记录见
+[Release v2.1.0](logs/release-v2.1.0.md)。v2.0.0 与 v1.9.1 的历史记录分别见
+[Release v2.0.0](logs/release-v2.0.0.md) 和
 [Release v1.9.1](logs/release-v1.9.1.md)。
+
+v2.1.0 以 v2.0.0 为基准一次汇总金额规则、实际流水合并与规则编辑更新。
+先前本地 2.1.0～2.4.0 迭代均未独立发布，已归并；说明及验收边界见
+[Release v2.1.0](logs/release-v2.1.0.md)。发布号不替代 schema/备份格式，本次使用 schema 13 / 格式 12。
+从 v2.0.0 更新后，进入插件并选择“备份并升级”，账本由 schema 12 一步升级到 13；选择“稍后”保持原文件不变。
 
 正式发布版本的 tag 必须使用不带 `v` 的版本号，并与 `package.json`、`manifest.json` 和
 `versions.json` 完全一致。发布前除标准命令外，应在中英文界面检查金额设置、
@@ -14,8 +20,8 @@
 批量预览与本地审计记录、通用规则、收入/代付转换、AI 分类预览和统一表格布局。
 
 当前版本要求 Obsidian `1.13.0` 或更高版本；发布声明必须要求用户先升级到当前
-最新的 `1.13.x` 桌面版，再安装或更新插件。当前发布文案见
-[Release v2.0.0](logs/release-v2.0.0.md)。
+最新的 `1.13.x` 桌面版，再安装或更新插件。发布文案见
+[Release v2.1.0](logs/release-v2.1.0.md)。
 
 ## 安装产物
 
@@ -28,8 +34,8 @@ GitHub Release 直接上传 `main.js`、`manifest.json` 和 `styles.css`。三�
 npm run typecheck
 npm run lint
 npm test
-npm run build
 npm run notices:update
+npm run build
 npm run release:check
 bash scripts/smoke_test_plugin.sh build
 ```
@@ -64,6 +70,7 @@ Release 的 `main.js`、`manifest.json` 和 `styles.css`。更新时保留已有
 
 - tag 与 manifest 版本完全一致，使用不带 `v` 前缀的当前版本号；
 - 推送版本 tag 后由 `.github/workflows/release.yml` 重新执行完整验证和生产构建；
+- `scripts/release-notes.mjs` 从 CHANGELOG 提取本版本的 English/中文说明；workflow 使用该文案创建或更新 Release，不自动拼接提交记录；
 - 只上传 `main.js`、`manifest.json` 和 `styles.css`，不上传插件 ZIP；
 - 对标准三文件生成 GitHub artifact attestations；
 - 仓库根目录保留 `versions.json`，声明各版本最低兼容 Obsidian 版本；
@@ -78,7 +85,7 @@ Release 的 `main.js`、`manifest.json` 和 `styles.css`。更新时保留已有
 月度保存与放弃、分析空状态、中文/英文、深色/浅色、窄窗口和键盘焦点；测试结果必须按协议格式
 记录，不得把自动化测试或源码检查替代为界面通过。
 
-- 新安装、schema 9→10→11→12 与各版本直接打开、迁移保护备份、属性保留/清除/取消选择、未配置门禁和根目录切换；
+- 新安装、schema 9→10→11→12→13 与各版本直接打开、迁移保护备份、属性保留/清除/取消选择、未配置门禁和根目录切换；
 - dirty 导航、多 ItemView、禁用/启用和 Obsidian 重启；
 - CSV/XLSX/XLS 映射、增量不去重、覆盖草稿、规则和账户；
 - 缺少日期、空状态、警告保存、无效导入统计；

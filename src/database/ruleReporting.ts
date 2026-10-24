@@ -1,5 +1,8 @@
+import { readRuleRewriteMode } from "../domain/ruleRewrites";
+import { readRuleAmountFields } from "../domain/ruleAmounts";
 import {
   findRuleConflicts,
+  matchesRuleAmount,
   normalizeProductKey,
   ruleMatchLevel,
   type RuleRow
@@ -14,6 +17,7 @@ function toRuleRow(row: Row): RuleRow & { id: number } {
   const matchScope = text(row.match_scope) as RuleRow["match_scope"];
   return {
     id: Number(row.id),
+    ...readRuleAmountFields(row),
     transaction_type: text(row.transaction_type),
     match_scope: matchScope,
     counterparty: matchScope === "product" ? "" : text(row.counterparty),
@@ -22,7 +26,8 @@ function toRuleRow(row: Row): RuleRow & { id: number } {
     category: text(row.category),
     category_active: row.category_active === undefined ? undefined : Boolean(row.category_active),
     rewrite_merchant: text(row.rewrite_merchant),
-    rewrite_product: text(row.rewrite_product)
+    rewrite_empty_mode: readRuleRewriteMode(row.rewrite_empty_mode),
+      rewrite_product: text(row.rewrite_product)
   };
 }
 
@@ -132,7 +137,7 @@ export function buildRuleReport(
     revision,
     rows: raw.map((row, index) => {
       const definition = definitions[index];
-      const summary = transactionSummary(transactionsForRule(transactionIndex, definition));
+      const summary = transactionSummary(transactionsForRule(transactionIndex, definition).filter((row) => matchesRuleAmount(definition, row.amount)));
       const id = Number(row.id);
       return {
         ...row,

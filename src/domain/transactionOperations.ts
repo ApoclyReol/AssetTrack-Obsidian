@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { RuleMatcher, type RuleRow } from "./rules";
+import { rewriteRuleFields } from "./ruleRewrites";
 import { scalarText } from "./text";
 import type {
   OperationPreview,
@@ -273,8 +274,7 @@ export function previewTransactionOperation(
       const next = resolution.status === "matched"
         ? {
             ...row,
-            counterparty: resolution.rewrite_merchant || row.counterparty || "",
-            product: resolution.rewrite_product || row.product,
+            ...rewriteRuleFields(resolution, row),
             category_key: resolution.category_key ?? null,
             category: resolution.category ?? ""
           }

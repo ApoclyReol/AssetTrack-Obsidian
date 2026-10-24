@@ -1155,6 +1155,7 @@ export class AssetTrackRepository {
         transactions,
         operationLogs
       );
+      const identityMap = new Map<string, number>();
       const nextRevision = this.monthWrites.saveMonth(
         db,
         month,
@@ -1163,10 +1164,11 @@ export class AssetTrackRepository {
         investmentAccounts,
         transactions,
         fixedAssets,
-        debts
+        debts,
+        identityMap
       );
       canonicalOperationLogs.forEach((entry) =>
-        this.operations.write(db, entry.preview, entry.selection)
+        this.operations.write(db, entry.preview, entry.selection, identityMap)
       );
       const workspace = this.getMonthFromDb(month, db);
       workspace.revision = nextRevision;
@@ -1190,9 +1192,10 @@ export class AssetTrackRepository {
       const canonicalOperationLogs = payload.section === "transactions"
         ? this.monthWrites.validateOperationLogs(db, month, payload.transactions, pendingOperationLogs)
         : [];
-      const nextRevision = this.monthWrites.saveMonthSection(db, month, payload);
+      const identityMap = new Map<string, number>();
+      const nextRevision = this.monthWrites.saveMonthSection(db, month, payload, identityMap);
       canonicalOperationLogs.forEach((entry) =>
-        this.operations.write(db, entry.preview, entry.selection)
+        this.operations.write(db, entry.preview, entry.selection, identityMap)
       );
       const workspace = this.getMonthFromDb(month, db);
       workspace.revision = nextRevision;

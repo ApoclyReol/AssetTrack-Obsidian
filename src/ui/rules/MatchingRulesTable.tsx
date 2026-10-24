@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CategoryDefinition
 } from "../../types/configuration";
@@ -9,6 +9,10 @@ import type {
 import type { ReadWindow } from "../../types/readWindows";
 import { businessLabel, t } from "../../i18n";
 import { inferRuleScopeFromConditions, ruleCategoryType } from "../../domain/rules";
+import type { App } from "obsidian";
+import { RuleRewriteEditor } from "../RuleRewriteEditor";
+import { ruleConflictMessages } from "./ruleConflictMessages";
+import { RuleAmountEditor } from "../RuleAmountEditor";
 import { ActionTableHeader } from "../TablePrimitives";
 import {
   clone,
@@ -34,6 +38,7 @@ import {
 } from "./ruleListModel";
 
 export interface MatchingRulesTableProps {
+  app?: App;
   rules: SavedRule[];
   categories: CategoryDefinition[];
   sort: SortState;
@@ -99,21 +104,8 @@ function groupLabel(rule: SavedRule, groupBy: RuleGroupBy): string {
   }
 }
 
-function sortOptionValue(sort: { key: string; direction: "asc" | "desc" } | null): string {
-  return `${sort?.key ?? DEFAULT_RULE_SORT.key}:${sort?.direction ?? DEFAULT_RULE_SORT.direction}`;
-}
-
-function isDefaultView(filters: RuleListFilters, groupBy: RuleGroupBy, sort: SortState): boolean {
-  return !filters.query.trim()
-    && !filters.transactionType
-    && !filters.status
-    && !filters.scope
-    && !filters.categoryKey
-    && groupBy === "none"
-    && sortOptionValue(sort) === sortOptionValue(DEFAULT_RULE_SORT);
-}
-
 export function MatchingRulesTable({
+  app,
   rules,
   categories,
   sort,
@@ -148,7 +140,10 @@ export function MatchingRulesTable({
   };
 
   const effectiveSort = sort ?? DEFAULT_RULE_SORT;
-  const ruleView = sortRows(rules, effectiveSort, ruleSortValue)
+  const conflicts = useMemo(() => ruleConflictMessages(rules), [rules]);
+  const conflictIndexes = new Set(conflicts.flatMap((conflict) => conflict.indexes));
+  const displayedRules = rules.map((rule, index) => conflictIndexes.has(index) ? { ...rule, rule_status: "冲突" as const } : rule);
+  const ruleView = sortRows(displayedRules, effectiveSort, ruleSortValue)
     .filter(({ row }) => matchesRule(row, filters));
   const groupedRuleView = (() => {
     const grouped = new Map<string, Array<{ row: SavedRule; originalIndex: number }>>();
@@ -161,21 +156,6 @@ export function MatchingRulesTable({
     return Array.from(grouped, ([key, rows]) => ({ key, rows }));
   })();
 
-  const sortOptions = [
-    ["occurrences:desc", t("流水数（多到少）", "Transactions (high to low)")],
-    ["occurrences:asc", t("流水数（少到多）", "Transactions (low to high)")],
-    ["last_used_date:desc", t("最近使用（新到旧）", "Latest used (newest first)")],
-    ["last_used_date:asc", t("最近使用（旧到新）", "Latest used (oldest first)")],
-    ["status:asc", t("状态（先看问题）", "Status (issues first)")],
-    ["category:asc", t("分类（A-Z）", "Category (A-Z)")],
-    ["match_scope:asc", t("作用域（先具体）", "Scope (most specific first)")],
-    ["transaction_type:asc", t("收支类型", "Transaction type")],
-    ["id:asc", t("编号", "ID")]
-  ] as const;
-  const activeSortValue = sortOptionValue(effectiveSort);
-  const activeSortOption = sortOptions.some(([value]) => value === activeSortValue)
-    ? activeSortValue
-    : "custom";
   const hasFilters = Boolean(
     filters.query.trim()
     || filters.transactionType
@@ -186,12 +166,6 @@ export function MatchingRulesTable({
 
   const updateFilter = <K extends keyof RuleListFilters>(key: K, value: RuleListFilters[K]) => {
     setFilters((current) => ({ ...current, [key]: value }));
-  };
-
-  const resetView = () => {
-    setFilters(EMPTY_RULE_LIST_FILTERS);
-    setGroupBy("none");
-    onSort({ ...DEFAULT_RULE_SORT });
   };
 
   const appendRule = () => {
@@ -206,8 +180,8 @@ export function MatchingRulesTable({
   const renderRuleRow = ({ row, originalIndex: index }: { row: SavedRule; originalIndex: number }) => {
     const rowLabel = row.id ? `#${row.id}` : t(`第 ${index + 1} 条新规则`, `New rule ${index + 1}`);
     const status = ruleListStatus(row);
-    return <tr data-asset-track-row-key={String(row.id ?? `new-rule-${index}`)} key={String(row.id ?? index)}>
-      <td className="asset-track-count-cell">{row.id ? `#${row.id}` : t("新规则", "New")}</td>
+    return <tr className={conflictIndexes.has(index) ? "asset-track-rule-conflict-row" : undefined} data-asset-track-row-key={String(row.id ?? `new-rule-${index}`)} key={String(row.id ?? index)}>
+      <td className="asset-track-count-cell">{row.id ? `#${row.id}` : t(`新规则 ${index + 1}`, `New rule ${index + 1}`)}</td>
       <td className="asset-track-rule-status-cell">
         <span className={`asset-track-rule-status is-${statusClass(status)}`}>{statusLabel(status)}</span>
         <small>{scopeLabel(ruleScope(row))}</small>
@@ -215,8 +189,8 @@ export function MatchingRulesTable({
       <td className="asset-track-type-cell"><select aria-label={t(`${rowLabel}收支类型`, `${rowLabel} transaction type`)} value={row.transaction_type} onChange={(event) => updateRule(index, (rule) => { rule.transaction_type = event.target.value as SavedRule["transaction_type"]; rule.category_key = ""; rule.category = ""; })}><option value="支出">{businessLabel("支出")}</option><option value="收入">{businessLabel("收入")}</option><option value="代付">{businessLabel("代付")}</option></select></td>
       <td><input aria-label={t(`${rowLabel}交易对手条件`, `${rowLabel} counterparty condition`)} value={row.counterparty ?? ""} onChange={(event) => updateRule(index, (rule) => { rule.counterparty = event.target.value; })} /></td>
       <td><input aria-label={t(`${rowLabel}商品条件`, `${rowLabel} item condition`)} value={row.product} onChange={(event) => updateRule(index, (rule) => { rule.product = event.target.value; })} /></td>
-      <td><input aria-label={t(`${rowLabel}重写交易对手`, `${rowLabel} rewrite counterparty`)} value={row.rewrite_merchant ?? ""} onChange={(event) => updateRule(index, (rule) => { rule.rewrite_merchant = event.target.value; })} /></td>
-      <td><input aria-label={t(`${rowLabel}重写商品`, `${rowLabel} rewrite item`)} value={row.rewrite_product ?? ""} onChange={(event) => updateRule(index, (rule) => { rule.rewrite_product = event.target.value; })} /></td>
+      <td><RuleAmountEditor app={app} value={row} label={t(`${rowLabel}金额条件`, `${rowLabel} amount condition`)} onChange={(value) => updateRule(index, (rule) => { Object.assign(rule, value); })} /></td>
+      <td><RuleRewriteEditor app={app} value={row} label={t(`${rowLabel}重写信息`, `${rowLabel} rewrites`)} onChange={(value) => updateRule(index, (rule) => { Object.assign(rule, value); })} /></td>
       <td className="asset-track-centered-cell"><select aria-label={t(`${rowLabel}分类`, `${rowLabel} category`)} value={row.category_key} onChange={(event) => updateRule(index, (rule) => { const category = categories.find((item) => item.category_key === event.target.value); rule.category_key = event.target.value; rule.category = category?.name ?? ""; })}><option value="">{t("请选择", "Select")}</option>{categories.filter((category) => category.transaction_type === ruleCategoryType(row.transaction_type)).map((category) => <option key={category.category_key} value={category.category_key} disabled={!category.is_active}>{category.name}{category.is_active ? "" : ` · ${t("停用", "Inactive")}`}</option>)}</select></td>
       <td className="asset-track-count-cell">{row.occurrences ?? "—"}</td><td className="asset-track-date-cell">{row.last_month ?? "—"}</td>
       <td className="asset-track-actions-cell"><button type="button" onClick={() => void (onRemove
@@ -226,7 +200,7 @@ export function MatchingRulesTable({
   };
 
   return <Section sectionRef={sectionRef}>
-    <div className="asset-track-rules-toolbar" role="region" aria-label={t("规则筛选、分组与排序", "Rule filters, grouping and sorting")}>
+    <div className="asset-track-rules-toolbar" role="region" aria-label={t("规则筛选与分组", "Rule filters and grouping")}>
       <div className="asset-track-rules-toolbar-heading">
         <strong>{t("规则浏览", "Browse rules")}</strong>
         <span className="asset-track-rules-toolbar-summary" role="status">
@@ -248,22 +222,6 @@ export function MatchingRulesTable({
             <option value="category">{t("分类", "Category")}</option>
           </select>
         </label>
-        <label>
-          {t("排序", "Sort")}
-          <select value={activeSortOption} onChange={(event) => {
-            const [key, direction] = event.target.value.split(":");
-            if (direction === "asc" || direction === "desc") onSort({ key, direction });
-          }}>
-            {activeSortOption === "custom" && <option value="custom">{t("按当前表头", "Current table column")}</option>}
-            {sortOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select>
-        </label>
-        <button type="button" className="asset-track-rules-sort-direction" aria-label={t(`切换排序方向（当前${effectiveSort.direction === "asc" ? "升序" : "降序"}）`, `Toggle sort direction (currently ${effectiveSort.direction === "asc" ? "ascending" : "descending"})`)} onClick={() => onSort({ key: effectiveSort.key, direction: effectiveSort.direction === "asc" ? "desc" : "asc" })}>
-          {effectiveSort.direction === "asc" ? t("升序 ↑", "Ascending ↑") : t("降序 ↓", "Descending ↓")}
-        </button>
-        <button type="button" disabled={isDefaultView(filters, groupBy, sort)} onClick={resetView}>{t("重置视图", "Reset view")}</button>
-      </div>
-      <div className="asset-track-filter-grid asset-track-rules-filter-grid asset-track-rules-advanced-filter-grid">
         <label>
           {t("收支", "Type")}
           <select value={filters.transactionType} onChange={(event) => updateFilter("transactionType", event.target.value as RuleListFilters["transactionType"])}>
@@ -300,14 +258,18 @@ export function MatchingRulesTable({
           </select>
         </label>
       </div>
+      {conflicts.length > 0 && <div className="asset-track-rule-conflicts" role="alert">
+        <strong>{t("以下规则有冲突，请修改后保存：", "Resolve these rule conflicts before saving:")}</strong>
+        <ul>{conflicts.map((conflict) => <li key={conflict.key}>{conflict.message}</li>)}</ul>
+      </div>}
       {hasFilters && <p className="asset-track-rules-filter-note" role="note">{t("筛选只改变当前浏览，不会修改规则。", "Filters only change this view; they do not modify rules.")}</p>}
     </div>
     {ruleView.length === 0 ? <EmptyState text={rules.length === 0 ? t("尚无已保存匹配规则。", "No saved matching rules yet.") : t("没有符合当前筛选条件的规则。", "No rules match the current filters.")} /> : <div ref={tableScrollRef} className="asset-track-table-scroll asset-track-responsive-scroll asset-track-rule-table-scroll">
       <table className="asset-track-rules-table"><caption>{t(
-        "匹配优先级：交易对手 + 商品 ＞ 商品 ＞ 交易对手",
-        "Match priority: counterparty + item > item > counterparty"
-      )}</caption><thead><tr><th scope="col" className="asset-track-count-column">{t("编号", "ID")}</th>{[
-        ["status", t("状态", "Status")], ["transaction_type", t("收支", "Type")], ["counterparty", t("交易对手条件", "Counterparty condition")], ["product", t("商品条件", "Item condition")], ["rewrite_merchant", t("重写交易对手", "Rewrite counterparty")], ["rewrite_product", t("重写商品", "Rewrite item")], ["category", t("分类", "Category")], ["occurrences", t("流水数", "Transactions")], ["last_month", t("最近月份", "Latest month")]
+        "匹配优先级：精确金额 ＞ 区间 ＞ 不限金额；同档交易对手 + 商品 ＞ 商品 ＞ 交易对手",
+        "Match priority: exact amount > range > unrestricted; then counterparty + item > item > counterparty"
+      )}</caption><thead><tr><th scope="col" className="asset-track-count-column"><SortButton field="id" label={t("编号", "ID")} sort={effectiveSort} onSort={onSort} /></th>{[
+        ["status", t("状态", "Status")], ["transaction_type", t("收支", "Type")], ["counterparty", t("交易对手条件", "Counterparty condition")], ["product", t("商品条件", "Item condition")], ["match_amount_minor", t("金额条件", "Amount condition")], ["rewrites", t("重写信息", "Rewrites")], ["category", t("分类", "Category")], ["occurrences", t("流水数", "Transactions")], ["last_month", t("最近月份", "Latest month")]
       ].map(([field, label]) => <th key={field} scope="col" className={field === "transaction_type" ? "asset-track-type-column" : field === "status" ? "asset-track-status-column" : field === "category" ? "asset-track-centered-column" : field === "occurrences" ? "asset-track-count-column" : field === "last_month" ? "asset-track-date-column" : undefined}><SortButton field={field} label={label} sort={effectiveSort} onSort={onSort} /></th>)}<ActionTableHeader /></tr></thead>
         <tbody>{groupedRuleView.map((group) => <Fragment key={group.key}>
           {groupBy !== "none" && <tr className="asset-track-rule-group-row"><th scope="rowgroup" colSpan={RULE_COLUMN_COUNT}><span>{groupLabel(group.rows[0].row, groupBy)}</span><small>{t(`${group.rows.length} 条规则`, `${group.rows.length} rules`)}</small></th></tr>}
@@ -321,7 +283,7 @@ export function MatchingRulesTable({
         <button type="button" disabled={pageState.kind === "pending"} onClick={() => void onReload()}>
           {t("放弃并重载", "Discard and reload")}
         </button>
-        <button type="button" className="mod-cta" disabled={!dirty || saveState.kind === "pending"} onClick={() => void onSave()}>
+        <button type="button" className="mod-cta" disabled={!dirty || conflicts.length > 0 || saveState.kind === "pending"} onClick={() => void onSave()}>
           {t("保存规则", "Save rules")}
         </button>
         {readWindow && <span className="asset-track-section-scope-note" role="note">

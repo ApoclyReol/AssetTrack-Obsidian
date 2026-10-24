@@ -8,8 +8,37 @@ export const SCHEMA9_VERSION = 9;
 export const SCHEMA10_VERSION = 10;
 export const SCHEMA11_VERSION = 11;
 export const PREVIOUS_SCHEMA_VERSION = SCHEMA9_VERSION;
-export const CURRENT_SCHEMA_VERSION = 12;
-export const BACKUP_FORMAT_VERSION = 9;
+export const SCHEMA12_VERSION = 12;
+export const CURRENT_SCHEMA_VERSION = 13;
+// Unpublished local builds used these numbers before the release was consolidated.
+const DEVELOPMENT_RANGE_SCHEMA_VERSION = 14;
+const DEVELOPMENT_REWRITE_SCHEMA_VERSION = 15;
+export const BACKUP_FORMAT_VERSION = 12;
+
+const REWRITE_MODE_COLUMN = "rewrite_empty_mode TEXT NOT NULL DEFAULT 'preserve' CHECK(rewrite_empty_mode IN ('preserve','clear'))";
+
+const RANGE_COLUMN_NAMES = [
+  "match_amount_min_minor", "match_amount_max_minor", "match_amount_min_exclusive",
+  "match_amount_max_exclusive", "match_amount_min_key", "match_amount_max_key"
+];
+const ALL_AMOUNT_COLUMN_NAMES = ["match_amount_minor", "match_amount_key", ...RANGE_COLUMN_NAMES];
+const POST_SCHEMA11_COLUMNS = [...ALL_AMOUNT_COLUMN_NAMES, "rewrite_empty_mode"];
+const AMOUNT_MIN_SQL = "CASE WHEN match_amount_minor IS NOT NULL THEN match_amount_minor ELSE COALESCE(match_amount_min_minor,0)+match_amount_min_exclusive END";
+const AMOUNT_MAX_SQL = "CASE WHEN match_amount_minor IS NOT NULL THEN match_amount_minor WHEN match_amount_max_minor IS NULL THEN -1 ELSE match_amount_max_minor-match_amount_max_exclusive END";
+const AMOUNT_RANGE_CHECK = `
+  (match_amount_minor IS NULL OR (match_amount_min_minor IS NULL AND match_amount_max_minor IS NULL AND match_amount_min_exclusive=0 AND match_amount_max_exclusive=0))
+  AND (match_amount_min_minor IS NOT NULL OR match_amount_min_exclusive=0)
+  AND (match_amount_max_minor IS NOT NULL OR match_amount_max_exclusive=0)
+  AND (${AMOUNT_MIN_SQL}) BETWEEN 0 AND 9007199254740991
+  AND (match_amount_max_minor IS NULL OR (${AMOUNT_MIN_SQL})<=(${AMOUNT_MAX_SQL}))`;
+const RANGE_COLUMNS_SQL = [
+  "match_amount_min_minor INTEGER CHECK(match_amount_min_minor IS NULL OR (typeof(match_amount_min_minor)='integer' AND match_amount_min_minor BETWEEN 0 AND 9007199254740991))",
+  "match_amount_max_minor INTEGER CHECK(match_amount_max_minor IS NULL OR (typeof(match_amount_max_minor)='integer' AND match_amount_max_minor BETWEEN 0 AND 9007199254740991))",
+  "match_amount_min_exclusive INTEGER NOT NULL DEFAULT 0 CHECK(match_amount_min_exclusive IN (0,1))",
+  `match_amount_max_exclusive INTEGER NOT NULL DEFAULT 0 CHECK(match_amount_max_exclusive IN (0,1)) CHECK(${AMOUNT_RANGE_CHECK})`,
+  `match_amount_min_key INTEGER GENERATED ALWAYS AS (${AMOUNT_MIN_SQL}) VIRTUAL`,
+  `match_amount_max_key INTEGER GENERATED ALWAYS AS (${AMOUNT_MAX_SQL}) VIRTUAL`
+];
 
 const NORMALIZE_MATCH_KEY_FUNCTION = "asset_track_normalize_match_key";
 
@@ -224,8 +253,12 @@ export const REQUIRED_COLUMNS: Record<
     "product",
     "match_counterparty_key",
     "match_product_key",
+    "match_amount_minor",
+    "match_amount_key",
+    ...RANGE_COLUMN_NAMES,
     "rewrite_merchant",
     "rewrite_product",
+    "rewrite_empty_mode",
     "category_key",
     "category"
   ],
@@ -318,7 +351,9 @@ export const REQUIRED_INDEX_DEFINITIONS: readonly RequiredIndexDefinition[] = [
       "transaction_type",
       "match_scope",
       "match_counterparty_key",
-      "match_product_key"
+      "match_product_key",
+      "match_amount_min_key",
+      "match_amount_max_key"
     ],
     unique: true
   },
@@ -335,7 +370,7 @@ export const REQUIRED_INDEX_DEFINITIONS: readonly RequiredIndexDefinition[] = [
 ] as const;
 
 export const REQUIRED_GENERATED_COLUMNS: Record<string, readonly string[]> = {
-  auto_rules: ["match_counterparty_key", "match_product_key"]
+  auto_rules: ["match_counterparty_key", "match_product_key", "match_amount_key", "match_amount_min_key", "match_amount_max_key"]
 };
 
 export interface RequiredForeignKey {
@@ -487,6 +522,15 @@ export const REQUIRED_CHECK_CONSTRAINTS: readonly RequiredCheckConstraint[] = [
     table: "auto_rules",
     expression: "CHECK(match_scope IN ('product','merchant','merchant_product'))"
   },
+  { table: "auto_rules", expression: "CHECK(rewrite_empty_mode IN ('preserve','clear'))" },
+  ...["match_amount_minor", "match_amount_min_minor", "match_amount_max_minor"].map((column) => ({
+    table: "auto_rules" as const,
+    expression: `CHECK(${column} IS NULL OR (typeof(${column})='integer' AND ${column} BETWEEN 0 AND 9007199254740991))`
+  })),
+  ...["match_amount_min_exclusive", "match_amount_max_exclusive"].map((column) => ({
+    table: "auto_rules" as const, expression: `CHECK(${column} IN (0,1))`
+  })),
+  { table: "auto_rules", expression: `CHECK(${AMOUNT_RANGE_CHECK})` },
   {
     table: "auto_rules",
     expression: "CHECK((match_scope='product' AND match_counterparty_key='' AND match_product_key<>'') OR (match_scope='merchant' AND match_counterparty_key<>'' AND match_product_key='') OR (match_scope='merchant_product' AND match_counterparty_key<>'' AND match_product_key<>''))"
@@ -548,7 +592,7 @@ function legacySchemaIssues(db: DatabaseSync): SchemaMigrationIssue[] {
   const missingColumns = Object.entries(legacyColumns).flatMap(([table, columns]) => {
     if (!tables.includes(table)) return [];
     const actual = tableColumns(db, table);
-    const missing = columns.filter((column) => !actual.includes(column));
+    const missing = columns.filter((column) => !POST_SCHEMA11_COLUMNS.includes(column) && !actual.includes(column));
     return missing.length ? [`${table}(${missing.join(",")})`] : [];
   });
   if (missingTables.length || missingColumns.length) {
@@ -581,7 +625,7 @@ function schema10Issues(db: DatabaseSync): SchemaMigrationIssue[] {
   const missingColumns = Object.entries(REQUIRED_COLUMNS).flatMap(([table, columns]) => {
     if (!tables.includes(table)) return [];
     const actual = tableColumns(db, table);
-    const missing = columns.filter((column) => !actual.includes(column));
+    const missing = columns.filter((column) => !POST_SCHEMA11_COLUMNS.includes(column) && !actual.includes(column));
     return missing.length ? [`${table}(${missing.join(",")})`] : [];
   });
   if (missingTables.length || missingColumns.length) {
@@ -607,7 +651,7 @@ function schema11Issues(db: DatabaseSync): SchemaMigrationIssue[] {
   const missingColumns = PRE_SCHEMA12_TABLES.flatMap((table) => {
     const actual = tableColumns(db, table);
     const required = REQUIRED_COLUMNS[table];
-    const missing = required.filter((column) => !actual.includes(column));
+    const missing = required.filter((column) => !POST_SCHEMA11_COLUMNS.includes(column) && !actual.includes(column));
     return missing.length ? [`${table}(${missing.join(",")})`] : [];
   });
   if (missingTables.length || missingColumns.length) {
@@ -627,8 +671,24 @@ export function canMigrateSchema11(db: DatabaseSync): boolean {
   return version === SCHEMA11_VERSION && schema11Issues(db).length === 0;
 }
 
+function hasPreviousColumns(db: DatabaseSync, excluded: readonly string[]): boolean {
+  const tables = new Set(tableNames(db));
+  return REQUIRED_TABLES.every((table) => tables.has(table)
+    && REQUIRED_COLUMNS[table].filter((column) => !excluded.includes(column)).every((column) => tableColumns(db, table).includes(column)));
+}
+
+function hasPreviousRuleLayout(db: DatabaseSync, excluded: readonly string[]): boolean {
+  const actual = tableColumns(db, "auto_rules");
+  return excluded.every((column) => !actual.includes(column)) && hasPreviousColumns(db, excluded);
+}
+
 export function canMigrateSchema(db: DatabaseSync): boolean {
-  return canMigrateSchema9(db) || canMigrateSchema10(db) || canMigrateSchema11(db);
+  const version = Number((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version);
+  return canMigrateSchema9(db) || canMigrateSchema10(db) || canMigrateSchema11(db)
+    || (version === SCHEMA12_VERSION && hasPreviousRuleLayout(db, POST_SCHEMA11_COLUMNS))
+    || (version === CURRENT_SCHEMA_VERSION && hasPreviousRuleLayout(db, [...RANGE_COLUMN_NAMES, "rewrite_empty_mode"]))
+    || (version === DEVELOPMENT_RANGE_SCHEMA_VERSION && hasPreviousRuleLayout(db, ["rewrite_empty_mode"]))
+    || (version === DEVELOPMENT_REWRITE_SCHEMA_VERSION && hasPreviousColumns(db, []));
 }
 
 interface LegacyRuleRow {
@@ -1212,7 +1272,7 @@ function seedTaxonomy(db: DatabaseSync, preserveLegacyAttributes = true): void {
 function migrateSchema11To12InTransaction(db: DatabaseSync, preserveLegacyAttributes = true): SchemaMigrationReport {
   const report: SchemaMigrationReport = {
     from_version: SCHEMA11_VERSION,
-    to_version: CURRENT_SCHEMA_VERSION,
+    to_version: SCHEMA12_VERSION,
     category_count: Number((db.prepare("SELECT COUNT(*) AS count FROM category_definitions").get() as { count: number }).count),
     rule_count: Number((db.prepare("SELECT COUNT(*) AS count FROM auto_rules").get() as { count: number }).count),
     preserved_row_counts: migrationRowCounts(db),
@@ -1222,7 +1282,7 @@ function migrateSchema11To12InTransaction(db: DatabaseSync, preserveLegacyAttrib
   if (version !== SCHEMA11_VERSION) {
     report.issues.push({
       code: "legacy_schema_invalid",
-      message: `只支持从 schema ${SCHEMA11_VERSION} 迁移到 schema ${CURRENT_SCHEMA_VERSION}，当前版本为 ${version}`,
+      message: `只支持从 schema ${SCHEMA11_VERSION} 迁移到 schema ${SCHEMA12_VERSION}，当前版本为 ${version}`,
       rule_ids: []
     });
     throw new SchemaMigrationError(report);
@@ -1234,7 +1294,7 @@ function migrateSchema11To12InTransaction(db: DatabaseSync, preserveLegacyAttrib
   }
   createTaxonomyTables(db);
   seedTaxonomy(db, preserveLegacyAttributes);
-  db.exec(`PRAGMA user_version=${CURRENT_SCHEMA_VERSION}`);
+  db.exec(`PRAGMA user_version=${SCHEMA12_VERSION}`);
   const migratedRowCounts = migrationRowCounts(db);
   const rowCountMismatch = Object.entries(report.preserved_row_counts).find(
     ([table, count]) => migratedRowCounts[table] !== count
@@ -1264,13 +1324,13 @@ export function migrateSchema11To12(
   if (version !== SCHEMA11_VERSION) {
     throw new SchemaMigrationError({
       from_version: SCHEMA11_VERSION,
-      to_version: CURRENT_SCHEMA_VERSION,
+      to_version: SCHEMA12_VERSION,
       category_count: 0,
       rule_count: 0,
       preserved_row_counts: {},
       issues: [{
         code: "legacy_schema_invalid",
-        message: `只支持从 schema ${SCHEMA11_VERSION} 迁移到 schema ${CURRENT_SCHEMA_VERSION}，当前版本为 ${version}`,
+        message: `只支持从 schema ${SCHEMA11_VERSION} 迁移到 schema ${SCHEMA12_VERSION}，当前版本为 ${version}`,
         rule_ids: []
       }]
     });
@@ -1455,6 +1515,47 @@ function combineMigrationReports(
   };
 }
 
+/** One public upgrade, also recognizing the exact/range/full unpublished layouts. */
+function migrateRulesToSchema13InTransaction(db: DatabaseSync, fromVersion: number): SchemaMigrationReport {
+  if (!canMigrateSchema(db)) {
+    throw new SchemaMigrationError({ from_version: fromVersion, to_version: CURRENT_SCHEMA_VERSION,
+      category_count: 0, rule_count: 0, preserved_row_counts: {},
+      issues: [{ code: "legacy_schema_invalid", message: `不支持从 schema ${fromVersion} 升级此数据库结构`, rule_ids: [] }] });
+  }
+  const counts = migrationRowCounts(db);
+  const columns = new Set(tableColumns(db, "auto_rules"));
+  if (!columns.has("match_amount_minor")) {
+    db.exec(`ALTER TABLE auto_rules ADD COLUMN match_amount_minor INTEGER
+      CHECK(match_amount_minor IS NULL OR (typeof(match_amount_minor)='integer' AND match_amount_minor BETWEEN 0 AND 9007199254740991));
+      ALTER TABLE auto_rules ADD COLUMN match_amount_key INTEGER
+      GENERATED ALWAYS AS (COALESCE(match_amount_minor,-1)) VIRTUAL;`);
+  }
+  if (!columns.has("match_amount_min_minor")) {
+    for (const definition of RANGE_COLUMNS_SQL) db.exec(`ALTER TABLE auto_rules ADD COLUMN ${definition}`);
+  }
+  if (!columns.has("rewrite_empty_mode")) db.exec(`ALTER TABLE auto_rules ADD COLUMN ${REWRITE_MODE_COLUMN}`);
+  db.exec(`DROP INDEX idx_auto_rules_match;
+    CREATE UNIQUE INDEX idx_auto_rules_match ON auto_rules
+      (transaction_type,match_scope,match_counterparty_key,match_product_key,match_amount_min_key,match_amount_max_key);
+    PRAGMA user_version=${CURRENT_SCHEMA_VERSION};`);
+  const migratedCounts = migrationRowCounts(db);
+  const rowCountMismatch = Object.entries(counts).find(([table, count]) => migratedCounts[table] !== count);
+  const foreignKeyViolations = db.prepare("PRAGMA foreign_key_check").all().length;
+  const integrity = String(
+    (db.prepare("PRAGMA integrity_check").get() as { integrity_check: string }).integrity_check
+  );
+  if (rowCountMismatch || foreignKeyViolations !== 0 || integrity !== "ok") {
+    throw new AssetTrackError({
+      code: "database.migration_validation_failed",
+      status: 422,
+      params: { rowCountMismatch: rowCountMismatch?.[0] ?? "", foreignKeyViolations, integrity }
+    });
+  }
+  return { from_version: fromVersion, to_version: CURRENT_SCHEMA_VERSION,
+    category_count: counts.category_definitions, rule_count: counts.auto_rules,
+    preserved_row_counts: counts, issues: [] };
+}
+
 export function migrateSchemaToCurrent(
   db: DatabaseSync,
   options: { preserveLegacyAttributes?: boolean } = {}
@@ -1463,7 +1564,7 @@ export function migrateSchemaToCurrent(
   const initialVersion = Number(
     (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version
   );
-  if (initialVersion === CURRENT_SCHEMA_VERSION) {
+  if (initialVersion === CURRENT_SCHEMA_VERSION && !canMigrateSchema(db)) {
     throw new AssetTrackError({
       code: "database.migration_not_required",
       status: 409,
@@ -1474,7 +1575,8 @@ export function migrateSchemaToCurrent(
   try {
     const reports: SchemaMigrationReport[] = [];
     let version = initialVersion;
-    while (version !== CURRENT_SCHEMA_VERSION) {
+    let complete = false;
+    while (!complete) {
       const previousVersion = version;
       switch (version) {
         case SCHEMA9_VERSION:
@@ -1482,6 +1584,13 @@ export function migrateSchemaToCurrent(
           break;
         case SCHEMA10_VERSION:
           reports.push(migrateSchema10To11InTransaction(db));
+          break;
+        case SCHEMA12_VERSION:
+        case CURRENT_SCHEMA_VERSION:
+        case DEVELOPMENT_RANGE_SCHEMA_VERSION:
+        case DEVELOPMENT_REWRITE_SCHEMA_VERSION:
+          reports.push(migrateRulesToSchema13InTransaction(db, version));
+          complete = true;
           break;
         case SCHEMA11_VERSION:
           reports.push(migrateSchema11To12InTransaction(db, options.preserveLegacyAttributes ?? true));
@@ -1505,7 +1614,7 @@ export function migrateSchemaToCurrent(
       version = Number(
         (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version
       );
-      if (version === previousVersion) {
+      if (!complete && version === previousVersion) {
         throw new AssetTrackError({
           code: "database.migration_version_stalled",
           status: 422,
@@ -1636,6 +1745,11 @@ export function createSchema(db: DatabaseSync): void {
           ELSE ''
         END
       ) STORED,
+      match_amount_minor INTEGER CHECK(match_amount_minor IS NULL OR
+        (typeof(match_amount_minor)='integer' AND match_amount_minor BETWEEN 0 AND 9007199254740991)),
+      match_amount_key INTEGER GENERATED ALWAYS AS (COALESCE(match_amount_minor,-1)) VIRTUAL,
+      ${RANGE_COLUMNS_SQL.join(",\n      ")},
+      ${REWRITE_MODE_COLUMN},
       rewrite_merchant TEXT NOT NULL DEFAULT '',
       rewrite_product TEXT NOT NULL DEFAULT '',
       category_key TEXT NOT NULL,
@@ -1666,7 +1780,7 @@ export function createSchema(db: DatabaseSync): void {
     CREATE INDEX idx_debt_start ON debt_manager(start_date);
     CREATE INDEX idx_debt_paid ON debt_manager(is_paid);
     CREATE UNIQUE INDEX idx_auto_rules_match
-      ON auto_rules(transaction_type, match_scope, match_counterparty_key, match_product_key);
+      ON auto_rules(transaction_type, match_scope, match_counterparty_key, match_product_key, match_amount_min_key, match_amount_max_key);
     CREATE INDEX idx_operation_logs_created ON operation_logs(created_at, id);
   `);
   createTaxonomyTables(db);

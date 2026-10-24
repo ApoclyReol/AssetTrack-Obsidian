@@ -485,7 +485,14 @@ export class AssetTrackSettingTab extends PluginSettingTab {
     choice: "preserve" | "clear"
   ): Promise<boolean> {
     const inspection = await this.plugin.inspectDataDirectory(directory);
-    if (inspection.migration_required) {
+    if (inspection.migration_required && (inspection.migration_impact?.from_schema ?? 0) >= 12) {
+      const confirmed = await confirmAction(this.app,
+        t("升级规则数据结构？", "Upgrade the rule schema?"),
+        t("本次升级规则，支持金额区间和明确的重写留空行为，旧规则默认保留原值；已有流水、规则、分类属性和标签保持不变。确认后先创建保护备份，再执行升级；取消不修改原文件。", "This adds amount ranges and explicit blank-rewrite behavior. Existing rules keep original values; transactions, rules, attributes and tags are preserved. A protection backup is created before upgrading. Cancel leaves the original unchanged."),
+        t("备份并升级", "Back up and upgrade"));
+      if (!confirmed) return false;
+      choice = "preserve";
+    } else if (inspection.migration_required) {
       const impact = inspection.migration_impact;
       const details = impact
         ? t(
@@ -596,6 +603,9 @@ export class AssetTrackSettingTab extends PluginSettingTab {
       );
       if (result.migration_required) {
         const impact = result.migration_impact;
+        if ((impact?.from_schema ?? 0) >= 12) return t(
+          "发现待升级数据库；载入时将确认升级规则结构并创建保护备份，已有分类属性和标签保持不变。",
+          "An older database was found. Loading asks to upgrade rule definitions and create a protection backup; existing attributes and tags are preserved.");
         const summary = impact
           ? t(
               `schema ${impact.from_schema}：${impact.category_count} 个分类、${impact.transaction_count} 条流水；旧属性 ${impact.legacy_necessity_count + impact.legacy_pattern_count + impact.legacy_big_ticket_count} 项。`,
