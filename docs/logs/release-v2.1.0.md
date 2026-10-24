@@ -1,6 +1,6 @@
 # v2.1.0 金额规则与流水合并
 
-相对 v2.0.0 的更新。维护者已确认推送和发布，正式资产由 `2.1.0` tag 的发行流程生成。
+相对 v2.0.0 的更新。状态：已于 2026-10-24 12:54（北京时间）正式发布，正式资产由 `2.1.0` tag 的发行流程生成。
 
 发行入口：[GitHub Release 2.1.0](https://github.com/ApoclyReol/AssetTrack-Obsidian/releases/tag/2.1.0)。
 
@@ -53,3 +53,15 @@ Minimum Obsidian version: 1.13.0. Use the latest 1.13.x desktop version before u
 维护者于 2026-10-24 确认“推送和发布新版本”。同一工作树重新通过 45 个测试文件 / 400 项测试、typecheck、lint、生产构建、release:check、三文件与 SQLite 冒烟、文档链接及差异检查。发布说明使用已确认的 English/中文正文，发布 tag 为 `2.1.0`，不带 `v` 前缀。
 
 GitHub Actions 在发布前再次检查与构建，并为 `main.js`、`manifest.json`、`styles.css` 分别生成 attestation。正式资产与说明以该 Release 及对应 Actions 记录为准；本地安装或自动化结果不替代真实宿主验收。
+
+### 正式发布结果
+
+- 发布提交：`b21455e49ddd223f45166227a7b68218ca2af0a1`；版本 tag 为 `2.1.0`，主分支及 tag 已推送。
+- [Release 流程](https://github.com/ApoclyReol/AssetTrack-Obsidian/actions/runs/40064102993)成功；[tag CI](https://github.com/ApoclyReol/AssetTrack-Obsidian/actions/runs/40064102970)与[主分支 CI](https://github.com/ApoclyReol/AssetTrack-Obsidian/actions/runs/40064103095)的 Ubuntu、macOS、Windows 检查全部通过。
+- 公开 Release 为正式版，说明与维护者确认的 English/中文正文一致，仅含三个标准插件文件。已实际下载并与本地构建逐个比对；全部哈希一致，且来源证明验证通过，绑定本仓库发布流程、上述提交及 `refs/tags/2.1.0`。
+
+| 文件 | SHA-256 |
+| --- | --- |
+| `main.js` | `1b127f302baa860d41300dded2ec1aaa6bdb56cb389aadd508f021695e353ba8` |
+| `manifest.json` | `adaa2b19afc417db6ec2f9f38be42f9ad09e88c296d4119e349df6f4f5fbdc08` |
+| `styles.css` | `0ed31a86acbdff664878c04a772c5feaecd0692140a7d9e9639d9452a17ee2a7` |
