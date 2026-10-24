@@ -1,6 +1,6 @@
-# v2.2.0 发布准备与验收记录
+# v2.2.0 发布与验收记录
 
-日期：2026-10-24。基于 v2.1.0；schema 13 / 备份格式 12 不变。用户已批准发布，云端结果核验后补记。
+日期：2026-10-24。基于 v2.1.0；schema 13 / 备份格式 12 不变。已正式发布，云端与产物核验记录见文末。
 
 ## 授权与范围
 
@@ -27,7 +27,7 @@
 - 标准三文件和 `node:sqlite` 冒烟通过；构建目录仅含三个规定文件。
 - 已将 v2.2.0 三文件写入用户授权的个人库；再次比对安装文件与构建 SHA-256 均相同，原插件设置哈希未变。
 - 安装前留存旧三文件，首次备份保留正式 v2.1.0，后续修复另存一份，不覆盖首次备份。
-- 本地验证阶段没有创建 tag 或发布；现已获得发布授权，云端结果见末尾记录。
+- 已创建并推送数字 tag `2.2.0`，正式发布结果见文末。
 
 | 文件 | 最新构建与安装的 SHA-256 |
 | --- | --- |
@@ -69,7 +69,7 @@
 
 - 最终安装三文件与上述构建哈希完全一致，原插件设置哈希未变。
 - 已通过应用清单确认 Obsidian `running: false`；测试结束后应用保持关闭。
-- 原型本地预览服务已停止；本轮不再启动 Obsidian，执行已获授权的 Git 与发布流程。
+- 原型本地预览服务已停止；发布过程没有再次启动 Obsidian。
 
 ## 发布基准与门禁
 
@@ -77,4 +77,19 @@
 - package、lockfile、manifest、versions 已统一为 2.2.0，schema 13 / 备份格式 12 不变；未改最低 Obsidian 版本 1.13.0。
 - 发布说明从 CHANGELOG 生成，English 和中文独立分节，只说明用户可见变化；已获用户确认。
 - 发布门禁：418 项测试、独立性能检查、类型、lint、通知生成、生产构建、release:check、标准三文件与 node:sqlite 冒烟、diff 检查通过。
-- 发布授权：用户已确认文案，允许测试通过后提交、推送、创建数字 tag `2.2.0` 并公开 Release。云端 CI、三文件哈希及来源证明核验后记录实际结果。
+- 发布授权：用户已确认文案，允许测试通过后提交、推送、创建数字 tag `2.2.0` 并公开 Release。云端 CI、三文件哈希及来源证明均已核验，实际结果见下节。
+
+## 云端发布核验
+
+发布时间：2026-10-24 20:49:31（Asia/Shanghai）。
+
+- 发布源码提交：`3ba4d82e5b37ba49a86ca8a639b2137dbbbe2d62`；数字 tag `2.2.0` 指向该提交。
+- [main 三平台 CI](https://github.com/ApoclyReol/AssetTrack-Obsidian/actions/runs/40095205259)：Linux、macOS、Windows 全部通过。
+- [tag 三平台 CI](https://github.com/ApoclyReol/AssetTrack-Obsidian/actions/runs/40095443643)：全部通过。
+- [Release 工作流](https://github.com/ApoclyReol/AssetTrack-Obsidian/actions/runs/40095443584)：构建、测试、标准三文件校验、来源证明生成与公开发布成功。
+- [正式 Release 2.2.0](https://github.com/ApoclyReol/AssetTrack-Obsidian/releases/tag/2.2.0)：非 draft、非 prerelease；附件恰好为 `main.js`、`manifest.json`、`styles.css`。
+- 正式下载三文件 SHA-256 与上表、本地最终构建及个人库安装相同；远端资产摘要也一致。
+- 发布正文与用户审阅通过、从 CHANGELOG 提取的 English／中文说明逐字一致。
+- 三文件均通过 `gh attestation verify` 独立签名核验；强制验证仓库、`.github/workflows/release.yml`、`refs/tags/2.2.0`、源码提交 `3ba4d82e5b37ba49a86ca8a639b2137dbbbe2d62`，并要求 GitHub hosted runner。证书中的源码摘要、tag、工作流身份及 Release run 均匹配。
+
+发布后仅补充文档核验记录，不移动 tag，不改运行产物。
