@@ -1,17 +1,14 @@
+import { AssetTrackError } from "../application/errors";
+import { ruleConflictMessages } from "./rules/ruleConflictMessages";
 import {
   forwardRef,
-  useEffect,
   useImperativeHandle,
   useRef,
-  useState,
-  type KeyboardEvent
+  useState
 } from "react";
 import { Notice, type App } from "obsidian";
 import type {
   CsvColumnMapping
-} from "../types/csv";
-import type {
-  CsvRawRow
 } from "../types/csv";
 import type {
   FixedAsset,
@@ -55,6 +52,7 @@ import { MonthEditorTransactionsSection } from "./month/MonthEditorTransactionsS
 import { MonthEditorSupplementalSections } from "./month/MonthEditorSupplementalSections";
 import { monthWorkflowSummary } from "./monthWorkflow";
 import { RuleCreationModal } from "./RuleCreationModal";
+import { TransactionToolbarIcon } from "./TransactionToolbarIcon";
 import { transactionKey as operationTransactionKey } from "../domain/transactionOperations";
 import { resolveRule, ruleCategoryType } from "../domain/rules";
 import type { EditorSession } from "./editorSession";
@@ -74,117 +72,6 @@ export interface MonthEditorHandle extends EditorSession {
 }
 
 export { MONTH_SECTIONS, type MonthMetrics } from "./monthEditorModel";
-
-interface SourceRowPreview {
-  filename: string;
-  headers: string[];
-  row: CsvRawRow;
-}
-
-const SOURCE_ROW_FOCUSABLE_SELECTOR = [
-  "button:not([disabled])",
-  "input:not([disabled])",
-  "select:not([disabled])",
-  "textarea:not([disabled])",
-  "[tabindex]:not([tabindex='-1'])"
-].join(",");
-
-function CsvSourceRowModal({
-  preview,
-  onClose
-}: {
-  preview: SourceRowPreview;
-  onClose: () => void;
-}) {
-  const dialogRef = useRef<HTMLElement | null>(null);
-  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
-
-  useEffect(() => {
-    closeButtonRef.current?.focus();
-  }, []);
-
-  const handleKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
-      return;
-    }
-    if (event.key !== "Tab") return;
-    const focusable = Array.from(
-      dialogRef.current?.querySelectorAll<HTMLElement>(SOURCE_ROW_FOCUSABLE_SELECTOR) ?? []
-    );
-    if (!focusable.length) {
-      event.preventDefault();
-      return;
-    }
-    const first = focusable[0];
-    const last = focusable.at(-1);
-    const active = dialogRef.current?.ownerDocument.activeElement;
-    if (event.shiftKey && active === first) {
-      event.preventDefault();
-      last?.focus();
-    } else if (!event.shiftKey && active === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  };
-
-  return (
-    <div
-      className="asset-track-modal-backdrop"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <section
-        ref={dialogRef}
-        className="asset-track-modal asset-track-source-row-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="asset-track-source-row-title"
-        aria-describedby="asset-track-source-row-description"
-        onKeyDown={handleKeyDown}
-      >
-        <header>
-          <div>
-            <h2 id="asset-track-source-row-title">{t("原始账单行", "Raw statement row")}</h2>
-            <span className="asset-track-modal-subtitle">
-              {preview.filename} · {t(`原始第 ${preview.row.row} 行`, `Source row ${preview.row.row}`)}
-            </span>
-          </div>
-          <button ref={closeButtonRef} type="button" onClick={onClose}>
-            {t("关闭", "Close")}
-          </button>
-        </header>
-        <p id="asset-track-source-row-description" className="asset-track-import-intro">
-          {t("这是导入时保留的原始单元格内容，用于核对流水映射。它不会修改当前草稿。", "These are the source cells retained during import for checking the mapping. They do not modify the current draft.")}
-        </p>
-        <div className="asset-track-table-scroll asset-track-source-row-table">
-          <table>
-            <thead>
-              <tr>
-                {preview.headers.map((header) => <th key={header} scope="col">{header}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                {preview.headers.map((header, index) => (
-                  <td key={header}>
-                    {preview.row.values[index]?.trim() || t("（空）", "(empty)")}
-                  </td>
-                ))}
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <footer>
-          <button type="button" onClick={onClose}>{t("关闭", "Close")}</button>
-        </footer>
-      </section>
-    </div>
-  );
-}
 
 export const MonthEditor = forwardRef<MonthEditorHandle, {
   app?: App;
@@ -317,7 +204,6 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
   const [expandedGroup, setExpandedGroup] = useState("");
   const [transactionViewMode, setTransactionViewMode] = useState<"detail" | "product" | "counterparty">("detail");
   const [lastSavedAt, setLastSavedAt] = useState<string>();
-  const [sourceRowPreview, setSourceRowPreview] = useState<SourceRowPreview | null>(null);
   const actionRef = useRef<MonthEditorHandle>({
     requestDelete: () => undefined,
     openImport: () => undefined,
@@ -402,7 +288,6 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
       if (rowIndex !== index) return row;
       return updatedTransactionRow(row, field, value);
     });
-    operations.protectTransaction(index);
     operations.invalidatePendingOperationLogs();
     mark({ ...draft, transactions: rows }, "transactions");
   };
@@ -418,7 +303,6 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
         ? updatedTransactionRow(row, field, value)
         : row
     );
-    targetIndexes.forEach((index) => operations.protectTransaction(index));
     operations.invalidatePendingOperationLogs();
     mark({ ...draft, transactions: rows }, "transactions");
   };
@@ -459,7 +343,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
 
   const deleteTransaction = (index: number) => {
     const transactions = draft.transactions.filter((_, item) => item !== index);
-    operations.recordUndo(transactions);
+    operations.recordUndo(transactions, t("删除流水", "Delete transaction"));
     operations.invalidatePendingOperationLogs();
     mark({ ...draft, transactions }, "transactions");
   };
@@ -529,6 +413,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
       app,
       suggestedAmount,
       categories,
+      rules,
       initial: {
         transaction_type: ruleTransactionType,
         match_scope: matchScope,
@@ -539,11 +424,19 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
       },
       onConfirm: async (rule) => {
         const shell = await api.ruleWorkspaceShell();
-        const nextRules = [...shell.rules, rule].map((item) => ({ ...item }));
+        if ((rulesRevision !== null && shell.rules_revision !== rulesRevision)
+          || (rule.id != null && !shell.rules.some((item) => item.id === rule.id))) {
+          throw new AssetTrackError({ code: "revision_conflict", status: 409 });
+        }
+        const nextRules = rule.id
+          ? shell.rules.map((item) => item.id === rule.id ? rule : item)
+          : [...shell.rules, rule];
+        const conflicts = ruleConflictMessages(nextRules);
+        if (conflicts.length) throw new Error(conflicts.map((item) => item.message).join("\n"));
         const selectedKey = operationTransactionKey(row, rowIndex);
-        const saved = await (api as MonthEditorPort & RuleWritePort).saveRules(shell.rules_revision, nextRules, {
+        const saved = await (api as MonthEditorPort & RuleWritePort).saveRules(shell.rules_revision, nextRules.map((item) => ({ ...item })), {
           source_page: "记录/流水",
-          operation_type: "create-rule",
+          operation_type: rule.id ? "save-rules" : "create-rule",
           selection: [selectedKey],
           metadata: { rule_id: rule.id ?? null }
         });
@@ -724,12 +617,7 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
           onClearSavedMapping={clearCsvMapping}
         />
       )}
-      {sourceRowPreview && (
-        <CsvSourceRowModal
-          preview={sourceRowPreview}
-          onClose={() => setSourceRowPreview(null)}
-        />
-      )}
+
       <input
         ref={csv.csvInputRef}
         type="file"
@@ -790,16 +678,6 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
         onUpdateGroup={updateTransactionGroup}
         onDelete={deleteTransaction}
         onAdd={addTransaction}
-        sourceRows={csv.lastImportedSource?.rows}
-        onViewSourceRow={(row, sourceRow) => {
-          const source = csv.lastImportedSource;
-          if (!source) return;
-          setSourceRowPreview({
-            filename: source.filename,
-            headers: source.headers,
-            row: sourceRow
-          });
-        }}
         businessTab={operations.businessTab}
         onBusinessTabChange={operations.changeBusinessTab}
         showBusinessTabs={activeSection !== "transactions"}
@@ -810,89 +688,36 @@ export const MonthEditor = forwardRef<MonthEditorHandle, {
         onMergeGroup={(group) => void operations.mergeGroup(group)}
         onCreateRule={openRuleCreationForGroup}
         renderBatchActions={({ businessTab: currentTab, selectedTransactionKeys: keys }) => <>
-          {(currentTab === "outgoing" || currentTab === "incoming") && <button
-            type="button"
-            disabled={state.kind === "pending" || keys.size === 0}
-            onClick={() => void operations.executeAiClassification(currentTab, keys)}
-          >{t("AI 分类建议", "AI classification suggestions")}</button>}
-          {(currentTab === "outgoing" || currentTab === "incoming") && <>
-            <button
-              type="button"
-              disabled={state.kind === "pending" || keys.size === 0}
-              onClick={() => operations.openBatchEdit(
-                "bulk-edit-counterparty",
-                currentTab,
-                keys,
-                (row) => row.type === "支出" || row.type === "收入" || row.type === "代付"
-              )}
-            >{t("修改交易对手", "Edit counterparty")}</button>
-            <button
-              type="button"
-              disabled={state.kind === "pending" || keys.size === 0}
-              onClick={() => operations.openBatchEdit(
-                "bulk-edit-product",
-                currentTab,
-                keys,
-                (row) => row.type === "支出" || row.type === "收入" || row.type === "代付"
-              )}
-            >{t("修改商品", "Edit item")}</button>
-            <button
-              type="button"
-              disabled={state.kind === "pending" || keys.size === 0}
-              onClick={() => operations.openBatchEdit(
-                "bulk-edit-category",
-                currentTab,
-                keys,
-                (row) => row.type === "支出" || row.type === "收入" || row.type === "代付"
-              )}
-            >{t("修改分类", "Edit category")}</button>
-          </>}
-          {(currentTab === "outgoing" || currentTab === "incoming") && <>
-            <button
-              type="button"
-              disabled={state.kind === "pending" || keys.size === 0}
-              onClick={() => operations.openTagBatchEdit(
-                "bulk-add-tag",
-                currentTab,
-                keys,
-                (row) => row.type === "支出" || row.type === "收入" || row.type === "代付"
-              )}
-            >{t("添加标签", "Add tag")}</button>
-            <button
-              type="button"
-              disabled={state.kind === "pending" || keys.size === 0}
-              onClick={() => operations.openTagBatchEdit(
-                "bulk-remove-tag",
-                currentTab,
-                keys,
-                (row) => row.type === "支出" || row.type === "收入" || row.type === "代付"
-              )}
-            >{t("移除标签", "Remove tag")}</button>
-            <button type="button" disabled={state.kind === "pending" || !operations.canUndo}
-              onClick={operations.undo}>{t("撤回", "Undo")}</button>
-          </>}
-          {currentTab === "incoming" && <>
-            <button
-              type="button"
-              disabled={state.kind === "pending" || keys.size === 0}
-              onClick={() => void operations.executeSelectedOperation(
-                "income-to-daifu",
-                currentTab,
-                keys,
-                (row) => row.type === "收入"
-              )}
-            >{t("收入转代付", "Income to paid on behalf")}</button>
-            <button
-              type="button"
-              disabled={state.kind === "pending" || keys.size === 0}
-              onClick={() => void operations.executeSelectedOperation(
-                "daifu-to-income",
-                currentTab,
-                keys,
-                (row) => row.type === "代付"
-              )}
-            >{t("代付转收入", "Paid on behalf to income")}</button>
-          </>}
+          <div className="asset-track-transaction-tool-group">
+            <div className="asset-track-transaction-group-heading"><strong>{t("分类", "Classification")}</strong></div>
+            <div className="asset-track-transaction-toolbar-buttons">
+              <button type="button" disabled={state.kind === "pending"}
+                title={keys.size ? t("应用规则到选中流水", "Apply rules to the selected transactions") : t("应用规则到本月全部流水", "Apply rules to all transactions in this month")}
+                onClick={() => void operations.applyRules(keys)}><TransactionToolbarIcon name="git-branch" />{t("规则分类", "Rule classification")}</button>
+              <button type="button" disabled={state.kind === "pending" || keys.size === 0}
+                onClick={() => void operations.executeAiClassification(currentTab, keys)}><TransactionToolbarIcon name="sparkles" />{t("AI 分类", "AI classification")}</button>
+              <button type="button" disabled={state.kind === "pending" || keys.size === 0}
+                onClick={() => operations.openBatchEdit("bulk-edit-category", currentTab, keys,
+                  row => row.type === "支出" || row.type === "收入" || row.type === "代付")}>
+                <TransactionToolbarIcon name="layout-grid" />{t("修改分类", "Edit category")}
+              </button>
+            </div>
+          </div>
+          <div className="asset-track-transaction-tool-group">
+            <div className="asset-track-transaction-group-heading"><strong>{t("编辑", "Edit")}</strong></div>
+            <div className="asset-track-transaction-toolbar-buttons">
+              <button type="button" disabled={state.kind === "pending" || keys.size === 0}
+                onClick={() => operations.openInfoEdit(currentTab, keys)}><TransactionToolbarIcon name="pencil" />{t("编辑信息", "Edit information")}</button>
+              <button type="button" disabled={state.kind === "pending" || keys.size === 0}
+                onClick={() => operations.openTagBatchEdit("bulk-add-tag", currentTab, keys,
+                  row => row.type === "支出" || row.type === "收入" || row.type === "代付")}>
+                <TransactionToolbarIcon name="tags" />{t("编辑标签", "Edit tags")}
+              </button>
+              <button type="button" disabled={state.kind === "pending" || !operations.canUndo}
+                title={operations.undoLabel ? t(`撤回上一步「${operations.undoLabel}」，与当前选择无关`, `Undo “${operations.undoLabel}”, regardless of the current selection`) : t("暂无可撤回的草稿操作", "No draft operation to undo")}
+                onClick={operations.undo}><TransactionToolbarIcon name="undo-2" />{t("撤回", "Undo")}</button>
+            </div>
+          </div>
         </>}
         renderRuleControls={renderRuleControls}
         renderTransactionActions={({ row, transactionKey, businessTab: currentTab }) => {

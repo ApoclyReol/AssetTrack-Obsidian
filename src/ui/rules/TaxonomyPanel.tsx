@@ -21,7 +21,7 @@ import { TaxonomyEditorModal, type StagedTaxonomyRemoval } from "../TaxonomyEdit
 export interface TaxonomyPanelProps {
   app: App;
   api: ConfigurationEditorPort;
-  view: "all";
+  view: "all" | "attributes" | "tags";
   dataVersion?: number;
   onDataChanged: () => void;
   onDirtyChange?: (dirty: boolean) => void;
@@ -44,7 +44,7 @@ function nextSort(rows: Array<{ sort_order: number }>): number {
 }
 
 interface TaxonomyTableProps {
-  view: "all";
+  view: "all" | "attributes" | "tags";
   taxonomy: TaxonomyWorkspace;
   attributeDirty: boolean;
   tagDirty: boolean;
@@ -81,7 +81,7 @@ function TaxonomyTable({
   onSaveTags
 }: TaxonomyTableProps) {
   return <div className={`asset-track-taxonomy-panels${view === "all" ? " asset-track-taxonomy-panels--split" : ""}`}>
-    <Section>
+    {view !== "tags" && <Section>
       <h3>{t("分类属性", "Category attributes")}</h3>
       <div className="asset-track-table-scroll asset-track-responsive-scroll">
         <table className="asset-track-taxonomy-table"><thead><tr>
@@ -137,8 +137,8 @@ function TaxonomyTable({
         <button type="button" disabled={pending} onClick={onAddGroup}>{t("新增属性名称", "Add attribute name")}</button>
         <button type="button" className="mod-cta" disabled={!attributeDirty || pending || !canSave} onClick={onSaveAttributes}>{t("保存属性", "Save attributes")}</button>
       </div>
-    </Section>
-    <Section>
+    </Section>}
+    {view !== "attributes" && <Section>
       <h3>{t("流水标签", "Transaction tags")}</h3>
       <div className="asset-track-table-scroll asset-track-responsive-scroll">
         <table className="asset-track-taxonomy-table asset-track-taxonomy-tag-table"><thead><tr>
@@ -159,7 +159,7 @@ function TaxonomyTable({
         <button type="button" disabled={pending} onClick={onAddTag}>{t("新增标签", "Add tag")}</button>
         <button type="button" className="mod-cta" disabled={!tagDirty || pending || !canSave} onClick={onSaveTags}>{t("保存标签", "Save tags")}</button>
       </div>
-    </Section>
+    </Section>}
   </div>;
 }
 

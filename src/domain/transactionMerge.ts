@@ -60,7 +60,7 @@ export function previewTransactionMerge(request: MergeTransactionsRequest): Merg
     for (const row of sourceRows) {
       const tags = [...new Set(row.tag_keys ?? [])].sort();
       if (tags.length && !request.include_tagged) { excludedTagged++; continue; }
-      const key = JSON.stringify([row.category_key ?? null, row.category, tags]);
+      const key = JSON.stringify([row.category_key ?? null, row.category]);
       const partition = partitions.get(key) ?? [];
       partition.push(row); partitions.set(key, partition);
     }
@@ -77,7 +77,7 @@ export function previewTransactionMerge(request: MergeTransactionsRequest): Merg
         counterparty: before[0].counterparty ?? "", product: before[0].product,
         [secondary]: names.size === 1 ? [...names][0] : "",
         category_key: before[0].category_key ?? null, category: before[0].category,
-        amount: minor / 100, tag_keys: [...new Set(before[0].tag_keys ?? [])].sort(),
+        amount: minor / 100, tag_keys: [],
         account_key: null, source: `合并 · ${before.length} 笔`
       };
       return { cleared_fields: clearedFields, source_keys: sourceKeys, before: structuredClone(before), after };

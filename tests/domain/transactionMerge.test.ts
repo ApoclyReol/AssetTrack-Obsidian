@@ -34,17 +34,16 @@ describe("exact amount rules", () => {
 });
 
 describe("actual transaction merge", () => {
-  it("excludes tagged rows by default and preserves all tag totals when opted in", () => {
+  it("keeps tagged rows by default and removes tags when opted in", () => {
     const rows = [row(1), row(2), row(3, { tag_keys: ["a"] }), row(4, { tag_keys: ["a"] }),
       row(5, { tag_keys: ["a", "b"] }), row(6, { tag_keys: ["b", "a"] }), row(7, { tag_keys: ["b"] })];
-    const totals = (values: Transaction[]) => ["a", "b"].map((key) => Math.round(values.filter((value) => value.tag_keys?.includes(key)).reduce((sum, value) => sum + value.amount, 0) * 100));
     const ordinary = previewTransactionMerge(request(rows));
     expect(ordinary.groups).toHaveLength(1); expect(ordinary.excluded_tagged_count).toBe(5);
     expect(ordinary.rows.slice(1)).toEqual(rows.slice(2));
     const tagged = previewTransactionMerge({ ...request(rows), include_tagged: true });
-    expect(tagged.groups).toHaveLength(3); expect(tagged.rows).toHaveLength(4);
-    expect(tagged.groups.map((group) => group.after.tag_keys)).toEqual([[], ["a"], ["a", "b"]]);
-    expect(tagged.rows.at(-1)).toEqual(rows.at(-1)); expect(totals(tagged.rows)).toEqual(totals(rows));
+    expect(tagged.groups).toHaveLength(1); expect(tagged.rows).toHaveLength(1);
+    expect(tagged.groups[0].after.tag_keys).toEqual([]);
+    expect(tagged.groups[0].after.amount).toBe(139.3);
   });
 
   it("keeps the summary name and identical secondary names, and explicitly clears differing secondary names", () => {
@@ -57,13 +56,13 @@ describe("actual transaction merge", () => {
     const byProduct = previewTransactionMerge({ ...request(sameRows.map((value, index) => ({ ...value, counterparty: `平台${index}` }))), group_by: "product" });
     expect(byProduct.groups[0]).toMatchObject({ cleared_fields: ["counterparty"], after: { product: "原始名称", counterparty: "" } });
   });
-  it("creates one new first-day row for a complete tag set and preserves unselected rows", () => {
+  it("clears merged tags and preserves unselected rows", () => {
     const a = row(1, { tag_keys: ["a", "b"] }); const b = row(2, { tag_keys: ["b", "a"] }); const untouched = row(3, { amount: 77 });
     const req = request([a, b, untouched]); req.groups[0].transaction_keys = ["id:1", "id:2"];
     req.include_tagged = true;
     const result = previewTransactionMerge(req);
     expect(result.rows).toHaveLength(2);
-    expect(result.rows[0]).toMatchObject({ transaction_date: "2026-10-01", amount: 39.8, product: "", counterparty: "平台", category: "旧分类", tag_keys: ["a", "b"] });
+    expect(result.rows[0]).toMatchObject({ transaction_date: "2026-10-01", amount: 39.8, product: "", counterparty: "平台", category: "旧分类", tag_keys: [] });
     expect(result.rows[0].id).toBeUndefined(); expect(result.rows[0].client_id).toBeTruthy();
     expect(result.rows[1]).toEqual(untouched); expect(req.rows).toHaveLength(3);
   });
@@ -76,20 +75,17 @@ describe("actual transaction merge", () => {
     expect(result.preview.rule_ids).toEqual([]);
     expect(result.preview.metadata).not.toHaveProperty("rules_revision");
   });
-  it("preserves category totals, uncategorized rows and all tag totals across independent partitions", () => {
+  it("preserves category totals while combining different tag sets", () => {
     const rows = [row(1), row(2), row(3, { category: "另一分类", category_key: "other" }), row(4, { category: "另一分类", category_key: "other" }),
       row(5, { category: "", category_key: null }), row(6, { category: "", category_key: null }),
       row(7, { tag_keys: ["a"] }), row(8, { tag_keys: ["a"] }), row(9, { tag_keys: ["a", "b"] })];
     const result = previewTransactionMerge({ ...request(rows), include_tagged: true });
-    expect(result.groups).toHaveLength(4); expect(result.unchanged_count).toBe(1);
+    expect(result.groups).toHaveLength(3); expect(result.unchanged_count).toBe(0);
     const totals = (values: Transaction[], predicate: (value: Transaction) => boolean) => Math.round(values.filter(predicate).reduce((sum, value) => sum + value.amount, 0) * 100);
     for (const category of ["旧分类", "另一分类", ""]) {
       expect(totals(result.rows, (value) => value.category === category)).toBe(totals(rows, (value) => value.category === category));
     }
-    for (const tag of ["a", "b"]) {
-      expect(totals(result.rows, (value) => !!value.tag_keys?.includes(tag))).toBe(totals(rows, (value) => !!value.tag_keys?.includes(tag)));
-    }
-    expect(result.rows.at(-1)).toEqual(rows.at(-1));
+    expect(result.rows.every((value) => !value.tag_keys?.length)).toBe(true);
   });
   it("allows opening an all-tagged group and can merge a previous total again", () => {
     const tagged = [row(1, { tag_keys: ["a"] }), row(2, { tag_keys: ["a"] })];

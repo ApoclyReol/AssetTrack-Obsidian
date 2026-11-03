@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Asset Track 流水工具栏验证稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --accent: #8650de;
+      --accent-soft: #f0eafa;
+      --ink: #303541;
+      --muted: #707987;
+      --line: #dce0e8;
+      --surface: #f5f6f9;
+      --green: #287749;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #eef0f5; color: var(--ink); font: 14px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    button, input, select { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: default; color: #969da8; background: #f1f2f5; }
+    button:not(:disabled):hover { background: #edeef4; border-color: #b7bdca; }
+    button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    button { min-height: 40px; border: 1px solid var(--line); border-radius: 7px; padding: 8px 14px; background: #fff; }
+    button.primary { color: #fff; background: var(--accent); border-color: var(--accent); }
+    button.primary:not(:disabled):hover { background: #7540cb; }
+    button.primary:disabled { color: #fff; opacity: .45; }
+    svg { width: 16px; height: 16px; flex: 0 0 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+    input[type="checkbox"] { width: 17px; height: 17px; margin: 0; accent-color: var(--accent); cursor: pointer; flex: 0 0 17px; }
+    .review-bar { max-width: 1392px; margin: 24px auto 14px; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .review-title { font-size: 17px; font-weight: 650; }
+    .review-bar p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+    .review-controls { display: flex; gap: 8px; }
+    .review-controls button { min-height: 36px; padding: 6px 12px; font-size: 12px; }
+    .app { max-width: 1344px; margin: auto; border: 1px solid #d6dbe5; border-radius: 12px; background: #fff; overflow: hidden; box-shadow: 0 8px 28px #25334d0c; transition: max-width .18s ease; }
+    .app.narrow { max-width: 960px; }
+    .app-nav { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 24px; border-bottom: 1px solid var(--line); background: #fafbfc; }
+    .brand { display: flex; gap: 26px; align-items: center; }
+    .brand > strong { font-size: 17px; }
+    .nav-items { display: flex; gap: 20px; color: var(--muted); }
+    .nav-items .active { color: var(--accent); font-weight: 600; }
+    .month { font-variant-numeric: tabular-nums; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+    .workspace { padding: 24px; }
+    .page-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 26px; }
+    .heading-main { display: flex; align-items: center; gap: 20px; }
+    h1 { font-size: 23px; margin: 0; font-weight: 650; }
+    .business-tabs { display: flex; gap: 5px; }
+    .business-tabs span { padding: 7px 15px; border-radius: 6px; color: var(--muted); }
+    .business-tabs .active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+    .page-actions { display: flex; gap: 8px; }
+    .toolbar { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; padding: 15px 16px 16px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+    .tool-group { min-width: 0; }
+    .tool-group + .tool-group { border-left: 1px solid var(--line); padding-left: 20px; }
+    .group-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+    .group-heading strong { font-size: 13px; font-weight: 600; }
+    .group-heading span { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .button-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+    .button-grid button { display: flex; align-items: center; justify-content: center; gap: 7px; padding: 8px 5px; height: 42px; white-space: nowrap; font-size: 13px; }
+    .button-grid button.active { border-color: #c4afe8; color: #6e3db4; background: #ece3fa; font-weight: 600; }
+    .table-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 17px 2px 10px; min-height: 54px; color: var(--muted); font-size: 12px; }
+    .selection-meta { display: flex; align-items: center; gap: 14px; }
+    .selection-meta strong { font-weight: 500; color: var(--ink); }
+    .text-button { padding: 0; min-height: 28px; border: 0; border-radius: 3px; background: transparent; color: var(--accent); font-size: 12px; }
+    .table-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 7px; }
+    table { width: 100%; min-width: 880px; border-collapse: collapse; text-align: left; }
+    th { height: 48px; background: #f4f5f8; color: #626b7b; font-size: 12px; font-weight: 600; }
+    th, td { padding: 12px 14px; border-bottom: 1px solid #e5e8ee; }
+    th:first-child, td:first-child { width: 88px; }
+    td { font-size: 13px; height: 64px; }
+    tr:last-child td { border-bottom: 0; }
+    tbody tr.selected td { background: #faf7fe; }
+    .check-label { display: flex; align-items: center; gap: 8px; min-height: 30px; cursor: pointer; white-space: nowrap; }
+    .row-index { color: #7d8594; font-variant-numeric: tabular-nums; }
+    .money { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    td.money { color: var(--green); font-weight: 600; }
+    .date { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .subtle { color: #89919e; }
+    .empty-category { color: #a56e21; }
+    .tag { display: inline-block; padding: 2px 8px; margin: 2px 4px 2px 0; border-radius: 5px; background: #eef1f7; color: #626c7e; font-size: 12px; white-space: nowrap; }
+    .row-action { min-height: 30px; padding: 4px 9px; font-size: 12px; }
+    .group-name { font-weight: 600; }
+    .group-count { display: block; color: var(--muted); font-size: 12px; font-weight: 400; margin-top: 3px; }
+    .group-actions { display: flex; gap: 5px; }
+    .detail-row td { background: #fafbfc; padding: 0 24px 14px; }
+    .detail-line { display: grid; grid-template-columns: 105px 1fr 90px; gap: 12px; padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 12px; }
+    .table-footer { padding-top: 14px; display: flex; justify-content: flex-end; gap: 24px; color: var(--muted); font-size: 12px; }
+    .table-footer strong { color: var(--ink); margin-left: 8px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .design-notes { max-width: 1344px; margin: 18px auto 32px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; padding: 0 3px; }
+    .design-notes section { padding: 14px 16px; border: 1px solid #dce0e8; border-radius: 8px; background: #f8f9fc; }
+    .design-notes h2 { margin: 0 0 5px; font-size: 13px; font-weight: 600; }
+    .design-notes p { margin: 0; font-size: 12px; color: #646e7e; line-height: 1.7; }
+    dialog { width: min(620px, calc(100vw - 32px)); max-height: calc(100vh - 40px); padding: 0; border: 1px solid #d7dce5; border-radius: 13px; background: #fff; color: var(--ink); box-shadow: 0 20px 80px #17213b2b; }
+    dialog::backdrop { background: #252c3d42; }
+    .modal-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 25px 28px 17px; }
+    .modal-heading h2 { font-size: 21px; margin: 0 0 5px; font-weight: 650; }
+    .modal-heading p { color: var(--muted); font-size: 13px; margin: 0; }
+    .close { min-height: 30px; width: 30px; padding: 5px; border: 0; color: var(--muted); }
+    .modal-body { padding: 0 28px 24px; overflow: auto; max-height: calc(100vh - 238px); }
+    .form-section { padding: 19px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+    .form-field + .form-field { margin-top: 20px; }
+    .field-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+    .field-heading > label { font-weight: 600; font-size: 13px; }
+    .clear-label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+    .form-field input[type="text"], .form-field select { width: 100%; border: 1px solid #cfd6e3; background: #fff; padding: 11px 12px; border-radius: 6px; height: 44px; }
+    input:disabled { background: #eef0f5; }
+    .field-note { margin: 15px 0 0; color: var(--muted); font-size: 12px; }
+    .modal-actions { border-top: 1px solid var(--line); padding: 16px 28px 20px; display: flex; justify-content: flex-end; gap: 9px; background: #fff; }
+    .mode-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-bottom: 18px; }
+    .mode-switch .active { background: var(--accent-soft); color: #713eb8; border-color: #baa1e1; }
+    .tag-options, .category-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .choice { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 11px 13px; background: #fff; border: 1px solid var(--line); border-radius: 7px; cursor: pointer; font-size: 13px; }
+    .choice:has(input:checked) { border-color: #b59add; background: #faf7ff; }
+    .ai-row { padding: 12px 0; display: grid; grid-template-columns: 1fr 140px; align-items: center; gap: 15px; border-bottom: 1px solid var(--line); }
+    .ai-row select { padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+    .toast { position: fixed; bottom: 25px; left: 50%; transform: translate(-50%, 12px); background: #34323e; color: #fff; padding: 11px 18px; border-radius: 8px; box-shadow: 0 6px 25px #17213b1f; font-size: 13px; opacity: 0; pointer-events: none; transition: opacity .15s, transform .15s; z-index: 5; }
+    .toast.visible { opacity: 1; transform: translate(-50%, 0); }
+    .narrow .toolbar { grid-template-columns: 1fr 1fr; }
+    .narrow .tool-group:first-child { grid-column: 1 / -1; }
+    .narrow .tool-group:nth-child(2) { border-left: 0; padding-left: 0; }
+    @media (max-width: 1100px) {
+      .toolbar { grid-template-columns: 1fr 1fr; }
+      .tool-group:first-child { grid-column: 1 / -1; }
+      .tool-group:nth-child(2) { border-left: 0; padding-left: 0; }
+      .app { margin-inline: 14px; }
+      .design-notes { padding-inline: 14px; }
+    }
+    @media (max-width: 650px) {
+      .review-bar { align-items: flex-start; padding: 0 16px; }
+      .review-controls { flex-wrap: wrap; justify-content: flex-end; }
+      .workspace { padding: 16px; }
+      .app-nav { padding: 14px 16px; }
+      .nav-items { display: none; }
+      .page-heading, .heading-main { flex-wrap: wrap; gap: 12px; }
+      .page-actions { flex-wrap: wrap; }
+      .toolbar, .narrow .toolbar { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+      .toolbar .tool-group { grid-column: auto; padding: 0; border-left: 0; }
+      .design-notes { grid-template-columns: 1fr; }
+      .modal-heading { padding: 22px 20px 16px; }
+      .modal-body { padding: 0 20px 22px; }
+      .modal-actions { padding: 15px 20px; }
+      .tag-options, .category-options { grid-template-columns: minmax(0, 1fr); }
+      .table-meta { flex-wrap: wrap; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+    <symbol id="list" viewBox="0 0 20 20"><path d="M7 5h10M7 10h10M7 15h10M3 5h.1M3 10h.1M3 15h.1"/></symbol>
+    <symbol id="group" viewBox="0 0 20 20"><rect x="3" y="3" width="14" height="5" rx="1"/><path d="M5 11h12M5 15h12"/></symbol>
+    <symbol id="people" viewBox="0 0 20 20"><circle cx="7" cy="7" r="3"/><path d="M2 17v-2a5 5 0 0 1 10 0v2M13 4a3 3 0 0 1 0 6M16 17v-2a5 5 0 0 0-2-4"/></symbol>
+    <symbol id="rule" viewBox="0 0 20 20"><path d="M5 3v14M5 7h10M5 14h10"/><circle cx="5" cy="3" r="1.5"/><circle cx="15" cy="7" r="1.5"/><circle cx="15" cy="14" r="1.5"/></symbol>
+    <symbol id="spark" viewBox="0 0 20 20"><path d="m10 2 2.2 5.8L18 10l-5.8 2.2L10 18l-2.2-5.8L2 10l5.8-2.2Z"/></symbol>
+    <symbol id="category" viewBox="0 0 20 20"><rect x="3" y="3" width="5" height="5" rx="1"/><rect x="12" y="3" width="5" height="5" rx="1"/><rect x="3" y="12" width="5" height="5" rx="1"/><rect x="12" y="12" width="5" height="5" rx="1"/></symbol>
+    <symbol id="edit" viewBox="0 0 20 20"><path d="m12 3 5 5M3 17l4-1L17 6l-3-3L4 13Z"/></symbol>
+    <symbol id="tag" viewBox="0 0 20 20"><path d="M3 3h7l7 7-7 7-7-7Z"/><circle cx="7" cy="7" r="1"/></symbol>
+    <symbol id="icon-undo" viewBox="0 0 20 20"><path d="M7 4 3 8l4 4M3 8h9a5 5 0 0 1 0 10"/></symbol>
+    <symbol id="close" viewBox="0 0 20 20"><path d="m5 5 10 10M15 5 5 15"/></symbol>
+  </defs></svg>
+  <header class="review-bar">
+    <div><div class="review-title">流水工具栏与编辑窗口</div><p>可点击验证稿 · 示例数据，修改仅作用于当前页面</p></div>
+    <div class="review-controls"><button id="width-toggle">窄窗口</button><button id="reset-demo">重置演示</button></div>
+  </header>
+  <main class="app" id="app">
+    <div class="app-nav"><div class="brand"><strong>Asset Track</strong><nav class="nav-items" aria-label="页面背景"><span class="active">记录</span><span>分析</span><span>配置</span></nav></div><span class="month">2026-10</span></div>
+    <div class="workspace">
+      <div class="page-heading">
+        <div class="heading-main"><h1>流水</h1><div class="business-tabs"><span class="active">出账</span><span>入账</span><span>理财</span></div></div>
+        <div class="page-actions"><button class="primary" id="import-demo">导入账单</button><button id="reload-demo">放弃并重载</button><button class="primary" id="save-demo" disabled>保存流水</button></div>
+      </div>
+      <section class="toolbar" aria-label="流水视图与操作">
+        <div class="tool-group">
+          <div class="group-heading"><strong>视图</strong><span>切换展示方式</span></div>
+          <div class="button-grid" id="view-tabs" role="tablist" aria-label="流水视图">
+            <button class="active" data-view="detail" role="tab" aria-selected="true"><svg><use href="#list"/></svg>逐项</button>
+            <button data-view="product" role="tab" aria-selected="false"><svg><use href="#group"/></svg>商品汇总</button>
+            <button data-view="counterparty" role="tab" aria-selected="false"><svg><use href="#people"/></svg>对手汇总</button>
+          </div>
+        </div>
+        <div class="tool-group">
+          <div class="group-heading"><strong>分类</strong><span id="classify-scope">作用于已选流水</span></div>
+          <div class="button-grid">
+            <button id="rule-classify"><svg><use href="#rule"/></svg>规则分类</button>
+            <button id="ai-classify"><svg><use href="#spark"/></svg>AI 分类</button>
+            <button id="edit-category"><svg><use href="#category"/></svg>修改分类</button>
+          </div>
+        </div>
+        <div class="tool-group">
+          <div class="group-heading"><strong>编辑</strong><span id="edit-scope">作用于已选流水</span></div>
+          <div class="button-grid">
+            <button id="edit-info"><svg><use href="#edit"/></svg>编辑信息</button>
+            <button id="edit-tags"><svg><use href="#tag"/></svg>编辑标签</button>
+            <button id="undo" disabled title="暂无可撤回的草稿操作"><svg><use href="#icon-undo"/></svg>撤回</button>
+          </div>
+        </div>
+      </section>
+      <div class="table-meta"><span id="view-count"></span><div class="selection-meta"><strong id="selection-count" role="status"></strong><button class="text-button" id="clear-selection">取消选择</button></div></div>
+      <div class="table-scroll"><table><thead id="table-head"></thead><tbody id="table-body"></tbody></table></div>
+      <div class="table-footer"><span>当前视图总额<strong id="total"></strong></span><span id="draft-status">草稿尚无修改</span></div>
+    </div>
+  </main>
+  <aside class="design-notes" aria-label="本稿设计说明">
+    <section><h2>全选放在表格里</h2><p>第一列表头勾选当前视图，支持部分选中。汇总视图按组内逐笔流水计数，切换视图继续保留选择。</p></section>
+    <section><h2>撤回固定在编辑组</h2><p>位置与宽度保持一致，始终撤回最近一次草稿操作。选中其他行不会改变撤回对象，悬停可看操作名称。</p></section>
+    <section><h2>操作范围就近显示</h2><p>有选择时分类与编辑处理选中项；未选择时规则分类处理本月，其他编辑需先选择。上方月份操作沿用现有层级。</p></section>
+  </aside>
+  <dialog id="editor" aria-labelledby="modal-title">
+    <div class="modal-heading"><div><h2 id="modal-title"></h2><p id="modal-description"></p></div><button class="close" id="close-modal" aria-label="关闭窗口"><svg><use href="#close"/></svg></button></div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-actions"><button id="cancel-modal">取消</button><button class="primary" id="confirm-modal">应用到草稿</button></div>
+  </dialog>
+  <div class="toast" id="toast" role="status"></div>
+  <script>
+    const initialRows = [
+      { id: 1, date: '2026-10-23', counterparty: '示例便利店', product: '饮用水', category: '', amount: 1.2, tags: [] },
+      { id: 2, date: '2026-10-19', counterparty: '示例便利店', product: '饮用水', category: '日常购物', amount: 1.5, tags: ['日常'] },
+      { id: 3, date: '2026-10-18', counterparty: '示例早餐店', product: '早餐', category: '餐饮基础', amount: 16, tags: [] },
+      { id: 4, date: '2026-10-16', counterparty: '示例出行平台', product: '地铁', category: '出行交通', amount: 8, tags: ['工作'] },
+      { id: 5, date: '2026-10-12', counterparty: '示例出行平台', product: '地铁', category: '出行交通', amount: 9, tags: [] },
+      { id: 6, date: '2026-10-08', counterparty: '示例书店', product: '图书', category: '文化娱乐', amount: 42, tags: ['日常'] }
+    ];
+    const categories = ['餐饮基础', '日常购物', '出行交通', '文化娱乐'];
+    const tagNames = ['日常', '工作', '旅行', '学习'];
+    const clone = value => JSON.parse(JSON.stringify(value));
+    const escape = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+    const money = value => '¥' + value.toFixed(1);
+    const $ = id => document.getElementById(id);
+    let rows = clone(initialRows);
+    let selected = new Set([1, 2]);
+    let history = [];
+    let dirty = false;
+    let view = 'detail';
+    let expanded = new Set();
+    let modalMode = '';
+    let modalIds = [];
+    let tagMode = 'add';
+    let toastTimer;
+
+    function notify(message) {
+      $('toast').textContent = message;
+      $('toast').classList.add('visible');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => $('toast').classList.remove('visible'), 2600);
+    }
+    function commit(label, update) {
+      const previous = clone(rows);
+      update();
+      if (JSON.stringify(previous) === JSON.stringify(rows)) { notify('当前内容已一致，无需修改'); return; }
+      history.push({ label, rows: previous, dirty });
+      history = history.slice(-10);
+      dirty = true;
+      render();
+      notify(label + '已应用到草稿');
+    }
+    function reset() {
+      rows = clone(initialRows); selected = new Set([1, 2]); history = []; dirty = false; expanded = new Set();
+      render(); notify('已恢复演示数据');
+    }
+    function groups() {
+      if (view === 'detail') return rows.map(row => ({ key: String(row.id), rows: [row] }));
+      const result = new Map();
+      rows.forEach(row => {
+        const key = row[view];
+        if (!result.has(key)) result.set(key, { key, rows: [] });
+        result.get(key).rows.push(row);
+      });
+      return [...result.values()];
+    }
+    function selectionCell(items, index) {
+      return '<label class="check-label"><input type="checkbox" data-ids="' + items.map(row => row.id).join(',') + '" aria-label="选择第 ' + (index + 1) + ' 行"><span class="row-index">' + (index + 1) + '</span></label>';
+    }
+    function tagsCell(items) {
+      const tags = [...new Set(items.flatMap(row => row.tags))];
+      return tags.length ? tags.map(tag => '<span class="tag">' + escape(tag) + '</span>').join('') : '<span class="subtle">—</span>';
+    }
+    function categoryCell(items) {
+      const names = [...new Set(items.map(row => row.category))];
+      return names.map(name => name ? escape(name) : '<span class="empty-category">未分类</span>').join(' / ');
+    }
+    function render() {
+      selected = new Set([...selected].filter(id => rows.some(row => row.id === id)));
+      const renderedGroups = groups();
+      const labels = view === 'detail'
+        ? ['日期', '交易对手', '商品', '标签', '分类', '金额', '操作']
+        : [view === 'product' ? '商品' : '交易对手', '笔数', view === 'product' ? '交易对手' : '商品', '标签', '分类', '金额', '操作'];
+      $('table-head').innerHTML = '<tr><th><label class="check-label"><input type="checkbox" id="select-all" aria-label="全选当前视图"><span>全选</span></label></th>' + labels.map(label => '<th' + (label === '金额' ? ' class="money"' : '') + '>' + label + '</th>').join('') + '</tr>';
+      $('table-body').innerHTML = renderedGroups.map((group, index) => {
+        const first = group.rows[0];
+        const allSelected = group.rows.every(row => selected.has(row.id));
+        let line = '<tr class="' + (allSelected ? 'selected' : '') + '"><td>' + selectionCell(group.rows, index) + '</td>';
+        if (view === 'detail') {
+          line += '<td class="date">' + first.date + '</td><td>' + escape(first.counterparty || '—') + '</td><td>' + escape(first.product || '—') + '</td>';
+        } else {
+          line += '<td class="group-name">' + escape(group.key || '未填写') + '</td><td>' + group.rows.length + '</td><td>' + escape([...new Set(group.rows.map(row => row[view === 'product' ? 'counterparty' : 'product']))].join(' / ')) + '</td>';
+        }
+        line += '<td>' + tagsCell(group.rows) + '</td><td>' + categoryCell(group.rows) + '</td><td class="money">' + money(group.rows.reduce((sum, row) => sum + row.amount, 0)) + '</td>';
+        line += '<td>' + (view === 'detail' ? '<button class="row-action" data-delete="' + first.id + '">删除</button>' : '<button class="row-action" data-expand="' + index + '">' + (expanded.has(group.key) ? '收起' : '展开逐项') + '</button>') + '</td></tr>';
+        if (view !== 'detail' && expanded.has(group.key)) {
+          line += '<tr class="detail-row"><td colspan="8">' + group.rows.map(row => '<div class="detail-line"><span>' + row.date + '</span><span>' + escape(row.product) + ' / ' + escape(row.counterparty) + '</span><span class="money">' + money(row.amount) + '</span></div>').join('') + '</td></tr>';
+        }
+        return line;
+      }).join('');
+      const count = selected.size;
+      $('view-count').textContent = view === 'detail' ? rows.length + ' 条流水' : renderedGroups.length + ' 个汇总组，共 ' + rows.length + ' 条流水';
+      $('selection-count').textContent = '已选 ' + count + ' 条';
+      $('clear-selection').hidden = count === 0;
+      $('classify-scope').textContent = count ? '作用于已选 ' + count + ' 条' : '规则可处理本月全部';
+      $('edit-scope').textContent = count ? '作用于已选 ' + count + ' 条' : '请先选择流水';
+      ['edit-info', 'edit-tags', 'edit-category', 'ai-classify'].forEach(id => { $(id).disabled = count === 0; $(id).title = count ? '' : '请先勾选需要处理的流水'; });
+      $('rule-classify').disabled = rows.length === 0;
+      $('rule-classify').title = count ? '使用规则处理选中的 ' + count + ' 条流水' : '使用规则处理本月全部流水';
+      $('undo').disabled = history.length === 0;
+      $('undo').title = history.length ? '撤回上一步「' + history.at(-1).label + '」，与当前选择无关' : '暂无可撤回的草稿操作';
+      $('save-demo').disabled = !dirty;
+      $('total').textContent = money(rows.reduce((sum, row) => sum + row.amount, 0));
+      $('draft-status').textContent = dirty ? '修改待保存' : '草稿尚无修改';
+      $('select-all').checked = rows.length > 0 && count === rows.length;
+      $('select-all').indeterminate = count > 0 && count < rows.length;
+      document.querySelectorAll('[data-ids]').forEach(input => {
+        const ids = input.dataset.ids.split(',').map(Number);
+        const matched = ids.filter(id => selected.has(id)).length;
+        input.checked = matched === ids.length; input.indeterminate = matched > 0 && matched < ids.length;
+      });
+      document.querySelectorAll('[data-view]').forEach(button => {
+        button.classList.toggle('active', button.dataset.view === view);
+        button.setAttribute('aria-selected', String(button.dataset.view === view));
+      });
+    }
+    function openModal(mode) {
+      modalMode = mode; modalIds = [...selected]; tagMode = 'add';
+      const titles = { info: '编辑信息', tags: '编辑标签', category: '修改分类', ai: 'AI 分类建议' };
+      $('modal-title').textContent = titles[mode];
+      $('modal-description').textContent = '修改已选的 ' + modalIds.length + ' 条流水，确认后进入当前草稿。';
+      $('confirm-modal').textContent = '应用到草稿';
+      if (mode === 'info') {
+        $('modal-body').innerHTML = '<div class="form-section">' + [['counterparty', '交易对手'], ['product', '商品']].map(([key, name]) => '<div class="form-field"><div class="field-heading"><label for="field-' + key + '">' + name + '</label><label class="clear-label"><input type="checkbox" data-clear="' + key + '">清空</label></div><input type="text" id="field-' + key + '" placeholder="填写后统一修改，留空保留原值"></div>').join('') + '</div><p class="field-note">两项可以独立修改。需要移除内容时，勾选对应的“清空”。</p>';
+      } else if (mode === 'tags') {
+        renderTagForm();
+      } else if (mode === 'category') {
+        $('modal-body').innerHTML = '<div class="form-section"><div class="category-options">' + categories.map(name => '<label class="choice"><input type="radio" name="category" value="' + name + '">' + name + '</label>').join('') + '</div></div>';
+      } else {
+        $('modal-description').textContent = '以下为演示建议，确认后修改已选流水的分类。';
+        $('modal-body').innerHTML = rows.filter(row => modalIds.includes(row.id)).map(row => '<div class="ai-row"><span>' + escape(row.product) + '</span><select data-ai-id="' + row.id + '">' + categories.map(name => '<option' + (name === suggestedCategory(row) ? ' selected' : '') + '>' + name + '</option>').join('') + '</select></div>').join('');
+      }
+      updateConfirm(); $('editor').showModal();
+    }
+    function renderTagForm() {
+      const available = tagMode === 'add' ? tagNames : [...new Set(rows.filter(row => modalIds.includes(row.id)).flatMap(row => row.tags))];
+      $('modal-body').innerHTML = '<div class="mode-switch"><button data-tag-mode="add" class="' + (tagMode === 'add' ? 'active' : '') + '">添加标签</button><button data-tag-mode="remove" class="' + (tagMode === 'remove' ? 'active' : '') + '">移除标签</button></div><div class="form-section"><div class="tag-options">' + available.map(name => '<label class="choice"><input type="checkbox" name="tag" value="' + escape(name) + '">' + escape(name) + '</label>').join('') + '</div>' + (available.length ? '' : '<span class="subtle">选中的流水没有标签。</span>') + '</div><p class="field-note">可同时选择多个标签，其他标签保留。</p>';
+      $('confirm-modal').textContent = tagMode === 'add' ? '添加到草稿' : '从草稿移除';
+    }
+    function updateConfirm() {
+      let valid = true;
+      if (modalMode === 'info') valid = ['counterparty', 'product'].some(key => $('field-' + key).value.trim() || document.querySelector('[data-clear="' + key + '"]').checked);
+      if (modalMode === 'tags') valid = !!document.querySelector('input[name="tag"]:checked');
+      if (modalMode === 'category') valid = !!document.querySelector('input[name="category"]:checked');
+      $('confirm-modal').disabled = !valid;
+    }
+    function suggestedCategory(row) {
+      if (/饮用水|早餐/.test(row.product)) return '餐饮基础';
+      if (row.product === '地铁') return '出行交通';
+      return '文化娱乐';
+    }
+    $('view-tabs').addEventListener('click', event => {
+      const button = event.target.closest('[data-view]');
+      if (button) { view = button.dataset.view; expanded.clear(); render(); }
+    });
+    $('table-head').addEventListener('change', event => {
+      if (event.target.id === 'select-all') { selected = event.target.checked ? new Set(rows.map(row => row.id)) : new Set(); render(); }
+    });
+    $('table-body').addEventListener('change', event => {
+      if (!event.target.dataset.ids) return;
+      event.target.dataset.ids.split(',').map(Number).forEach(id => event.target.checked ? selected.add(id) : selected.delete(id)); render();
+    });
+    $('table-body').addEventListener('click', event => {
+      const remove = event.target.closest('[data-delete]');
+      if (remove) commit('删除流水', () => { rows = rows.filter(row => row.id !== Number(remove.dataset.delete)); });
+      const expand = event.target.closest('[data-expand]');
+      if (expand) { const group = groups()[Number(expand.dataset.expand)]; expanded.has(group.key) ? expanded.delete(group.key) : expanded.add(group.key); render(); }
+    });
+    $('clear-selection').onclick = () => { selected.clear(); render(); };
+    $('edit-info').onclick = () => openModal('info');
+    $('edit-tags').onclick = () => openModal('tags');
+    $('edit-category').onclick = () => openModal('category');
+    $('ai-classify').onclick = () => openModal('ai');
+    $('rule-classify').onclick = () => {
+      const ids = selected.size ? [...selected] : rows.map(row => row.id);
+      commit('规则分类', () => rows.forEach(row => { if (ids.includes(row.id)) row.category = suggestedCategory(row); }));
+    };
+    $('undo').onclick = () => {
+      const previous = history.pop(); if (!previous) return;
+      rows = previous.rows; dirty = previous.dirty; render(); notify('已撤回「' + previous.label + '」');
+    };
+    $('modal-body').addEventListener('input', updateConfirm);
+    $('modal-body').addEventListener('change', event => {
+      const key = event.target.dataset.clear;
+      if (key) { $('field-' + key).disabled = event.target.checked; }
+      updateConfirm();
+    });
+    $('modal-body').addEventListener('click', event => {
+      const mode = event.target.closest('[data-tag-mode]');
+      if (mode) { tagMode = mode.dataset.tagMode; renderTagForm(); updateConfirm(); }
+    });
+    $('confirm-modal').onclick = () => {
+      const label = $('modal-title').textContent;
+      commit(label, () => {
+        if (modalMode === 'info') rows.forEach(row => {
+          if (!modalIds.includes(row.id)) return;
+          ['counterparty', 'product'].forEach(key => {
+            const clear = document.querySelector('[data-clear="' + key + '"]').checked;
+            const value = $('field-' + key).value.trim();
+            if (clear || value) row[key] = clear ? '' : value;
+          });
+        });
+        if (modalMode === 'tags') {
+          const tags = [...document.querySelectorAll('input[name="tag"]:checked')].map(input => input.value);
+          rows.forEach(row => { if (modalIds.includes(row.id)) row.tags = tagMode === 'add' ? [...new Set([...row.tags, ...tags])] : row.tags.filter(tag => !tags.includes(tag)); });
+        }
+        if (modalMode === 'category') {
+          const category = document.querySelector('input[name="category"]:checked').value;
+          rows.forEach(row => { if (modalIds.includes(row.id)) row.category = category; });
+        }
+        if (modalMode === 'ai') document.querySelectorAll('[data-ai-id]').forEach(select => { rows.find(row => row.id === Number(select.dataset.aiId)).category = select.value; });
+      });
+      $('editor').close();
+    };
+    $('cancel-modal').onclick = () => $('editor').close();
+    $('close-modal').onclick = () => $('editor').close();
+    $('width-toggle').onclick = () => { const narrow = $('app').classList.toggle('narrow'); $('width-toggle').textContent = narrow ? '宽窗口' : '窄窗口'; };
+    $('reset-demo').onclick = reset;
+    $('reload-demo').onclick = reset;
+    $('import-demo').onclick = () => notify('此处沿用现有导入流程，本稿仅演示下方工具栏');
+    $('save-demo').onclick = () => { dirty = false; history = []; render(); notify('演示草稿已保存，撤回记录已清空'); };
+    render();
+    const query = new URLSearchParams(location.search);
+    if (query.get('layout') === 'narrow') { $('app').classList.add('narrow'); $('width-toggle').textContent = '宽窗口'; }
+    if (['info', 'tags'].includes(query.get('panel'))) openModal(query.get('panel'));
+  </script>
+</body>
+</html>

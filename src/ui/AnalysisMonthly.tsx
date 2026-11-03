@@ -1,9 +1,7 @@
+import { CategoryDimensionPanel, DimensionPanel } from "./AnalysisDimensions";
 import {
   Bar,
   ComposedChart,
-  Legend,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -32,7 +30,6 @@ import {
   ComparisonCategoryTick,
   Empty,
   type LoadState,
-  PIE_COLORS,
   percent,
   PURPLE,
   signed,
@@ -97,13 +94,12 @@ export function MonthlyAnalysis({
         </section>
       )}
       <Cards items={[
-        { label: t("收入", "Income"), value: money(overview.metrics.total_income), tone: "inflow", hint: t("本月入账合计", "Total income this month") },
-        { label: t("净支出", "Net expense"), value: money(overview.metrics.total_expense), tone: "outflow", hint: t("支出减去代付", "Expenses minus paid-on-behalf transactions") },
+        { label: t("收入", "Income"), value: money(overview.metrics.total_income), tone: "inflow" },
+        { label: t("净支出", "Net expense"), value: money(overview.metrics.total_expense), tone: "outflow" },
         {
           label: t("储蓄", "Savings"),
           value: money(overview.metrics.surplus),
-          tone: overview.metrics.surplus >= 0 ? "inflow" : "outflow",
-          hint: t("收入减净支出", "Income minus net expense")
+          tone: overview.metrics.surplus >= 0 ? "inflow" : "outflow"
         },
         {
           label: t("储蓄率", "Savings rate"),
@@ -114,18 +110,16 @@ export function MonthlyAnalysis({
             ? undefined
             : overview.metrics.savings_rate >= 0
               ? "inflow"
-              : "outflow",
-          hint: t("储蓄占收入比例", "Savings as a share of income")
+              : "outflow"
         },
-        { label: t("总资产", "Total assets"), value: money(overview.metrics.total_assets), hint: t("现金减借款加投入本金", "Cash minus debt plus invested principal") },
-        { label: t("市场净资产", "Market net assets"), value: money(overview.metrics.market_net_assets), hint: t("按当前理财市值计算", "Uses current investment market value") },
+        { label: t("总资产", "Total assets"), value: money(overview.metrics.total_assets) },
+        { label: t("市场净资产", "Market net assets"), value: money(overview.metrics.market_net_assets) },
         {
           label: t("资产环比", "Asset change"),
           value: overview.metrics.asset_delta === null
             ? t("不可比较", "Unavailable")
             : money(overview.metrics.asset_delta),
-          tone: changeTone(overview.metrics.asset_delta),
-          hint: t("与上月资产比较", "Compared with the previous month")
+          tone: changeTone(overview.metrics.asset_delta)
         },
         {
           label: t("对账差额", "Reconciliation difference"),
@@ -133,8 +127,7 @@ export function MonthlyAnalysis({
             ? money(overview.reconciliation.discrepancy)
             : t("不可比较", "Unavailable"),
           tone: reconciliationTone(discrepancy, reconciliationTolerance),
-          suffix: discrepancyStatus ? businessLabel(discrepancyStatus) : undefined,
-          hint: t("实际净支出减理论消费", "Actual net expense minus theoretical consumption")
+          suffix: discrepancyStatus ? businessLabel(discrepancyStatus) : undefined
         }
       ]} />
       <div className="asset-track-analysis-grid">
@@ -176,25 +169,25 @@ export function MonthlyAnalysis({
           }) : <Empty text={t("暂无理财账户。", "No investment accounts.")} />}
         </ChartPanel>
       </div>
-      <div className="asset-track-analysis-grid is-three">
-        <PiePanel
-          title={t("具体分类", "Categories")}
-          data={categories.map((row) => ({ name: row.category, value: row.amount, months: [month] }))}
-          onOpenTransactions={onOpenTransactions}
-        />
-        <MonthlyDimensionPanel title={t("属性", "Attributes")} rows={(overview.attribute_summary ?? []).map((row) => ({
-          name: `${row.group} · ${row.attribute}`,
-          amount: row.amount,
-          count: row.transaction_count,
-          drilldown: { dimension: "attribute", key: row.attribute_key, label: `${row.group} · ${row.attribute}`, months: [month] }
-        }))} onOpenTransactions={onOpenTransactions} />
-        <MonthlyDimensionPanel title={t("标签", "Tags")} rows={(overview.tag_summary ?? []).map((row) => ({
+      <div className="asset-track-analysis-grid is-three asset-track-dimension-grid">
+        <DimensionPanel title={t("标签", "Tags")} rows={(overview.tag_summary ?? []).map((row) => ({
           name: row.tag,
           amount: row.amount,
           count: row.transaction_count,
           categories: row.categories,
           drilldown: { dimension: "tag", key: row.tag_key, label: row.tag, months: [month] }
         }))} note={t("同一笔流水可计入多个标签，标签金额不能相加。", "A transaction can appear in multiple tags; tag amounts must not be added together.")} onOpenTransactions={onOpenTransactions} />
+        <DimensionPanel title={t("属性", "Attributes")} rows={(overview.attribute_summary ?? []).map((row) => ({
+          name: `${row.group} · ${row.attribute}`,
+          amount: row.amount,
+          count: row.transaction_count,
+          drilldown: { dimension: "attribute", key: row.attribute_key, label: `${row.group} · ${row.attribute}`, months: [month] }
+        }))} onOpenTransactions={onOpenTransactions} />
+        <CategoryDimensionPanel
+          title={t("分类", "Categories")}
+          data={categories.map((row) => ({ name: row.category, value: row.amount, months: [month] }))}
+          onOpenTransactions={onOpenTransactions}
+        />
       </div>
       <ChartPanel title={t(`分类与上月对比${comparison?.previous_month ? `（${comparison.previous_month}）` : ""}`, `Category comparison with previous month${comparison?.previous_month ? ` (${comparison.previous_month})` : ""}`)}>
         {comparison?.available && comparisonRows.length ? (
@@ -245,83 +238,6 @@ export function MonthlyAnalysis({
       </div>
     </>
   );
-}
-
-function PiePanel({
-  title,
-  data,
-  onOpenTransactions
-}: {
-  title: string;
-  data: Array<{ name: string; value: number; months?: string[] }>;
-  onOpenTransactions?: (drilldown?: TransactionAnalysisDrilldown) => void;
-}) {
-  const coloredData = data.map((item, index) => ({
-    ...item,
-    fill: PIE_COLORS[index % PIE_COLORS.length]
-  }));
-  return (
-    <ChartPanel title={title}>
-      {data.length ? (
-        <ResponsiveContainer width="100%" height={280}>
-          <PieChart>
-            <Pie data={coloredData} dataKey="value" nameKey="name" innerRadius={48} outerRadius={88} />
-            <Tooltip formatter={tooltipMoney} />
-            <Legend />
-          </PieChart>
-        </ResponsiveContainer>
-      ) : <Empty text={t("暂无数据。", "No data.")} />}
-      {onOpenTransactions && data.length > 0 && <div className="asset-track-analysis-drilldown-list">
-        {data.map((item) => <button
-          key={item.name}
-          type="button"
-          className="asset-track-analysis-drilldown"
-          onClick={() => onOpenTransactions({
-            dimension: "category",
-            key: item.name,
-            label: item.name,
-            months: item.months
-          })}
-        >{t("查看", "View")} {item.name} {t("流水", "transactions")}</button>)}
-      </div>}
-    </ChartPanel>
-  );
-}
-
-function MonthlyDimensionPanel({
-  title,
-  rows,
-  note,
-  onOpenTransactions
-}: {
-  title: string;
-  rows: Array<{
-    name: string;
-    amount: number;
-    count: number;
-    categories?: Array<{ category: string; amount: number }>;
-    drilldown?: TransactionAnalysisDrilldown;
-  }>;
-  note?: string;
-  onOpenTransactions?: (drilldown?: TransactionAnalysisDrilldown) => void;
-}) {
-  return <ChartPanel title={title}>
-    {note && <p className="asset-track-rule-history-message" role="note">{note}</p>}
-    {rows.length ? <div className="asset-track-analysis-list">
-      {rows.map((row) => <div key={row.name}>
-        <span>{row.name}
-          {row.categories?.length ? <small>（{row.categories.map((category) => `${category.category} ${money(category.amount)}`).join("、")}）</small> : null}
-        </span>
-        <strong>{money(row.amount)} <small>（{row.count}）</small>
-          {onOpenTransactions && row.drilldown && <button
-            type="button"
-            className="asset-track-analysis-drilldown"
-            onClick={() => onOpenTransactions(row.drilldown)}
-          >{t("查看流水", "View transactions")}</button>}
-        </strong>
-      </div>)}
-    </div> : <Empty text={t("暂无数据。", "No data.")} />}
-  </ChartPanel>;
 }
 
 function BigTicketPanel({

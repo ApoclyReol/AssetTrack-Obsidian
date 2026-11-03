@@ -868,3 +868,26 @@ it("filters big-ticket comparisons and applies the anomaly threshold", async () 
     expect((await repository.getMonth("2026-01")).overview.anomalies?.new_big_items).toEqual([]);
   });
 });
+
+
+it("analyzes custom attributes over the latest twelve data months across gaps", async () => {
+  const { repository } = fixture();
+  const taxonomy = repository.taxonomy();
+  await repository.saveTaxonomy(taxonomy.attribute_revision,
+    [...taxonomy.groups, { group_key: "custom-frequency", selection_mode: "single", name: "自定义频率", is_active: true, sort_order: 99 }],
+    [...taxonomy.options, { attribute_key: "custom-value", group_key: "custom-frequency", name: "自定义项目", is_active: true, sort_order: 0 }],
+    taxonomy.tag_revision, taxonomy.tags);
+  const categories = repository.categories();
+  await repository.saveCategories(categories.revision, categories.rows.map((row) => ({ ...row,
+    attribute_keys: row.name === "餐饮基础" ? ["custom-value"] : row.attribute_keys })));
+  const months = ["2024-01", "2024-03", "2024-05", "2024-07", "2024-09", "2024-11", "2025-01", "2025-03", "2025-05", "2025-07", "2025-09", "2025-11", "2026-01"];
+  for (const month of months) {
+    await repository.saveMonth(month, 0, [{ account_key: "cash-default", balance: 100 }],
+      [{ account_key: "investment-default", principal: 0, market_value: 0, cash_balance: 0 }],
+      [{ transaction_date: `${month}-02`, type: "支出", product: "午餐", category_key: categoryKey("餐饮基础"), category: "餐饮基础", amount: 10 }], []);
+  }
+  const analysis = repository.annual("2026");
+  expect(analysis.attribute_expense_months).toEqual(months.slice(1));
+  expect(analysis.attribute_expenses?.find((row) => row.attribute_key === "custom-value"))
+    .toMatchObject({ group: "自定义频率", attribute: "自定义项目", rows: [{ product: "午餐", months_count: 12, total: 120 }] });
+});

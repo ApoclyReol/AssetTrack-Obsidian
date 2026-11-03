@@ -19,12 +19,14 @@ export class AnalysisTransactionsModal extends ManagedModal {
     this.modalEl.addClass("asset-track-native-modal", "asset-track-analysis-transactions-modal");
     const month = this.month?.trim() || t("当前月份", "Current month");
     const label = this.drilldown.label?.trim() || this.drilldown.key?.trim() || t("相关流水", "Related transactions");
-    this.setTitle(t(`${month} · ${label}`, `${month} · ${label}`));
+    const months = this.drilldown.months?.length ? [...new Set(this.drilldown.months)].sort() : [this.month];
+    const period = months.length > 1 ? `${months[0]} → ${months.at(-1)}` : month;
+    this.setTitle(`${period} · ${label}`);
     const status = this.contentEl.createEl("p", { text: t("正在加载流水…", "Loading transactions…") });
-    void Promise.all([this.api.month(this.month), this.api.categories()]).then(([workspace, categoryResult]) => {
+    void Promise.all([Promise.all(months.map((value) => this.api.month(value))), this.api.categories()]).then(([workspaces, categoryResult]) => {
       if (this.closed) return;
       const categories = categoryResult.rows;
-      const rows = workspace.transactions.filter((row) => {
+      const rows = workspaces.flatMap((workspace) => workspace.transactions).filter((row) => {
         if (row.type !== "支出" && row.type !== "代付") return false;
         if (this.drilldown.dimension === "tag") return row.tag_keys?.includes(this.drilldown.key);
         const category = categories.find((item) => item.category_key === row.category_key || item.name === row.category);

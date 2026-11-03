@@ -1,3 +1,4 @@
+import { MonthCreationModal } from "../../src/ui/MonthCreationModal";
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -357,10 +358,14 @@ describe("editor draft restoration", () => {
     );
 
     const monthSelect = await screen.findByRole("combobox", { name: "编辑月份" });
+    const chooseMonth = vi.spyOn(MonthCreationModal.prototype, "open").mockImplementation(function (this: MonthCreationModal) {
+      (this as unknown as { onChoose: (value: string) => void }).onChoose("2026-09");
+    });
     const createButton = await screen.findByRole("button", { name: "创建月份" });
     fireEvent.click(createButton);
     await waitFor(() => expect((monthSelect as HTMLSelectElement).value).toBe("2026-09"));
     expect(createMonth).toHaveBeenCalledWith("2026-09");
+    chooseMonth.mockRestore();
 
     fireEvent.click(screen.getByRole("button", { name: "删除月份" }));
     await waitFor(() => expect((monthSelect as HTMLSelectElement).value).toBe("2026-08"));

@@ -1,6 +1,6 @@
 import { CategoryMigrationModal } from "../CategoryMigrationModal";
 import { CategoryRemovalModal } from "../CategoryRemovalModal";
-import { Menu, Notice, type App } from "obsidian";
+import { Notice, type App } from "obsidian";
 import type { ConfigurationEditorPort } from "../../services/ports";
 import type {
   AttributeGroup,
@@ -145,10 +145,8 @@ export function CategoryDefinitionsTable({
             onSavedHistory, onDataChanged, onOpenRules
           }).open()}><span className="asset-track-action-full">{t("编辑属性", "Edit attributes")}</span><span className="asset-track-action-short">{t("属性", "Attributes")}</span></button>
           <button type="button" disabled={editingDisabled} onClick={() => openHistory(row, false)}><span className="asset-track-action-full">{t("迁移流水", "Migrate transactions")}</span><span className="asset-track-action-short">{t("迁移", "Migrate")}</span></button>
-          <button type="button" disabled={editingDisabled} aria-label={t(`${rowLabel}更多操作`, `More actions for ${rowLabel}`)} onClick={event => {
-            new Menu().addItem(item => item.setTitle(t("删除分类", "Delete category")).setIcon("trash-2")
-              .onClick(() => openHistory(row, true))).showAtMouseEvent(event.nativeEvent);
-          }}>···</button></div></td>
+          <button type="button" className="mod-warning" disabled={editingDisabled} aria-label={t(`删除${rowLabel}`, `Delete ${rowLabel}`)}
+            onClick={() => openHistory(row, true)}>{t("删除", "Delete")}</button></div></td>
         </tr>;
         })}</tbody>
       </table>

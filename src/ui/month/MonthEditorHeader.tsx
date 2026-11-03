@@ -87,13 +87,11 @@ export function MonthEditorHeader({
   reconciliationTolerance,
   businessTab,
   statusBar,
-  hasSelectedTransactions = false,
   emptyMonth,
   deleteConfirm,
   showDeleteConfirm,
   onOpenImport,
   onBusinessTabChange,
-  onApplyRules,
   onReload,
   onSave,
   onLoad,
@@ -149,16 +147,7 @@ export function MonthEditorHeader({
           <div className="asset-track-page-actions">
             {activeSection === "transactions" && <>
               {importButton(onOpenImport, state.kind === "pending")}
-              {businessTab !== "investment" && <button
-                type="button"
-                disabled={state.kind === "pending" || hasSelectedTransactions}
-                title={hasSelectedTransactions
-                  ? t("当前已有选中流水，请先取消选择后再应用全部规则。", "Selected rows are active. Clear the selection before applying all rules.")
-                  : undefined}
-                onClick={() => void onApplyRules()}
-              >
-                {t("应用规则", "Apply rules")}
-              </button>}
+
             </>}
             <button
               type="button"
@@ -191,16 +180,7 @@ export function MonthEditorHeader({
         </div>
         <div className="asset-track-actions">
           {importButton(onOpenImport, state.kind === "pending")}
-          {businessTab !== "investment" && <button
-            type="button"
-            disabled={state.kind === "pending" || hasSelectedTransactions}
-            title={hasSelectedTransactions
-              ? t("当前已有选中流水，请先取消选择后再应用全部规则。", "Selected rows are active. Clear the selection before applying all rules.")
-              : undefined}
-            onClick={() => void onApplyRules()}
-          >
-            {t("应用规则", "Apply rules")}
-          </button>}
+
           <button
             type="button"
             disabled={state.kind === "pending"}
@@ -235,13 +215,13 @@ export function MonthEditorHeader({
           monthMetrics.discrepancy,
           reconciliationTolerance
         ) ?? ""}`}>
-          <span className="asset-track-month-metric-label">
-            {t("对账差额", "Reconciliation difference")}
+          <div className="asset-track-month-metric-label">
+            <span>{t("对账差额", "Reconciliation difference")}</span>
             <ReconciliationHint
               discrepancy={monthMetrics.discrepancy}
               tolerance={reconciliationTolerance}
             />
-          </span>
+          </div>
           <strong>
             {monthMetrics.discrepancy === null
               ? t("不可比较", "Unavailable")

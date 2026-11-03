@@ -113,6 +113,8 @@ export function MonthEditorStatusBar({
     }
   };
 
+  if (compact && status.tone === "success" && !compactHeadline && !hasFeedback) return null;
+
   return (
     <section
      className={"asset-track-month-status is-" + status.tone + (compact ? " is-compact" : "")}
@@ -121,9 +123,9 @@ export function MonthEditorStatusBar({
       aria-live={status.tone === "error" ? "assertive" : "polite"}
       aria-atomic="true"
     >
-      <span className={`asset-track-month-status-state is-${status.tone}`}>
+      {(!compact || status.tone !== "success") && <span className={`asset-track-month-status-state is-${status.tone}`}>
         {status.label}
-      </span>
+      </span>}
       {!compact && <div className="asset-track-month-status-content">
         <strong>{headline}</strong>
         {feedback?.kind !== "success" && state.kind !== "pending" && state.kind !== "error"

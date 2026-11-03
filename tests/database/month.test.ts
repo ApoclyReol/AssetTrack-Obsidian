@@ -473,3 +473,15 @@ it("protects locked months from edits and deletion", async () => {
     expect((await repository.getMonth("2026-01")).cash_accounts[0].balance).toBe(100);
   });
 });
+
+
+it("allows skipping months and filling an earlier month", async () => {
+  const { repository } = fixture();
+  const first = await repository.createMonth("2025-08");
+  await repository.saveMonthSection(first.month, { section: "transactions", expected_revision: first.revision, transactions: [] });
+  const later = await repository.createMonth("2026-03");
+  await repository.saveMonthSection(later.month, { section: "transactions", expected_revision: later.revision, transactions: [] });
+  const historical = await repository.createMonth("2025-01");
+  expect(historical.month).toBe("2025-01");
+  expect(repository.monthCreationPolicy().months).toEqual(["2025-01", "2025-08", "2026-03"]);
+});

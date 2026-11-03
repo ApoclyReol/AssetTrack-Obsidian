@@ -50,6 +50,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          version="$(node -p "require('./manifest.json').version")"
           assets=(
             build/main.js
             build/manifest.json
@@ -57,8 +58,8 @@ jobs:
           )
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --clobber
-            gh release edit "${GITHUB_REF_NAME}" --notes-file "${RUNNER_TEMP}/asset-track-release-notes.md"
+            gh release edit "${GITHUB_REF_NAME}" --title "Asset Track ${version}" --notes-file "${RUNNER_TEMP}/asset-track-release-notes.md"
           else
             gh release create "${GITHUB_REF_NAME}" "${assets[@]}" \
-              --verify-tag --notes-file "${RUNNER_TEMP}/asset-track-release-notes.md"
+              --verify-tag --title "Asset Track ${version}" --notes-file "${RUNNER_TEMP}/asset-track-release-notes.md"
           fi

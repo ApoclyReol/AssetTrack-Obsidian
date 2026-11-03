@@ -832,6 +832,7 @@ export class AnalysisReadModel {
         attribute_key: row.attribute_key,
         attribute: row.attribute,
         total: row.amount,
+        transaction_count: row.transaction_count,
         share_percent: total > 0 ? roundHalfEven(row.amount / total * 100, 1) : 0,
         months: [...(attributeMonths.get(row.attribute_key) ?? new Set<string>())].sort()
       })),
@@ -888,10 +889,7 @@ export class AnalysisReadModel {
       };
     }
     const latestMonth = annualMonths.at(-1)!;
-    const rollingStart = shiftMonth(latestMonth, -11);
-    const rollingMonths = availableMonths.filter(
-      (month) => month >= rollingStart && month <= latestMonth
-    );
+    const rollingMonths = availableMonths.filter((month) => month <= latestMonth).slice(-12);
     const trendMonths = sampleMonths(availableMonths);
     const requiredMonths = new Set<string>([
       ...annualMonths,
@@ -916,7 +914,7 @@ export class AnalysisReadModel {
     const savings = roundHalfEven(totalIncome - totalExpense);
     const latest = annual.at(-1)!;
     const rollingRows = full.filter(
-      (row) => row.month >= rollingStart && row.month <= latestMonth
+      (row) => rollingMonths.includes(row.month)
     );
     const annualFixedAssets = new Map<string, AnnualFixedAsset>();
     const fixedAssetMonths = annualMonths.filter((month) => month.startsWith(year));
@@ -947,6 +945,13 @@ export class AnalysisReadModel {
       },
       latest,
       rolling_rows: rollingRows,
+      attribute_expense_months: rollingMonths,
+      attribute_expenses: (this.context.attributeOptions?.(db) ?? []).filter((option) => option.is_active).map((option) => ({
+        attribute_key: option.attribute_key,
+        group: (this.context.attributeGroups?.(db) ?? []).find((group) => group.group_key === option.group_key)?.name ?? "",
+        attribute: option.name,
+        rows: this.recurringExpenses(latest.month, rollingMonths, categories, transactionsByMonth, option.attribute_key)
+      })),
       recurring_expenses: this.recurringExpenses(
         latest.month,
         rollingMonths,
@@ -1017,13 +1022,14 @@ export class AnalysisReadModel {
     latestMonth: string,
     selectedMonths: string[],
     categories: CategoryDefinition[],
-    transactionsByMonth: Map<string, Transaction[]>
+    transactionsByMonth: Map<string, Transaction[]>,
+    attributeKey: string = TAXONOMY_ATTRIBUTE_KEYS.recurring
   ): RecurringExpenseSummary[] {
     const selected = new Set(selectedMonths.filter((month) => month <= latestMonth));
     if (!selected.size) return [];
     const periodicCategories = new Map(
       categories
-        .filter((category) => categoryHasAttribute(category, TAXONOMY_ATTRIBUTE_KEYS.recurring))
+        .filter((category) => categoryHasAttribute(category, attributeKey))
         .map((category) => [category.category_key, category.name])
     );
     const result = new Map<string, {

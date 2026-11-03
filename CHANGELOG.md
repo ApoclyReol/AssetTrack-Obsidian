@@ -1,5 +1,31 @@
 # Changelog
 
+## 2.3.5
+
+### English
+
+- Choose the month to create, including skipped and historical months. Rolling analysis uses the latest twelve months with data.
+- Create matching rules in one dialog from transactions or Configuration. Match conditions and results appear side by side, amount and rewrite settings stay visible, and concise conflict notices identify existing rules. Apply rules directly to the current draft or selected transactions.
+- Organize transaction actions into View, Classification and Edit groups. Edit item and counterparty together, manage tag additions and removals in one dialog, and undo draft changes. Select all beside the selection count, while keeping row-level tag editing available.
+- Merge summary groups with one option to keep tagged transactions. Turning it off includes tagged transactions and removes tags from merged results. Categories are handled separately, and confirmation updates the draft.
+- Manage categories, attribute definitions and tag definitions on one Category design page. Show category deletion directly and give category descriptions more space.
+- Align annual and monthly tag, attribute and category analysis. Compact category buttons show amounts and percentages and open the related transactions. Simplify annual panels and reorder savings, history and fixed assets.
+- Fix empty hover hints, help-icon alignment, transaction status clutter, summary amount signs, cancel behavior and layout shifts when selecting transactions.
+
+Updating from 2.2.0 does not require a ledger upgrade. Transaction edits and merges take effect in the draft first. Save transactions to persist them.
+
+### 中文
+
+- 创建月份支持自主选月、跳月和补历史月，滚动分析采用最近十二个有数据的月份。
+- 流水页和配置页统一使用新建规则窗口，左右展示匹配条件和处理结果，金额与重写设置直接可见，精简冲突提示并指明已有规则。规则直接应用于当前草稿或选中流水。
+- 流水操作划分为视图、分类、编辑三组。商品与交易对手可集中修改，标签在同窗添加或移除，草稿修改支持撤回。全选与选择数量同行，保留每行标签编辑入口。
+- 合并汇总组仅保留“保留带标签项”选项。取消后带标签项也参与合并，合并结果去除标签。不同分类分别处理，确认后进入草稿。
+- 分类、属性定义和标签定义在同一“分类设计”页面管理，直接展示分类删除入口，为分类说明增加空间。
+- 统一年度与月度的标签、属性、分类分析。分类按钮同时展示金额与占比，点击查看相关流水。精简年度面板，调整储蓄率、全历史趋势与固定资产顺序。
+- 修复空悬浮提示、帮助图标对齐、冗余流水状态、汇总金额符号、取消操作及选择流水时的布局跳变。
+
+从 2.2.0 更新无需升级账本。流水编辑与合并先进入草稿，点击“保存流水”后生效。
+
 ## 2.2.0
 
 ### English

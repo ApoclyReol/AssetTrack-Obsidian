@@ -185,7 +185,7 @@ describe("month debt and special transaction rows", () => {
     expect(screen.getByLabelText("支出第 1 行交易对手")).toBeDefined();
   });
 
-  it("offers the retained source row for an imported transaction", () => {
+  it("omits the source-row interaction even when import metadata is available", () => {
     const rows: Transaction[] = [{
       id: 1,
       source: "账单.csv · 原始第 2 行",
@@ -213,11 +213,8 @@ describe("month debt and special transaction rows", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "查看支出第 1 行原始账单" }));
-    expect(onViewSourceRow).toHaveBeenCalledWith(rows[0], {
-      row: 2,
-      values: ["2026-01-01", "拿铁", "12", "支出"]
-    });
+    expect(screen.queryByRole("button", { name: "查看支出第 1 行原始账单" })).toBeNull();
+    expect(onViewSourceRow).not.toHaveBeenCalled();
   });
 
   it("removes rule coverage from item summary and keeps type/category sortable", () => {

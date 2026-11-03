@@ -112,6 +112,7 @@ export interface AnnualCostAudit {
     group: string;
     attribute_key: string;
     attribute: string;
+    transaction_count?: number;
     total: number;
     share_percent: number;
     months?: string[];
@@ -141,6 +142,8 @@ export interface AnnualOverview {
   latest: AnnualRow | null;
   rolling_rows: AnnualRow[];
   recurring_expenses: RecurringExpenseSummary[];
+  attribute_expenses?: Array<{ attribute_key: string; group: string; attribute: string; rows: RecurringExpenseSummary[] }>;
+  attribute_expense_months?: string[];
   fixed_assets: AnnualFixedAsset[];
   all_trend_rows: AnnualRow[];
   cost_audit: AnnualCostAudit;

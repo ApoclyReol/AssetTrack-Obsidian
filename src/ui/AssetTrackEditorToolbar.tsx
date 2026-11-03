@@ -72,13 +72,13 @@ export function MonthMetricsSummary({
         <strong>{money(metrics.expense)}</strong>
       </div>
       <div className={`asset-track-month-metric ${reconciliationTone(metrics.discrepancy, reconciliationTolerance) ?? ""}`}>
-        <span className="asset-track-month-metric-label">
-          {t("对账差额", "Reconciliation difference")}
+        <div className="asset-track-month-metric-label">
+          <span>{t("对账差额", "Reconciliation difference")}</span>
           <ReconciliationHint
             discrepancy={metrics.discrepancy}
             tolerance={reconciliationTolerance}
           />
-        </span>
+        </div>
         <strong>
           {metrics.discrepancy === null ? t("不可比较", "Unavailable") : money(metrics.discrepancy)}
           {discrepancyStatus && <small className="asset-track-month-metric-suffix">（{businessLabel(discrepancyStatus)}）</small>}
@@ -192,7 +192,7 @@ export function AssetTrackEditorToolbar({
                 type="button"
                 className="mod-cta"
                 disabled={!monthPolicy?.can_create}
-                title={t("创建下一个月份", "Create the next month")}
+                title={t("选择要创建的月份", "Choose a month to create")}
                 onClick={() => void onCreateNext()}
               >
                 {t("创建月份", "Create month")}
@@ -232,12 +232,12 @@ export function AssetTrackEditorToolbar({
               <button
                 key={item}
                 type="button"
-                className={rulesMode === item ? "is-active" : ""}
+                className={(rulesMode === item || (rulesMode === "taxonomy" && item === "categories")) ? "is-active" : ""}
                 onClick={() => void onSwitchRulesMode(item)}
               >
                 {{
                   health: t("数据健康", "Data health"),
-                  categories: t("分类定义", "Category definitions"),
+                  categories: t("分类设计", "Category design"),
                   matching: t("匹配规则", "Matching rules"),
                   products: t("商品总览", "Item overview"),
                   taxonomy: t("分类属性", "Category attributes")

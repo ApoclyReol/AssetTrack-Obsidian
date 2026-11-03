@@ -1,3 +1,4 @@
+import { MonthCreationModal } from "./MonthCreationModal";
 import {
   useCallback,
   useEffect,
@@ -435,7 +436,10 @@ export function AssetTrackEditorApp({
         params: reason?.params
       });
     }
-    const target = monthPolicy.next_target;
+    const target = await new Promise<string | null>((resolve) => {
+      new MonthCreationModal(app, monthPolicy, resolve).open();
+    });
+    if (!target || sequence !== navigationSequence.current) return;
     await api.createMonth(target);
     if (sequence !== navigationSequence.current) return;
     await refreshMonths();

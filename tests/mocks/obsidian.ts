@@ -15,6 +15,7 @@ export const Platform = {
 };
 
 export const requestUrl = vi.fn();
+export const setIcon = vi.fn();
 
 export class App {}
 

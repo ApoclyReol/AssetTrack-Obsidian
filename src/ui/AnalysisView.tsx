@@ -34,7 +34,11 @@ export function AnalysisView({
   return (
     <main className="asset-track-analysis">
       {mode === "annual" && (
-        <AnnualAnalysis state={annualState} year={year} />
+        <AnnualAnalysis state={annualState} year={year} onOpenTransactions={(drilldown) => {
+          if (!drilldown || annualState.kind !== "ready") return;
+          const targetMonth = drilldown.months?.at(-1) ?? annualState.data.months.at(-1);
+          if (targetMonth) new AnalysisTransactionsModal(app, api, targetMonth, drilldown).open();
+        }} />
       )}
       {mode === "monthly" && month && (
         <MonthlyAnalysis

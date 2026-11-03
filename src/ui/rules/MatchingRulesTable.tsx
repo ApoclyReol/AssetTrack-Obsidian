@@ -13,6 +13,7 @@ import type { App } from "obsidian";
 import { RuleRewriteEditor } from "../RuleRewriteEditor";
 import { ruleConflictMessages } from "./ruleConflictMessages";
 import { RuleAmountEditor } from "../RuleAmountEditor";
+import { RuleCreationModal } from "../RuleCreationModal";
 import { ActionTableHeader } from "../TablePrimitives";
 import {
   clone,
@@ -169,12 +170,23 @@ export function MatchingRulesTable({
   };
 
   const appendRule = () => {
+    if (!app) return;
     const category = categories.find((row) => row.is_active && row.transaction_type === "支出");
-    pendingRuleKey.current = `new-rule-${rules.length}`;
-    setFilters(EMPTY_RULE_LIST_FILTERS);
-    setGroupBy("none");
-    onSort({ ...DEFAULT_RULE_SORT });
-    onChange([...rules, { transaction_type: "支出", match_scope: undefined, counterparty: "", product: "", rewrite_merchant: "", rewrite_product: "", category_key: category?.category_key ?? "", category: category?.name ?? "" }]);
+    new RuleCreationModal({
+      app,
+      categories,
+      rules,
+      initial: { transaction_type: "支出", counterparty: "", product: "",
+        category_key: category?.category_key ?? "", category: category?.name ?? "" },
+      confirmLabel: t("添加到规则草稿", "Add to rule draft"),
+      onConfirm: (rule) => {
+        pendingRuleKey.current = `new-rule-${rules.length}`;
+        setFilters(EMPTY_RULE_LIST_FILTERS);
+        setGroupBy("none");
+        onSort({ ...DEFAULT_RULE_SORT });
+        onChange([...rules, rule]);
+      }
+    }).open();
   };
 
   const renderRuleRow = ({ row, originalIndex: index }: { row: SavedRule; originalIndex: number }) => {
@@ -278,7 +290,7 @@ export function MatchingRulesTable({
       </table>
     </div>}
     <div className="asset-track-section-actions">
-      <button type="button" onClick={appendRule}>{t("新增规则", "Add rule")}</button>
+      <button type="button" disabled={!app || pageState.kind === "pending" || saveState.kind === "pending"} onClick={appendRule}>{t("新建规则", "New rule")}</button>
       {showSectionActions && <>
         <button type="button" disabled={pageState.kind === "pending"} onClick={() => void onReload()}>
           {t("放弃并重载", "Discard and reload")}

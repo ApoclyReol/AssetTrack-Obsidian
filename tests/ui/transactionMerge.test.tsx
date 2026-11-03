@@ -28,20 +28,20 @@ function section(selected: Set<number> = new Set(), transactionRows = rows, matc
   return merge;
 }
 describe("merge summary interactions", () => {
-  it("recomputes the preview when tagged transactions are included and confirms that exact result", async () => {
+  it("computes the result on confirmation and removes tags when retention is disabled", async () => {
     const taggedRows = rows.map((row) => ({ ...row, tag_keys: ["a", "b"] }));
     const request: MergeTransactionsRequest = { month: "2026-10", rows: taggedRows, group_by: "product", groups: [{ transaction_keys: ["id:1", "id:2"] }], expected_revision: 1 };
     const result = previewTransactionMerge(request);
     const confirm = vi.fn<(value: MergePreviewResult) => Promise<void>>().mockResolvedValue(undefined);
     const onPreview = vi.fn(async (includeTagged: boolean) => previewTransactionMerge({ ...request, include_tagged: includeTagged }));
     render(<TransactionMergeContent result={result} onPreview={onPreview} tagNames={{ a: "旅行", b: "家庭" }} onConfirm={confirm} onClose={vi.fn()} />);
-    expect(screen.getByRole<HTMLButtonElement>("button", { name: "合并到流水草稿" }).disabled).toBe(true);
-    fireEvent.click(screen.getByRole("checkbox", { name: "包含有标签的流水" }));
-    await waitFor(() => expect(screen.getByRole<HTMLButtonElement>("button", { name: "合并到流水草稿" }).disabled).toBe(false));
-    expect(screen.getAllByText("旅行 · 家庭").length).toBeGreaterThan(0); expect(onPreview).toHaveBeenCalledWith(true);
+    expect(screen.getByRole<HTMLInputElement>("checkbox", { name: "保留带标签项" }).checked).toBe(true);
+    expect(screen.queryByRole("table")).toBeNull();
+    fireEvent.click(screen.getByRole("checkbox", { name: "保留带标签项" }));
+    expect(onPreview).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "合并到流水草稿" }));
     await waitFor(() => expect(confirm).toHaveBeenCalledOnce());
-    expect(confirm.mock.calls[0][0].groups[0].after).toMatchObject({ amount: 39.8, tag_keys: ["a", "b"] });
+    expect(confirm.mock.calls[0][0].groups[0].after).toMatchObject({ amount: 39.8, tag_keys: [] });
   });
   it("only offers per-row merging and always uses the entire visible summary group", () => {
     const merge = section(new Set([1]));
@@ -67,14 +67,14 @@ describe("merge summary interactions", () => {
     const values = rows.map((row, index) => ({ ...row, counterparty: `平台${index}` }));
     const result = previewTransactionMerge({ month: "2026-10", rows: values, group_by: "product", groups: [{ transaction_keys: ["id:1", "id:2"] }], expected_revision: 1 });
     render(<TransactionMergeContent result={result} onConfirm={vi.fn()} onClose={vi.fn()} />);
-    expect(screen.getByText("—（原名称不同，合并后留空）")).toBeTruthy();
+    expect(screen.queryByRole("table")).toBeNull();
   });
   it("previews irreversible replacement and only confirms on the explicit button", async () => {
     const result = previewTransactionMerge({ month: "2026-10", rows, group_by: "product", groups: [{ transaction_keys: ["id:1", "id:2"] }], expected_revision: 1 });
     const confirm = vi.fn().mockResolvedValue(undefined); const close = vi.fn();
     render(<TransactionMergeContent result={result} onConfirm={confirm} onClose={close} />);
-    expect(screen.getByText(/保存后替换原记录/)).toBeTruthy();
-    expect(screen.getByText(/按分类和完整标签组合分别合并/)).toBeTruthy(); expect(confirm).not.toHaveBeenCalled();
+    expect(screen.getByRole<HTMLInputElement>("checkbox", { name: "保留带标签项" }).checked).toBe(true);
+    expect(confirm).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "合并到流水草稿" }));
     await waitFor(() => expect(close).toHaveBeenCalledTimes(1)); expect(confirm).toHaveBeenCalledTimes(1);
   });
@@ -93,7 +93,7 @@ describe("merge summary interactions", () => {
     const result = previewTransactionMerge({ month: "2026-10", rows, group_by: "product", groups: [{ transaction_keys: ["id:1", "id:2"] }], expected_revision: 1 });
     render(<TransactionMergeContent result={result} onConfirm={vi.fn()} onClose={vi.fn()} />);
     expect(screen.getByRole("button", { name: "Merge into transaction draft" })).toBeTruthy();
-    expect(screen.getByText(/splitting is not supported/)).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Keep tagged transactions" })).toBeTruthy();
   });
 });
 
@@ -122,4 +122,20 @@ it("requires an open modal to confirm and works without a loaded rule revision",
   await act(async () => { await capture.confirm!(() => true, capture.result!); });
   expect(mark).toHaveBeenCalledWith(expect.objectContaining({ transactions: [expect.objectContaining({ product: "会员", amount: 39.8 })] }), "transactions");
   expect(ruleWorkspaceShell).not.toHaveBeenCalled();
+});
+
+
+it("explains conflicting conditions and keeps the new rule blocked until its conditions change", async () => {
+  const existing = { ...rule, id: 22, match_amount_minor: null };
+  const confirm = vi.fn().mockResolvedValue(undefined);
+  render(<RuleCreationContent initial={{ ...rule, id: undefined, match_amount_minor: null }}
+    rules={[existing]} categories={categories} onConfirm={confirm} onClose={vi.fn()} />);
+  expect(screen.getByRole("alert").textContent).toContain("与规则#22冲突，会员 · 不限交易对手 · 不限金额，已归类到「订阅服务」。");
+  expect(screen.getByRole<HTMLButtonElement>("button", { name: "确认保存规则" }).disabled).toBe(true);
+  expect(screen.queryByRole("button", { name: "编辑规则 #22" })).toBeNull();
+  fireEvent.change(screen.getByRole("textbox", { name: "商品" }), { target: { value: "另一会员" } });
+  expect(screen.queryByRole("alert")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "确认保存规则" }));
+  await waitFor(() => expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ product: "另一会员" })));
+  expect(confirm.mock.calls[0][0]).not.toHaveProperty("id");
 });

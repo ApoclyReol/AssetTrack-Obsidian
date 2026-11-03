@@ -36,7 +36,7 @@ describe("merge transaction persistence", () => {
     expect(saved.transactions.find((row) => row.id === month.transactions[4].id)).toMatchObject({ category: "", amount: 0.4 });
     expect(repository.rules().rows).toHaveLength(0);
   });
-  it("persists tag partitions without changing tag totals and rejects a forged tag option", async () => {
+  it("persists tag removal and rejects a forged tag option", async () => {
     const { repository } = fixture();
     const taxonomy = repository.taxonomy();
     const savedTaxonomy = await repository.saveTaxonomy(taxonomy.attribute_revision, taxonomy.groups, taxonomy.options,
@@ -59,12 +59,9 @@ describe("merge transaction persistence", () => {
     log.preview.metadata!.include_tagged = true;
     const saved = await repository.saveMonthSection(month.month, { section: "transactions", expected_revision: month.revision,
       transactions: merge.rows, operation_logs: [log] });
-    expect(saved.transactions).toHaveLength(4);
-    for (const key of tags) {
-      const cents = (rows: typeof month.transactions) => Math.round(rows.filter((row) => row.tag_keys?.includes(key)).reduce((sum, row) => sum + row.amount, 0) * 100);
-      expect(cents(saved.transactions)).toBe(cents(month.transactions));
-    }
-    expect(saved.transactions.find((row) => row.id === month.transactions[6].id)).toMatchObject({ amount: 19.9, tag_keys: [tags[1]] });
+    expect(saved.transactions).toHaveLength(1);
+    expect(saved.transactions[0]).toMatchObject({ amount: 139.3, tag_keys: [] });
+    expect((await repository.getMonth(month.month)).transactions[0].tag_keys).toEqual([]);
   });
   it("atomically replaces sources with a new ID and logs the assigned identity", async () => {
     const { repository, month, merge, logs } = await setup();

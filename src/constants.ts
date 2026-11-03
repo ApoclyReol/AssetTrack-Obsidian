@@ -16,4 +16,4 @@ export const EDITOR_MODES: EditorMode[] = [
   "rules"
 ];
 export const ANALYSIS_MODES: AnalysisMode[] = ["annual", "monthly"];
-export const RULES_MODES: RulesMode[] = ["health", "categories", "taxonomy", "matching", "products"];
+export const RULES_MODES: RulesMode[] = ["health", "categories", "matching", "products"];

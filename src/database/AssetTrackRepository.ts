@@ -384,12 +384,11 @@ export class AssetTrackRepository {
     ).all()).map((row) => text(row.month)).filter(isMonth);
     const current = localMonth();
     const max = nextMonth(current);
-    const target = months.length ? nextMonth(months.at(-1)!) : current;
+    const suggested = months.length ? nextMonth(months.at(-1)!) : current;
+    const target = suggested > max ? current : suggested;
     let reason: MonthCreationPolicy["reason"] = null;
     if (drafts.length) {
       reason = { code: "month.draft_exists", params: { month: drafts[0] } };
-    } else if (target > max) {
-      reason = { code: "month.creation_limit", params: { max } };
     }
     return {
       months,

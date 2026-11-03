@@ -4,6 +4,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 export function HoverHint({ children, content, className = "" }: {
   children: ReactNode; content: ReactNode; className?: string;
 }) {
+  const hasContent = content !== undefined && content !== null && content !== false
+    && (typeof content !== "string" || content.trim().length > 0);
   const [open, setOpen] = useState(false);
   const host = useRef<HTMLSpanElement>(null);
   const tooltip = useRef<HTMLSpanElement>(null);
@@ -29,13 +31,13 @@ export function HoverHint({ children, content, className = "" }: {
   useEffect(() => () => cancel(), []);
   const change = (value: boolean) => {
     cancel();
-    timer.current = host.current?.ownerDocument.defaultView?.setTimeout(() => setOpen(value), 200);
+    timer.current = host.current?.ownerDocument.defaultView?.setTimeout(() => setOpen(value && hasContent), 200);
   };
   return <span ref={host} className={`asset-track-hover-hint ${className}`}
     onMouseEnter={() => change(true)} onMouseLeave={() => change(false)}
     onFocus={() => change(true)} onBlur={() => change(false)}>
     {children}
-    {open && host.current && createPortal(<span ref={tooltip} style={position}
+    {hasContent && open && host.current && createPortal(<span ref={tooltip} style={position}
       onMouseEnter={cancel} onMouseLeave={() => change(false)}
       className="asset-track-hover-hint-content" role="tooltip">{content}</span>, host.current.ownerDocument.body)}
   </span>;

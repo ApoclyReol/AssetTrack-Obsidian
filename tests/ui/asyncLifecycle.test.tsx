@@ -287,3 +287,34 @@ describe("async UI lifecycle guards", () => {
     }))).toContain("预览");
   });
 });
+
+it("uses the edited draft and rebases repeated rule passes on the previous draft operation", async () => {
+  const { previewTransactionOperation } = await import("../../src/domain/transactionOperations");
+  const { useState } = await import("react");
+  const canonical = { ...transaction("原商品"), id: 10, client_id: undefined };
+  const edited = { ...canonical, product: "手工商品" };
+  const rules = [{ id: 1, transaction_type: "支出" as const, match_scope: "product" as const,
+    product: "手工商品", category_key: "food", category: "餐饮", rewrite_product: "规范商品" }];
+  const pending = { current: [] as import("../../src/types/operations").PendingOperationLog[] };
+  const api = {
+    month: vi.fn(async () => ({ revision: 1, transactions: [canonical] })),
+    previewTransactionOperation: vi.fn(async (request: import("../../src/types/operations").TransactionOperationRequest & { rows: Transaction[] }) =>
+      previewTransactionOperation(request.rows ?? [], request, rules))
+  } as unknown as MonthEditorPort;
+  const confirm = vi.fn();
+  const { result } = renderHook(() => {
+    const [current, setCurrent] = useState({ revision: 1, transactions: [edited] } as MonthWorkspace);
+    const operations = useTransactionOperations({ api, hostWindow: { confirm } as unknown as Window,
+      month: "2026-07", draft: current, categories: [], rules, rulesRevision: 1,
+      setState: vi.fn(), mark: setCurrent, pendingOperationLogsRef: pending, transactionResetVersion: 0 });
+    return { operations, current };
+  });
+  await act(async () => { await result.current.operations.applyRules(); });
+  expect(result.current.current.transactions[0].product).toBe("规范商品");
+  await act(async () => { await result.current.operations.applyRules(); });
+  expect(confirm).not.toHaveBeenCalled();
+  expect(pending.current).toHaveLength(2);
+  expect(pending.current[0].preview.changes[0].before.product).toBe("原商品");
+  expect(pending.current[1].preview.changes[0].before.product).toBe("规范商品");
+  expect(pending.current[1].preview.changes[0].status).toBe("skip");
+});

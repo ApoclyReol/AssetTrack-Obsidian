@@ -65,5 +65,11 @@ export function ReconciliationHint({
     <strong>{title}</strong><p>{description}</p>
     {!unavailable && <p>{money(numericDiscrepancy)}{status && `（${businessLabel(status)}）`}</p>}
     {suggestions.length > 0 && <ul>{suggestions.map((suggestion) => <li key={suggestion}>{suggestion}</li>)}</ul>}
-  </>}><span className="asset-track-inline-question" tabIndex={0} aria-label={summaryLabel}>?</span></HoverHint>;
+  </>}><span className="asset-track-inline-question" tabIndex={0} aria-label={summaryLabel}>
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <circle cx="9" cy="9" r="8" fill="none" stroke="currentColor" />
+      <path d="M6.5 6.5a2.5 2.5 0 0 1 5 0c0 1.7-2.5 1.7-2.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <circle cx="9" cy="13" r="0.7" fill="currentColor" />
+    </svg>
+  </span></HoverHint>;
 }

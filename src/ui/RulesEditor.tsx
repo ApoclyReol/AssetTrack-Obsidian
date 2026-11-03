@@ -160,7 +160,8 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
     discard: async () => undefined,
     discardAll: async () => undefined
   });
-  const currentSection = section ?? "health";
+  const isDesignPage = section === "categories" || section === "taxonomy";
+  const currentSection: RulesMode = isDesignPage ? "categories" : section ?? "health";
   const getRulesDraftSnapshot = useCallback(() => {
     const snapshot = getDraftSnapshot(analyticsReady);
     return snapshot ? { ...snapshot, active_section: currentSection } : null;
@@ -545,11 +546,10 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
 
   const saveCurrentSection = async (): Promise<boolean> => {
     if (saveBlockedRef.current) return false;
-    if (currentSection === "taxonomy") {
-      return taxonomyPanelRef.current ? taxonomyPanelRef.current.save() : true;
-    }
     if (currentSection === "categories") {
-      return categoryDirty ? (await saveCategories()).saved : true;
+      const saved = categoryDirty ? (await saveCategories()).saved : true;
+      if (saved && taxonomyPanelRef.current?.hasUnsavedChanges()) return taxonomyPanelRef.current.save();
+      return saved;
     }
     if (currentSection === "matching") {
       return saveRules();
@@ -583,10 +583,6 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
   };
 
   const reloadCurrentSection = async () => {
-    if (currentSection === "taxonomy") {
-      await taxonomyPanelRef.current?.discard();
-      return;
-    }
     const sequence = ++editorRequestSequence.current;
     const generation = draftGeneration.current;
     setState({ kind: "pending", message: t("重载当前规则页面…", "Reloading this rules page…") });
@@ -626,6 +622,7 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
       setAnalyticsReady(true);
       setHistoryPanelKey((value) => value + 1);
       applyAnalytics(analytics);
+      if (isDesignPage) await taxonomyPanelRef.current?.discard();
       if (reloadAll) clearSaveBlock();
       const message = t("当前规则页面已重载。", "The current rules page was reloaded.");
       new Notice(message);
@@ -798,7 +795,7 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
         onOpenDetail={openProductDetail}
       />
     </Section>}
-    {(section === undefined || section === "categories") && <CategoryDefinitionsTable
+    {(section === undefined || isDesignPage) && <CategoryDefinitionsTable
       app={app}
       api={api}
       categories={workspace.categories}
@@ -811,7 +808,7 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
       onSavedHistory={handleHistorySaved}
       onDataChanged={onDataChanged}
       onOpenRules={openMatchingRulesPage}
-      showSectionActions={section === "categories"}
+      showSectionActions={isDesignPage}
       saveBlocked={saveBlocked}
       pageState={state}
       saveState={categoryState}
@@ -822,7 +819,7 @@ export const RulesEditor = forwardRef<RulesEditorHandle, RulesEditorProps>(funct
         if (categoryDirty) await saveCategories();
       }}
     />}
-    <div className={section === undefined || section === "taxonomy" ? "" : "asset-track-taxonomy-panel-hidden"}>
+    <div className={section === undefined || isDesignPage ? "" : "asset-track-taxonomy-panel-hidden"}>
       <TaxonomyPanel
         ref={taxonomyPanelRef}
         app={app}

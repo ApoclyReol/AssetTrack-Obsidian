@@ -22,10 +22,12 @@ import type {
   TransactionViewMode
 } from "../../types/operations";
 import { t } from "../../i18n";
+import { TransactionToolbarIcon } from "../TransactionToolbarIcon";
 import { transactionTypesForTab } from "../../domain/transactionOperations";
 import {
   TransactionSummaryTable,
   TransactionTable,
+  TransactionSelectionCheckbox,
   type TransactionRuleControlContext
 } from "../TransactionTables";
 import {
@@ -206,8 +208,6 @@ export function MonthEditorTransactionsSection({
   }, [activeIndexes, activeViewMode, draft.transactions, summaryGroups]);
   const effectiveSelectedKeys = selectedTransactionKeys ?? localSelectedTransactionKeys;
   const selectedCount = currentViewTransactionKeys.filter((key) => effectiveSelectedKeys.has(key)).length;
-  const allCurrentViewSelected = currentViewTransactionKeys.length > 0
-    && selectedCount === currentViewTransactionKeys.length;
   const effectiveShowSecondaryFields = true;
 
   const commitSelection = (next: Set<TransactionKey>): void => {
@@ -256,7 +256,7 @@ export function MonthEditorTransactionsSection({
 
   return (
     <>
-      <section className="asset-track-view-switcher" aria-label={t("流水展示", "Transaction display")}>
+      {(showBusinessTabs || transactionDrilldown || !isInvestmentTab) && <section className="asset-track-view-switcher" aria-label={t("流水展示", "Transaction display")}>
         {(showBusinessTabs || transactionDrilldown) && <div className="asset-track-transaction-toolbar-row asset-track-transaction-toolbar-row--primary">
           <div className="asset-track-transaction-display">
             {transactionDrilldown && <span className="asset-track-transaction-filter" role="status">
@@ -296,59 +296,43 @@ export function MonthEditorTransactionsSection({
             )}
           </div>
         </div>}
-        <div className="asset-track-transaction-toolbar-row asset-track-transaction-toolbar-row--secondary">
-          {!isInvestmentTab && <div className="asset-track-transaction-view-tabs" role="tablist" aria-label={t("流水视图", "Transaction view")}>
-          <button
-            type="button"
-            role="tab"
-            className={activeViewMode === "detail" ? "is-active" : ""}
-            aria-selected={activeViewMode === "detail"}
-            onClick={() => changeViewMode("detail")}
-          >
-            {t("逐项", "Individual")}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className={activeViewMode === "product" ? "is-active" : ""}
-            aria-selected={activeViewMode === "product"}
-            onClick={() => changeViewMode("product")}
-          >
-            {t("按商品汇总", "Group by item")}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className={activeViewMode === "counterparty" ? "is-active" : ""}
-            aria-selected={activeViewMode === "counterparty"}
-            onClick={() => changeViewMode("counterparty")}
-          >
-            {t("按交易对手汇总", "Group by counterparty")}
-          </button>
-          </div>}
-          <div className="asset-track-transaction-batch-actions asset-track-transaction-batch-actions--secondary">
-            <button
-              type="button"
-              disabled={currentViewTransactionKeys.length === 0}
-              aria-pressed={allCurrentViewSelected}
-              onClick={() => toggleTransactionKeys(currentViewTransactionKeys)}
-            >
-              {allCurrentViewSelected
-                ? t("全不选当前视图", "Deselect all in current view")
-                : t("全选当前视图", "Select all in current view")}
-            </button>
-            <span role="status">
-              {t(`已选择 ${selectedCount} 条流水`, `${selectedCount} transactions selected`)}
-            </span>
-            {renderBatchActions?.({
-              businessTab: activeBusinessTab,
-              viewMode: activeViewMode,
-              selectedTransactionKeys: effectiveSelectedKeys,
-              currentViewTransactionKeys
-            })}
+        {!isInvestmentTab && <div className="asset-track-transaction-workbench" role="region" aria-label={t("流水视图与操作", "Transaction views and actions")}>
+          <div className="asset-track-transaction-tool-group">
+            <div className="asset-track-transaction-group-heading"><strong>{t("视图", "View")}</strong></div>
+            <div className="asset-track-transaction-toolbar-buttons asset-track-transaction-view-tabs" role="tablist" aria-label={t("流水视图", "Transaction view")}>
+              <button type="button" role="tab" className={activeViewMode === "detail" ? "is-active" : ""}
+                aria-selected={activeViewMode === "detail"} onClick={() => changeViewMode("detail")}>
+                <TransactionToolbarIcon name="list" />{t("逐项", "Individual")}
+              </button>
+              <button type="button" role="tab" className={activeViewMode === "product" ? "is-active" : ""}
+                aria-selected={activeViewMode === "product"} onClick={() => changeViewMode("product")}>
+                <TransactionToolbarIcon name="panels-top-left" />{t("商品汇总", "Items")}
+              </button>
+              <button type="button" role="tab" className={activeViewMode === "counterparty" ? "is-active" : ""}
+                aria-selected={activeViewMode === "counterparty"} onClick={() => changeViewMode("counterparty")}>
+                <TransactionToolbarIcon name="users" />{t("交易对手汇总", "Counterparties")}
+              </button>
+            </div>
           </div>
-        </div>
-      </section>
+          {renderBatchActions?.({
+            businessTab: activeBusinessTab,
+            viewMode: activeViewMode,
+            selectedTransactionKeys: new Set(currentViewTransactionKeys.filter(key => effectiveSelectedKeys.has(key))),
+            currentViewTransactionKeys
+          })}
+        </div>}
+        {!isInvestmentTab && <div className="asset-track-transaction-selection-meta">
+          <span>{t(`当前视图 ${currentViewTransactionKeys.length} 条流水`, `${currentViewTransactionKeys.length} transactions in this view`)}</span>
+          <div>
+            <TransactionSelectionCheckbox keys={currentViewTransactionKeys} selected={effectiveSelectedKeys}
+              onToggle={toggleTransactionKeys} text={t("全选", "Select all")}
+              label={t("全选当前视图", "Select all in current view")} />
+            <span role="status">{t(`已选择 ${selectedCount} 条流水`, `${selectedCount} transactions selected`)}</span>
+            <button type="button" disabled={selectedCount === 0} aria-hidden={selectedCount === 0}
+              tabIndex={selectedCount > 0 ? 0 : -1} onClick={() => commitSelection(new Set())}>{t("取消选择", "Clear selection")}</button>
+          </div>
+        </div>}
+      </section>}
       {(isInvestmentTab || activeViewMode === "detail") && <div className={isInvestmentTab ? "asset-track-investment-tables" : undefined}>
         {activeTypes.map((type) => (
           <TransactionTable

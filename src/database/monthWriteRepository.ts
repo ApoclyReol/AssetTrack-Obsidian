@@ -38,12 +38,7 @@ export class MonthWriteRepository {
   createMonth(db: DatabaseSync, month: string): void {
     if (!isMonth(month)) throw new RepositoryValidationError({ code: "month.invalid", params: { month } });
     if (this.context.monthStatus(db, month)) return;
-    const months = this.context.getMonths(db);
-    const target = months.length ? nextMonth(months.at(-1)!) : localMonth();
     const max = nextMonth(localMonth());
-    if (month !== target) {
-      throw new RepositoryValidationError({ code: "month.creation_order", params: { target } });
-    }
     if (month > max) throw new RepositoryValidationError({ code: "month.creation_limit", params: { max } });
     const draft = db.prepare(
       "SELECT month FROM month_status WHERE status='draft' LIMIT 1"

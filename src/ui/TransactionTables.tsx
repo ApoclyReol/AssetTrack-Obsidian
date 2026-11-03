@@ -60,6 +60,25 @@ import {
 import { ActionTableHeader, StaticTableHeader } from "./TablePrimitives";
 import { TaxonomySelectionModal } from "./TaxonomySelectionModal";
 
+export function TransactionSelectionCheckbox({ keys, selected, onToggle, label, text }: {
+  keys: readonly TransactionKey[];
+  selected: ReadonlySet<TransactionKey>;
+  onToggle: (keys: readonly TransactionKey[]) => void;
+  label: string;
+  text?: string;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  const count = keys.filter(key => selected.has(key)).length;
+  const partial = count > 0 && count < keys.length;
+  useEffect(() => { if (input.current) input.current.indeterminate = partial; }, [partial]);
+  return <label className="asset-track-table-selection" title={label} onClick={event => event.stopPropagation()}>
+    <input ref={input} type="checkbox" className="asset-track-selection-checkbox" aria-label={label}
+      checked={keys.length > 0 && count === keys.length} disabled={!keys.length}
+      onChange={() => onToggle(keys)} />
+    {text && <span>{text}</span>}
+  </label>;
+}
+
 function TransactionTags({ app, label, selected, tags, loadTags, onApply }: {
   app?: App;
   label: string;
@@ -241,12 +260,7 @@ function fieldIssueTitle(
   return issueSummaryText(matching);
 }
 
-function sourceRowNumber(source?: string): number | null {
-  const match = source?.match(/原始第\s*(\d+)\s*行/);
-  if (!match) return null;
-  const row = Number(match[1]);
-  return Number.isInteger(row) && row > 0 ? row : null;
-}
+
 
 function RowIssueMarker({
   issues,
@@ -389,8 +403,6 @@ export function TransactionTable({
   renderTransactionActions,
   focusIndex,
   showSecondaryFields = true,
-  sourceRows = [],
-  onViewSourceRow
 }: TransactionTableProps) {
   const displayTitle = businessLabel(title);
   const [sort, setSort] = useState<SortState>(null);
@@ -404,10 +416,7 @@ export function TransactionTable({
   const pendingFocusKey = useRef<string | null>(null);
   const usesCategory = transactionTypeUsesCategory(title);
   const issuesByRow = useMemo(() => groupIssuesByRow(issues), [issues]);
-  const sourceRowsByNumber = useMemo(
-    () => new Map(sourceRows.map((sourceRow) => [sourceRow.row, sourceRow] as const)),
-    [sourceRows]
-  );
+
   const usesInvestmentAccount = title === "加仓" || title === "提现";
   const businessClass = title === "支出"
     ? " asset-track-grid--outgoing"
@@ -561,9 +570,6 @@ export function TransactionTable({
             const blockNumber = blockNumbers[originalIndex];
             const rowIssues = issuesByRow.get(originalIndex) ?? [];
             const stableKey = transactionKey(row);
-            const sourceRow = sourceRowNumber(row.source)
-              ? sourceRowsByNumber.get(sourceRowNumber(row.source) as number)
-              : undefined;
             const options = usesCategory ? categories.filter(
               (category) =>
                 category.transaction_type === categoryTypeForTransaction(row.type) &&
@@ -593,14 +599,6 @@ export function TransactionTable({
                     issues={rowIssues}
                     label={t(`${title}第 ${blockNumber} 行`, `${displayTitle} row ${blockNumber}`)}
                   />
-                  <small
-                    className="asset-track-transaction-source"
-                    title={row.source || t("手工新增流水", "Manually added transaction")}
-                  >
-                    {row.source
-                      ? t("导入", "Imported")
-                      : t("手工", "Manual")}
-                  </small>
                 </span>
                 <input
                   aria-label={t(`${title}第 ${blockNumber} 行日期`, `${displayTitle} row ${blockNumber} date`)}
@@ -686,17 +684,6 @@ export function TransactionTable({
                     index: originalIndex,
                     transactionKey: stableKey
                   })}
-                  {sourceRow && onViewSourceRow && (
-                    <button
-                      type="button"
-                      className="asset-track-source-row-action"
-                      title={t("查看导入时保留的原始账单行", "View the raw statement row retained for this import")}
-                      aria-label={t(`查看${title}第 ${blockNumber} 行原始账单`, `View raw statement for ${displayTitle} row ${blockNumber}`)}
-                      onClick={() => onViewSourceRow(row, sourceRow)}
-                    >
-                      {t("原始行", "Source row")}
-                    </button>
-                  )}
                   <button
                     type="button"
                     aria-label={t(`删除${title}第 ${blockNumber} 行`, `Delete ${displayTitle} row ${blockNumber}`)}
@@ -802,20 +789,9 @@ export function TransactionSummaryTable({
                 <tr>
                   <td className="asset-track-type-cell">
                     {selectedTransactionKeys && (onToggleTransaction || onToggleGroup) && (
-                      <input
-                        className="asset-track-selection-checkbox"
-                        type="checkbox"
-                        checked={group.transactionKeys.length > 0 && group.transactionKeys.every((key) => selectedTransactionKeys.has(key))}
-                        disabled={group.transactionKeys.length === 0}
-                        aria-label={t(`选择${group.label || "空"}汇总组`, `Select ${group.label || "(empty)"} summary group`)}
-                        onChange={() => {
-                          if (onToggleGroup) {
-                            onToggleGroup(group.transactionKeys);
-                          } else {
-                            group.transactionKeys.forEach((key) => onToggleTransaction?.(key));
-                          }
-                        }}
-                      />
+                      <TransactionSelectionCheckbox keys={group.transactionKeys} selected={selectedTransactionKeys}
+                        label={t(`选择${group.label || "空"}汇总组`, `Select ${group.label || "(empty)"} summary group`)}
+                        onToggle={keys => onToggleGroup ? onToggleGroup(keys) : keys.forEach(key => onToggleTransaction?.(key))} />
                     )}
                     {businessLabel(group.type)}
                   </td>
@@ -839,10 +815,7 @@ export function TransactionSummaryTable({
                     />
                   </td>
                   <td className="asset-track-count-cell">{group.count}</td>
-                  <td className="asset-track-amount-cell">{money(
-                    group.amount,
-                    group.type as "收入" | "支出" | "代付" | "加仓" | "提现"
-                  )}</td>
+                  <td className="asset-track-amount-cell">{money(Math.abs(group.amount))}</td>
                   {hasCategory && (
                     <td className="asset-track-summary-category-cell">
                       {transactionTypeUsesCategory(group.type) && (
