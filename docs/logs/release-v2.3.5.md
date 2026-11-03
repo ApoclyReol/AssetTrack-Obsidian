@@ -35,4 +35,25 @@ schema 13 / 备份格式 12，从 v2.2.0 更新无需升级账本。
 
 ## 远端发布状态
 
-main 和 tag 的提交、三平台 CI、Release 工作流、下载资产、标题与来源证明待发布后逐项核验。
+v2.3.5 已正式发布，标题为 `Asset Track 2.3.5`，tag 为 `2.3.5`，非草稿、非预发布。
+远端发布说明与 CHANGELOG 提取内容一致，包含完整 English 与中文段落。
+
+- 源码提交为 `ee57794e2a3b4924e6c75a3ca0390ced1e65c230`，远端 tag 解引用目标一致。
+- [main 三平台 CI](https://github.com/ApoclyReol/AssetTrack-Obsidian/actions/runs/41628221337) 通过。
+- [tag 三平台 CI](https://github.com/ApoclyReol/AssetTrack-Obsidian/actions/runs/41633651655) 通过。
+- [Release 工作流](https://github.com/ApoclyReol/AssetTrack-Obsidian/actions/runs/41633651654) 通过。
+- [正式下载页](https://github.com/ApoclyReol/AssetTrack-Obsidian/releases/tag/2.3.5) 仅包含标准三个插件资产。
+
+每个下载文件与本地构建及用户已验收的个人库安装文件 SHA-256 一致。
+
+| 文件 | SHA-256 |
+| --- | --- |
+
+| main.js | `7364bc96da86018e5c139364b82b615471fa675e06b2674ea6b786bbc4a98581` |
+| manifest.json | `3c5df2704d6ddfb04bc63b27c36451c229863007fa75a39189f49c1a24532b69` |
+| styles.css | `2b9d51e1d40e08f30d83b8bd3851f2606e380e0f8467e9cd57c969700463c596` |
+
+三个文件均通过独立 `gh attestation verify` 核验，约束仓库、`release.yml`、`refs/tags/2.3.5`、
+上述源码提交和 GitHub 托管 runner。
+
+本记录和长期文档的发布后同步使用独立文档提交，正式 tag 保持指向已验证的源码提交。

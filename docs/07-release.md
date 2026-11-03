@@ -3,8 +3,8 @@
 > 文档角色：开发与维护。本文服务发布、安装验证和发行门禁；用户安装请按 README 或
 > [用户指南](02-user-guide.md)操作。
 
-本轮发行目标为 v2.3.5，汇总自由选月、规则与合并简化、流水三分区和集中编辑、同页分类设计及年／月分析整理。
-用户已完成个人库验收并授权发布，发布说明与验证记录见 [Release v2.3.5](logs/release-v2.3.5.md)。
+当前发行版本为 v2.3.5，汇总自由选月、规则与合并简化、流水三分区和集中编辑、同页分类设计及年／月分析整理。
+用户验收、三平台 CI、发布标题、三文件和来源证明已核验通过，发布说明与验证记录见 [Release v2.3.5](logs/release-v2.3.5.md)。
 使用 schema 13 / 备份格式 12，从 v2.2.0 更新无需升级账本。云端工作流与发布产物核验结果写入对应日志。
 
 v2.1.0 以 v2.0.0 为基准一次汇总金额规则、实际流水合并与规则编辑更新。
@@ -69,7 +69,7 @@ Release 的 `main.js`、`manifest.json` 和 `styles.css`。更新时保留已有
 
 - tag 与 manifest 版本完全一致，使用不带 `v` 前缀的当前版本号；
 - Release 标题（API 的 `name` 字段）必须显式填写为 `Asset Track <版本号>`，例如
-  `Asset Track 2.2.0`；标题与 tag 是独立字段，不得用 tag 正确代替标题核验；
+  `Asset Track 2.3.5`；标题与 tag 是独立字段，不得用 tag 正确代替标题核验；
 - 推送版本 tag 后由 `.github/workflows/release.yml` 重新执行完整验证和生产构建；
 - `scripts/release-notes.mjs` 从 CHANGELOG 提取本版本的 English/中文说明；workflow 使用该文案创建或更新 Release，不自动拼接提交记录；
 - 只上传 `main.js`、`manifest.json` 和 `styles.css`，不上传插件 ZIP；
