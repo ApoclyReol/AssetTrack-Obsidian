@@ -78,4 +78,3 @@ export function DimensionPanel({
     </div> : <Empty text={t("暂无数据。", "No data.")} />}
   </ChartPanel>;
 }
-
